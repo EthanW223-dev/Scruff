@@ -41,6 +41,8 @@ const FEW = 8;
 const MAX_PROCESSES = 200;
 const PROCESS_CACHE_MS = 10_000;
 const JEV_BUDGET_MS = 3000;
+/** Extra narrowing steps asked for when the last few candidates disagree. */
+const MAX_EXTRA_STEPS = 2;
 const PHRASE_STOP = new Set(
   (
     "and but so then give make set to can could please now it its it's i im i'm i've ive me my we our you your the a an " +
@@ -140,7 +142,7 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
   let lastError: string | null = null;
   let callId = 0;
   /** The goal for the current search, when the fast path started it ("max" and "infinite" can't go in find_value). */
-  let want: { what: string; goal: Goal; bar: boolean; session: GameSession } | null = null;
+  let want: { what: string; goal: Goal; bar: boolean; session: GameSession; extra: number } | null = null;
   // Listing processes spawns PowerShell on Windows (about a second); reuse it for a little while.
   let processCache: { at: number; list: Awaited<ReturnType<GameManager["listGames"]>> } | null = null;
   const runningPrograms = async () => {
@@ -447,7 +449,7 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
           ...(typeof wanted === "number" ? { goal: wanted } : {}),
         });
         if (!out.ok) return notHandled(`Jev started a search for ${thing} = ${fmt(currentNumber)}, but it failed: ${out.text}`);
-        want = { what: thing.toLowerCase(), goal: wanted, bar: false, session: session! };
+        want = { what: thing.toLowerCase(), goal: wanted, bar: false, session: session!, extra: 0 };
         return afterSearch(thing, JSON.parse(out.text), { value: currentNumber });
       }
       case "change_no_number": {
@@ -461,7 +463,7 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
           ...(typeof goal === "number" ? { goal } : {}),
         });
         if (!out.ok) return notHandled(`Jev tried to start a search for ${thing} without a number, but: ${out.text}`);
-        want = { what: thing.toLowerCase(), goal, bar: true, session: session! };
+        want = { what: thing.toLowerCase(), goal, bar: true, session: session!, extra: 0 };
         return say(
           `On it. Tell me the number the game shows for ${thing}, or if it's a bar or has no number, make it go down or up ` +
             `in the game (take a hit, eat, use one...) and tell me which way it went.`,
@@ -498,6 +500,19 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
         );
       }
       const mine = want && want.what === what.toLowerCase() ? want : null;
+      if (result.count <= FEW && mine?.bar && step.direction && mine.extra < MAX_EXTRA_STEPS) {
+        // Found without a number, a few places can still be noise holding other values. Copies of the
+        // real thing agree, so until they do, one more step is safer than writing to all of them.
+        const decimals = result.addresses.filter((a) => a.type === "float" || a.type === "double");
+        const values = (decimals.length ? decimals : result.addresses).map((a) => a.value);
+        const agree = values.every((v) => Math.abs(v - values[0]) <= Math.max(0.01, Math.abs(values[0]) * 1e-3));
+        if (!agree) {
+          mine.extra++;
+          return say(
+            `Almost: ${result.count} places left. Make the ${what} go ${step.direction === "decreased" ? "up" : "down"} once more and tell me.`,
+          );
+        }
+      }
       if (result.count <= FEW) {
         const goal: Goal | null = mine?.goal ?? session!.searchGoal;
         if (goal === null) {

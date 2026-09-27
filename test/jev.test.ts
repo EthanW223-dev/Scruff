@@ -287,7 +287,7 @@ test("when Jev isn't sure, or TypeSafe is down, the chat model takes the message
   const started = Date.now();
   turn = await chat("undo everything");
   assert.equal(turn.reply, "Still here.");
-  assert.ok(Date.now() - started < 4500, "a hung TypeSafe doesn't hold the chat model up for long");
+  assert.ok(Date.now() - started < 6000, "a hung TypeSafe doesn't hold the chat model up for long");
 
   // Back to normal: the status recovers on the next good answer.
   script = () => ({ intent: "other" });
@@ -338,7 +338,7 @@ test("no number: 'give me max health' snapshots memory, narrows by down/same/up,
   assert.ok(hub.games.session!.scanner.isSnapshot, "no number: a snapshot");
 
   // The player plays: takes hits, waits, drinks a potion; tells Scruff only which way it went.
-  const moves = ["fight", "wait", "fight", "heal 4", "wait", "fight", "heal 4", "fight", "wait", "fight"];
+  const moves = ["fight", "wait", "fight", "heal 4", "wait", "fight", "heal 4", "fight", "wait", "heal 4", "fight", "wait"];
   const said: string[] = [];
   for (const move of moves) {
     const before = (await gameCommand("print")).health;

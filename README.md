@@ -27,6 +27,13 @@ neighbourhood. It is not the final map.
 Everything (models, sounds, UI, the world) is **generated in code**, so there are no art or audio assets to import.
 Swap in real assets whenever you're ready.
 
+### Browser preview
+
+`web/` is a small browser version of the same game (Three.js, no build step) so you can try the loop without Unity or a
+headset: grow, bag, sell, mix, cook, police, phone, rent and saves. It plays with mouse and keyboard or touch, and it's a
+preview only; the VR game is the Unity project. Serve the folder with any static server (for example
+`python3 -m http.server` inside `web/`) and open `index.html`.
+
 ---
 
 ## Getting it running

@@ -53,7 +53,7 @@ namespace Scruff
                     p.standards = 0;
                     p.lastPurchaseAbs = -99999f;
                     // first texts arrive around when the first plant is ready
-                    p.nextDealCheckAbs = 300f + rng.Next(0, 120);
+                    p.nextDealCheckAbs = state.AbsoluteMinutes + 300f + rng.Next(0, 120);
                 }
                 state.customers.Add(p);
             }

@@ -4,7 +4,9 @@ import { Agent, type Brain } from "./agent.ts";
 import { GameManager, memoryTools } from "./game.ts";
 import { gameFileTools } from "./gamefiles.ts";
 import { describeProfile } from "../games/profile.ts";
+import { JevService, JevSettings, type Jev } from "./jev.ts";
 import { McpEndpoint } from "./mcp.ts";
+import { quickPath } from "./quick.ts";
 import type { ModelRouter } from "./models.ts";
 import { ScreenBridge } from "./screen.ts";
 import { startServer } from "./server.ts";
@@ -20,6 +22,8 @@ export interface HubOptions {
   brain?: Brain;
   /** Where per-game themes and downloaded models live. Defaults to <root>/.scruff. */
   dataDir?: string;
+  /** Replaces the Jev client built from the TypeSafe key (tests); null turns the fast path off. */
+  jev?: Jev | null;
 }
 
 export async function createHub(opts: HubOptions) {
@@ -61,10 +65,18 @@ export async function createHub(opts: HubOptions) {
 
   const brain = opts.brain ?? opts.router?.brain();
   if (!brain) throw new Error("createHub needs a router or a brain.");
+  const jev = new JevService(new JevSettings(path.join(dataDir, "typesafe.json")), opts.jev);
   const agent = new Agent({
     brain,
     tools,
     status: () => ({ note: statusNote(), events: adapters.drainEvents().map((e) => `${e.adapter}: ${e.text}`) }),
+    quick: quickPath({
+      jev: () => jev.current,
+      games,
+      tools,
+      chatReady: () => opts.router?.describe().ready ?? true,
+      onDisabled: (reason) => jev.disable(reason),
+    }),
   });
 
   const dashboardUrl = `http://localhost:${opts.port}`;
@@ -79,6 +91,7 @@ export async function createHub(opts: HubOptions) {
     router: opts.router,
     dataDir,
     themes,
+    jev,
     agent,
     games,
     adapters,
@@ -88,6 +101,7 @@ export async function createHub(opts: HubOptions) {
 
   return {
     agent,
+    jev,
     themes,
     games,
     adapters,

@@ -119,6 +119,18 @@
         <button type="button" id="ai-apply" class="primary">Use this model</button>
       </div>
 
+      <section class="subscription jev">
+        <h3>Jev by TypeSafe <span id="jev-status" class="tag">off</span></h3>
+        <p class="muted small">Jev reads each message in a fraction of a second, and when it's a quick command Scruff does it right away instead of waiting on the chat AI: undo, setting or locking values it found, picking your game, and "I have 5 cans, give me 99" then "now it's 4.75". Everything else still goes to the AI above. Get a key at <a href="https://console.typesafe.ai/keys" target="_blank" rel="noreferrer">console.typesafe.ai</a>.</p>
+        <div class="model-row" id="jev-key-row">
+          <label for="jev-key">API key</label>
+          <input id="jev-key" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your TypeSafe key">
+          <button type="button" id="jev-save" class="primary">Save</button>
+        </div>
+        <p id="jev-env" class="muted small" hidden>Using TYPESAFE_API_KEY from .env.</p>
+        <button type="button" id="jev-remove" class="link" hidden>Turn Jev off (forget the key)</button>
+      </section>
+
       <section class="subscription">
         <h3>Use your Claude subscription</h3>
         <p class="muted small">Let Claude Desktop or Claude Code be the brain instead. They run on your Pro/Max plan, call Scruff's tools, and every change still shows up in this dashboard.</p>

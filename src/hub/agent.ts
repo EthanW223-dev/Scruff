@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { BetaMessageStreamParams } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 import { EventEmitter } from "node:events";
 import { SYSTEM_PROMPT } from "./prompt.ts";
+import type { QuickHandler, QuickOutcome } from "./quick.ts";
 import { ToolInputError, toApiTools, type HubTool, type ToolResultContent } from "./tools.ts";
 
 type Params = BetaMessageStreamParams;
@@ -31,6 +32,8 @@ export interface AgentOptions {
   tools: HubTool[];
   /** Status text (attached game, adapters, events). Sent with a user message when it changes. */
   status: () => { note: string; events: string[] };
+  /** Tried before the model on every message (the Jev fast path); may handle it outright. */
+  quick?: QuickHandler;
 }
 
 /** Events for the dashboard. */
@@ -60,6 +63,8 @@ export class Agent extends EventEmitter {
   private running = false;
   private controller: AbortController | null = null;
   private lastNote = "";
+  /** Messages the fast path handled since the model last heard from the player. */
+  private quickLog: string[] = [];
   private toolsByName: Map<string, HubTool>;
   private apiTools: Anthropic.Beta.BetaTool[];
 
@@ -89,6 +94,7 @@ export class Agent extends EventEmitter {
     this.stop();
     this.messages = [];
     this.lastNote = "";
+    this.quickLog = [];
   }
 
   get brain(): Brain {
@@ -114,7 +120,17 @@ export class Agent extends EventEmitter {
         this.controller = new AbortController();
         this.emitEvent({ type: "turn_start" });
         try {
-          await this.turn(text, this.controller.signal);
+          const signal = this.controller.signal;
+          let quick: QuickOutcome | null = null;
+          try {
+            quick = this.opts.quick ? await this.opts.quick(text, (e) => this.emitEvent(e), signal) : null;
+          } catch (err) {
+            if (signal.aborted) throw err;
+            // A fast-path bug must never cost the player their message: the model takes it.
+            this.emitEvent({ type: "notice", text: `Fast path skipped: ${describeError(err)}` });
+          }
+          if (quick?.handled) this.quickLog.push(quick.log);
+          else if (!signal.aborted) await this.turn(text, signal, quick?.note);
         } catch (err) {
           if (!this.controller.signal.aborted) this.emitEvent({ type: "error", text: describeError(err) });
         }
@@ -127,7 +143,7 @@ export class Agent extends EventEmitter {
     }
   }
 
-  private userContent(text: string): MessageParam["content"] {
+  private userContent(text: string, quickNote?: string): MessageParam["content"] {
     const { note, events } = this.opts.status();
     const parts: string[] = [];
     if (note !== this.lastNote) {
@@ -135,6 +151,11 @@ export class Agent extends EventEmitter {
       this.lastNote = note;
     }
     if (events.length) parts.push(`Game events since the last message:\n${events.map((e) => `- ${e}`).join("\n")}`);
+    if (this.quickLog.length) {
+      parts.push(`Handled instantly by Scruff's fast path (Jev) since your last reply:\n${this.quickLog.map((l) => `- ${l}`).join("\n")}`);
+      this.quickLog = [];
+    }
+    if (quickNote) parts.push(`Scruff's fast path (Jev) already did this for the message below: ${quickNote}`);
     if (!parts.length) return text;
     return [
       { type: "text", text: `[Scruff status]\n${parts.join("\n\n")}\n[/Scruff status]` },
@@ -142,12 +163,12 @@ export class Agent extends EventEmitter {
     ];
   }
 
-  private async turn(text: string, signal: AbortSignal): Promise<void> {
+  private async turn(text: string, signal: AbortSignal, quickNote?: string): Promise<void> {
     // Held for the whole turn: if "New chat" swaps in a fresh history mid-turn, this turn's
     // leftovers must not land in it.
     const messages = this.messages;
     const turnStart = messages.length;
-    messages.push({ role: "user", content: this.userContent(text) });
+    messages.push({ role: "user", content: this.userContent(text, quickNote) });
     let jsonRetries = 0;
 
     for (let step = 0; step < MAX_STEPS; step++) {

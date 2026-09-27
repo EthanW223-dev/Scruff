@@ -43,6 +43,8 @@ export class GameSession extends EventEmitter {
   searchLabel: string | null = null;
   /** The number the player last reported for it. */
   searchValue: number | null = null;
+  /** What the player wants it to become, once found (so a quick "now it's 4.75" can finish the job). */
+  searchGoal: number | null = null;
   /** Places dropped by live watching since the last search step. */
   watchDropped = 0;
   private watchTimer: NodeJS.Timeout | null = null;
@@ -171,6 +173,7 @@ export class GameSession extends EventEmitter {
       title: this.target.title,
       scan: {
         what: this.searchLabel,
+        goal: this.searchGoal,
         watching: this.watchTimer !== null,
         droppedLive: this.watchDropped,
         types: this.scanner.hasResults ? this.scanner.types : [],

@@ -10,7 +10,7 @@
 
 import WebSocket from "ws";
 
-process.title = "Scruff's Dungeon"; // what shows up in Scruff's game picker
+process.title = process.env.SCRUFF_DEMO_TITLE ?? "Scruff's Dungeon"; // what shows up in Scruff's game picker
 const HUB = process.env.SCRUFF_ADAPTER_URL ?? "ws://127.0.0.1:7777/ws/adapter";
 const headless = process.argv.includes("--headless");
 

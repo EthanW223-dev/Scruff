@@ -404,6 +404,10 @@ textarea:focus { box-shadow: 3px 3px 0 var(--accent); }
 .subscription { border-top: 1px solid var(--line); padding-top: 12px; display: flex; flex-direction: column; gap: 6px; }
 .subscription h3 { margin: 0; font: 600 18px/1.1 var(--font-display); letter-spacing: -0.01em; }
 .subscription p { margin: 0; }
+.subscription h3 .tag { display: inline-block; margin-left: 6px; padding: 1px 6px; background: var(--surface-2); color: var(--muted); font: 12px/1.4 var(--mono); vertical-align: 3px; letter-spacing: 0; }
+.subscription h3 .tag.on { background: var(--accent); color: var(--accent-ink); }
+.subscription a { color: inherit; }
+.subscription .primary { height: 34px; padding: 0 14px; font-size: 19px; }
 .subscription details { border: 1px solid var(--line); padding: 7px 10px; }
 .subscription summary { cursor: pointer; font: 19px/1 var(--pixel); }
 .subscription details p { margin: 8px 0 6px; }

@@ -65,6 +65,7 @@ function handle(msg) {
     case "state":
       state = msg;
       renderState();
+      renderJev();
       applyTheme(msg.theme);
       onGameChange(msg.game.attached, msg.theme);
       break;
@@ -156,6 +157,7 @@ function toolLabel(name, input = {}) {
     case "revert_all_changes": return "Undoing everything";
     case "look_at_screen": return "Looking at your screen";
     case "style_overlay": return "Styling the overlay to fit this game";
+    case "jev": return "Understood with Jev";
     case "use_game_adapter": return `${String(input.tool ?? "").replace("__", " → ")}`;
     default: return name;
   }
@@ -260,6 +262,16 @@ function shortResult(text) {
   // Long results arrive truncated, so look for the count rather than parsing the JSON.
   const count = /"count":\s*(\d+)/.exec(text);
   if (count) return `${Number(count[1]).toLocaleString()} result${count[1] === "1" ? "" : "s"}`;
+  // write_value: how many writes held, and whether the game put any back.
+  if (text.startsWith("{") && text.includes('"results"')) {
+    try {
+      const results = JSON.parse(text).results;
+      const held = results.filter((r) => "now" in r && !r.warning).length;
+      const back = results.filter((r) => r.warning).length;
+      const failed = results.filter((r) => r.error).length;
+      return [held && `${held} set`, back && `${back} changed back by the game`, failed && `${failed} failed`].filter(Boolean).join(" · ");
+    } catch {}
+  }
   if (text.startsWith("[")) {
     try {
       const n = JSON.parse(text).length;
@@ -408,9 +420,12 @@ function renderChanges(changes) {
 // ---------- AI menu ----------
 
 function renderAi() {
-  $("ai-chip").querySelector(".dot").className = `dot ${aiInfo.ready ? "on" : ""}`;
-  $("ai-label").textContent = aiInfo.model ? `${aiInfo.providerLabel} · ${aiInfo.model}` : "Pick an AI";
-  if (!aiInfo.ready) {
+  const jevOn = Boolean(state?.jev?.enabled);
+  $("ai-chip").querySelector(".dot").className = `dot ${aiInfo.ready || jevOn ? "on" : ""}`;
+  $("ai-label").textContent = (aiInfo.model ? `${aiInfo.providerLabel} · ${aiInfo.model}` : "Pick an AI") + (jevOn ? " + Jev" : "");
+  if (!aiInfo.ready && jevOn) {
+    setBanner("Jev is handling quick commands. For anything else, set up a chat AI in the AI menu.");
+  } else if (!aiInfo.ready) {
     setBanner(`${aiInfo.problem ?? "The AI isn't set up yet"}, or open the AI menu to use a local model or your Claude subscription.`);
   } else if (!$("banner").textContent.startsWith("Lost connection")) {
     setBanner(null);
@@ -418,6 +433,35 @@ function renderAi() {
 }
 
 let modelsMsg = null;
+
+// Jev (TypeSafe) fast path: on when a key is set; the key itself never comes back from the hub.
+function renderJev() {
+  const jev = state?.jev;
+  if (!jev) return;
+  const tag = $("jev-status");
+  tag.textContent = jev.enabled ? `on · ${jev.model}` : jev.problem ? "off: key problem" : "off";
+  tag.classList.toggle("on", jev.enabled);
+  tag.title = jev.problem ?? "";
+  $("jev-key-row").hidden = jev.source === "env" || jev.source === "test";
+  $("jev-env").hidden = jev.source !== "env";
+  $("jev-remove").hidden = jev.source !== "saved";
+  if (aiInfo) renderAi();
+}
+function saveJevKey() {
+  const key = $("jev-key").value.trim();
+  if (!key) return $("jev-key").focus();
+  send({ type: "set_jev_key", key });
+  $("jev-key").value = "";
+}
+$("jev-save").addEventListener("click", saveJevKey);
+$("jev-key").addEventListener("keydown", (e) => {
+  // The dialog is a form: Enter would close it instead of saving.
+  if (e.key === "Enter") {
+    e.preventDefault();
+    saveJevKey();
+  }
+});
+$("jev-remove").addEventListener("click", () => send({ type: "set_jev_key", key: null }));
 
 function openAiMenu() {
   $("provider-list").replaceChildren(el("li", "muted small", "Checking what's available…"));

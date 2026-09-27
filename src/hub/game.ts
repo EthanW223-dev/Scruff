@@ -242,8 +242,12 @@ export function memoryTools(games: GameManager, status: () => Record<string, unk
           .default("auto")
           .describe("Leave as auto unless you know how the game stores it"),
         new_search: z.boolean().default(false).describe("Start over instead of narrowing"),
+        goal: z
+          .number()
+          .optional()
+          .describe("What the player wants it to become, if they said. Scruff remembers it, so a later \"now it's 4.75\" can finish the job."),
       }),
-      async run({ what, value, min, max, change, by, type, new_search, steady }, ctx) {
+      async run({ what, value, min, max, change, by, type, new_search, steady, goal }, ctx) {
         const s = games.requireSession();
         const key = what.trim().toLowerCase();
         const narrowing = !new_search && s.searchLabel === key && s.scanner.count > 0;
@@ -271,8 +275,10 @@ export function memoryTools(games: GameManager, status: () => Record<string, unk
           ctx.progress(`Searching ${s.target.name} for ${what}…`);
           await trackScan((p) => s.scanner.firstScan(type === "auto" ? AUTO_TYPES : [type], request, p));
           s.searchLabel = key;
+          s.searchGoal = null;
         }
         if (value !== undefined) s.searchValue = value;
+        if (goal !== undefined) s.searchGoal = goal;
         s.watchLive(steady);
 
         const count = s.scanner.count;

@@ -6,6 +6,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import type { AdapterRegistry } from "./adapters.ts";
 import type { Agent, AgentEvent } from "./agent.ts";
 import type { GameManager } from "./game.ts";
+import type { JevService } from "./jev.ts";
 import type { McpEndpoint } from "./mcp.ts";
 import type { ModelRouter, ProviderId } from "./models.ts";
 import type { ScreenBridge } from "./screen.ts";
@@ -22,6 +23,7 @@ export interface ServerOptions {
   dashboardDir: string;
   dataDir: string;
   themes: ThemeStore;
+  jev: JevService;
   router?: ModelRouter;
   agent: Agent;
   games: GameManager;
@@ -88,7 +90,7 @@ function connectInfo(root: string, port: number) {
 }
 
 export function startServer(opts: ServerOptions): Promise<http.Server> {
-  const { agent, games, adapters, screen, mcp, router, themes } = opts;
+  const { agent, games, adapters, screen, mcp, router, themes, jev } = opts;
   const aiInfo = () =>
     router?.describe() ?? { provider: "custom", model: agent.brain.model, providerLabel: "Custom", ready: true, problem: undefined };
   const dashboards = new Set<WebSocket>();
@@ -104,6 +106,7 @@ export function startServer(opts: ServerOptions): Promise<http.Server> {
     adapters: adapters.state(),
     screen: { active: screen.active },
     theme: themes.current(),
+    jev: jev.info(),
     busy: agent.busy,
   });
 
@@ -120,6 +123,7 @@ export function startServer(opts: ServerOptions): Promise<http.Server> {
   adapters.on("update", pushState);
   screen.on("update", pushState);
   themes.on("change", pushState);
+  jev.on("change", pushState);
   adapters.on("event", (event) => broadcast({ type: "game_event", event }));
   setInterval(() => {
     if (dashboards.size && games.session?.watch.size) pushState();
@@ -173,6 +177,12 @@ export function startServer(opts: ServerOptions): Promise<http.Server> {
         broadcast({ type: "hello", ai: aiInfo() });
         broadcast({ type: "history", events: [] });
         toast(ws, `Now using ${aiInfo().model}. Started a new chat.`, "info");
+        break;
+      }
+      case "set_jev_key": {
+        const key = typeof msg.key === "string" ? msg.key : null;
+        await jev.setKey(key);
+        toast(ws, key ? "Jev is on: quick commands now run instantly." : "Jev is off.", "info");
         break;
       }
       case "list_games":

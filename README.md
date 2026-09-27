@@ -104,6 +104,24 @@ them automatically. Tips:
 - A local model shares your GPU with the game. If that hurts your frame rate, run Ollama on
   another PC and point `OLLAMA_URL` at it.
 
+**Add Jev for instant quick commands** (works alongside any of the above).
+[Jev](https://typesafe.ai) by TypeSafe isn't a chat model: it answers typed questions ("which of
+these does the player mean?") in a fraction of a second, with a confidence number. Scruff sends
+every message to Jev first. When Jev is sure it's a quick command, Scruff does it right away
+without waiting on the chat AI:
+
+- picking your game ("I'm playing 60 Seconds"),
+- the whole find-and-change loop: "I have 5 soup cans, give me 99" → change it in-game → "now
+  it's 4.75" → set,
+- setting, locking, unlocking or reading a value Scruff already found, undo and undo all.
+
+Anything else, or anything Jev isn't sure about, goes to the chat AI, which is told what Jev
+already did. With a slow local model this turns minutes-long waits into instant replies for the
+common stuff. Get a key at [console.typesafe.ai](https://console.typesafe.ai/keys) and paste it
+into the AI menu (or set `TYPESAFE_API_KEY` in `.env`). Jev also works with no chat AI at all,
+for just those commands. It costs about $0.04 per million input tokens; a message is a few
+hundred tokens.
+
 **Anything else with an OpenAI-compatible API** (OpenRouter, OpenAI, Groq, Gemini, DeepSeek,
 llama.cpp, vLLM, ...): set `OPENAI_BASE_URL` and `OPENAI_API_KEY` in `.env`.
 
@@ -146,7 +164,7 @@ in raw memory like a real game, and also connects to Scruff as a game adapter. A
   (watch list, freezing, undo log), `safety.ts` (anti-cheat check).
 - `src/hub/` is the local server: `agent.ts` runs the conversation and its tools, `models.ts`
   picks the AI (`providers/anthropic.ts` for Claude, `providers/openai.ts` for everything
-  OpenAI-compatible), `mcp.ts` serves the tools to Claude apps, `game.ts` defines the memory
+  OpenAI-compatible), `jev.ts` and `quick.ts` are the Jev client and fast path, `mcp.ts` serves the tools to Claude apps, `game.ts` defines the memory
   tools, `gamefiles.ts` the game-file tools, `adapters.ts` and `screen.ts` connect adapters and the shared screen, `server.ts`
   serves the dashboard.
 - `src/mcp-stdio.ts` is what Claude Desktop launches: it starts the hub if needed and relays MCP.
@@ -165,6 +183,8 @@ In `.env` (all optional):
 | `OLLAMA_URL` | `http://127.0.0.1:11434` | Where Ollama runs |
 | `LMSTUDIO_URL` | `http://127.0.0.1:1234` | Where LM Studio's server runs |
 | `OPENAI_BASE_URL`, `OPENAI_API_KEY` | | Any OpenAI-compatible service |
+| `TYPESAFE_API_KEY` | | Turns on Jev for quick commands (or paste it in the AI menu) |
+| `TYPESAFE_MODEL` | `jev-latest` | Pin a Jev version, e.g. `jev-1.13.0` |
 | `SCRUFF_PROVIDER`, `SCRUFF_MODEL` | first that works | Starting AI (`claude`, `ollama`, `lmstudio`, `openai`); a pick in the dashboard overrides it |
 | `SCRUFF_EFFORT` | `medium` | Claude only: `low` replies fastest; `high` thinks harder about tricky scans |
 | `SCRUFF_PORT` | `7777` | |

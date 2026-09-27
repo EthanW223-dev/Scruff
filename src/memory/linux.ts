@@ -81,7 +81,13 @@ export function listLinuxProcesses(): ProcessInfo[] {
       // Some programs rewrite argv[0] to their whole command line ("chrome --type=renderer ...").
       const first = cmdline[0].split(" --")[0];
       const exe = first.split(/[\\/]/).pop()?.slice(0, 60) || name;
-      out.push({ pid, name: exe, command: cmdline.join(" ").slice(0, 160) });
+      let exePath: string | undefined;
+      try {
+        exePath = fs.readlinkSync(`/proc/${pid}/exe`);
+      } catch {
+        // not ours to read
+      }
+      out.push({ pid, name: exe, command: cmdline.join(" ").slice(0, 160), exe: exePath });
     } catch {
       // process exited or is not readable
     }

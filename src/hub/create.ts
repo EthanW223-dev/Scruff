@@ -2,6 +2,8 @@ import path from "node:path";
 import { AdapterRegistry } from "./adapters.ts";
 import { Agent, type Brain } from "./agent.ts";
 import { GameManager, memoryTools } from "./game.ts";
+import { gameFileTools } from "./gamefiles.ts";
+import { describeProfile } from "../games/profile.ts";
 import { McpEndpoint } from "./mcp.ts";
 import type { ModelRouter } from "./models.ts";
 import { ScreenBridge } from "./screen.ts";
@@ -37,6 +39,7 @@ export async function createHub(opts: HubOptions) {
           ? "Not attached to a game."
           : game.supported.reason!,
       screen.active ? "The player is sharing their screen; look_at_screen works." : "Screen sharing is off.",
+      attached && games.profile ? describeProfile(games.profile) : "",
       attached ? (themes.hasSaved() ? "The overlay is already styled for this game." : "The overlay isn't styled for this game yet.") : "",
       adapters.describe(),
     ]
@@ -50,6 +53,7 @@ export async function createHub(opts: HubOptions) {
       overlay_styled_for_this_game: themes.hasSaved(),
       adapters: adapters.describe(),
     })),
+    ...gameFileTools(games, path.join(dataDir, "backups")),
     ...screen.tools(),
     themes.tool(),
     adapters.dispatchTool(),

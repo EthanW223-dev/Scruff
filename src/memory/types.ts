@@ -32,6 +32,8 @@ export interface ProcessInfo {
   title?: string;
   /** Full command line (Linux). */
   command?: string;
+  /** Path of the executable, when the OS tells us. */
+  exe?: string;
 }
 
 /** Raw access to another process's memory. One implementation per OS. */

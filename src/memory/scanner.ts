@@ -12,6 +12,8 @@ import {
 export type FirstScanMode = "exact" | "range";
 export type RefineMode =
   | "exact"
+  /** Holds `value` now and held something else before: what the player just changed. */
+  | "changed_to"
   | "range"
   | "changed"
   | "unchanged"
@@ -50,6 +52,8 @@ const CHUNK = 4 * 1024 * 1024;
 /** Below this many hits in a region we read addresses one at a time instead of the whole span. */
 const SPARSE_THRESHOLD = 64;
 const YIELD_EVERY_MS = 30;
+/** Live watching only runs on result sets this small, so a look stays cheap. */
+export const WATCH_LIMIT = 20_000;
 
 type Predicate = (value: number, previous: number) => boolean;
 
@@ -59,6 +63,9 @@ class TypedResults {
   truncated = false;
   addresses = new Float64Array(0);
   values = new Float64Array(0);
+  /** Live watching: the last value seen and how often it moved since the last scan. */
+  lastSeen: Float64Array | null = null;
+  moves: Uint8Array | null = null;
   private capacity: number;
 
   constructor(
@@ -286,7 +293,54 @@ export class Scanner {
       i = j;
     }
     part.count = kept;
+    part.lastSeen = null;
+    part.moves = null;
     return scanned;
+  }
+
+  /**
+   * One look at every result while the player plays, dropping ones that keep changing on their
+   * own (timers, animations, positions): a count the player controls doesn't do that. Returns
+   * how many were dropped, or null when a scan is running or there are too many to watch.
+   */
+  watchTick(maxMoves = 3, limit = WATCH_LIMIT): number | null {
+    if (this.busy || this.count === 0 || this.count > limit) return null;
+    let dropped = 0;
+    const buf = Buffer.alloc(8);
+    for (const part of this.parts) {
+      if (!part.count) continue;
+      const view = buf.subarray(0, TYPE_SIZE[part.type]);
+      part.lastSeen ??= part.values.slice(0, part.count);
+      part.moves ??= new Uint8Array(part.count);
+      const { addresses, values, lastSeen, moves } = part;
+      const float = isFloatType(part.type);
+      let kept = 0;
+      for (let i = 0; i < part.count; i++) {
+        let keep = true;
+        if (this.backend.read(addresses[i], view) !== view.length) {
+          keep = false; // freed
+        } else {
+          const v = decode(view, 0, part.type);
+          const moved = float ? Math.abs(v - lastSeen[i]) > 1e-6 && !(Number.isNaN(v) && Number.isNaN(lastSeen[i])) : v !== lastSeen[i];
+          if (moved) {
+            lastSeen[i] = v;
+            if (moves[i] < 255) moves[i]++;
+          }
+          if (moves[i] >= maxMoves) keep = false;
+        }
+        if (keep) {
+          addresses[kept] = addresses[i];
+          values[kept] = values[i];
+          lastSeen[kept] = lastSeen[i];
+          moves[kept] = moves[i];
+          kept++;
+        } else {
+          dropped++;
+        }
+      }
+      part.count = kept;
+    }
+    return dropped;
   }
 
   /** Current results with live values, for showing the AI or the user. */
@@ -500,6 +554,11 @@ export function buildPredicate(type: ValueType, request: ScanRequest): Predicate
       const min = need("min");
       const max = need("max");
       return (v) => v >= min && v <= max;
+    }
+    case "changed_to": {
+      const isMatch = near(need("value"));
+      const moved = float ? (v: number, prev: number) => Math.abs(v - prev) > 1e-6 : (v: number, prev: number) => v !== prev;
+      return (v, prev) => isMatch(v) && moved(v, prev);
     }
     case "changed":
       return (v, prev) => v !== prev && !(Number.isNaN(v) && Number.isNaN(prev));

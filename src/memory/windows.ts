@@ -115,18 +115,19 @@ const run = promisify(execFile);
 
 export async function listWindowsProcesses(): Promise<ProcessInfo[]> {
   const script =
-    "Get-Process | Select-Object Id, ProcessName, MainWindowTitle | ConvertTo-Json -Compress";
+    "Get-Process | Select-Object Id, ProcessName, MainWindowTitle, Path | ConvertTo-Json -Compress";
   const { stdout } = await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
     maxBuffer: 16 * 1024 * 1024,
     windowsHide: true,
   });
   const parsed = JSON.parse(stdout || "[]");
-  const rows: { Id: number; ProcessName: string; MainWindowTitle?: string }[] = Array.isArray(parsed)
+  const rows: { Id: number; ProcessName: string; MainWindowTitle?: string; Path?: string }[] = Array.isArray(parsed)
     ? parsed
     : [parsed];
   return rows.map((r) => ({
     pid: r.Id,
     name: `${r.ProcessName}.exe`,
     title: r.MainWindowTitle || undefined,
+    exe: r.Path || undefined,
   }));
 }

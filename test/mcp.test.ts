@@ -101,7 +101,8 @@ test("a Claude app can find and change the demo game's gold over MCP, and the da
   assert.match(textOf(stale), new RegExp(`Current results: ${addresses[0]}`));
 
   const written = JSON.parse(textOf(await call("write_value", { addresses, value: 4242, label: "Gold" })));
-  assert.equal(written.find((w: any) => w.type === "int32")?.now, 4242, "type inferred and the write stuck");
+  assert.equal(written.results.find((w: any) => w.type === "int32")?.now, 4242, "type inferred and the write stuck");
+  assert.match(written.note, /doesn't prove the game shows it/);
 
   game.stdin.write("print\n");
   assert.equal(JSON.parse((await gameLines.next()).value).gold, 4242);

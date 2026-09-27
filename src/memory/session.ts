@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import fs from "node:fs";
 import { processAlive } from "./platform.ts";
 import { Scanner } from "./scanner.ts";
 import { TYPE_SIZE, decode, encode, hex, type ProcessBackend, type ProcessInfo, type ValueType } from "./types.ts";
@@ -20,10 +21,15 @@ export interface ChangeRecord {
   after: number;
   frozen: boolean;
   undone: boolean;
+  /** Set for edits to a game file (save, settings) instead of memory. */
+  file?: { path: string; backup: string; summary: string };
 }
 
 const FREEZE_INTERVAL_MS = 100;
 const ALIVE_CHECK_MS = 2000;
+const WATCH_MS = 1000;
+/** A number the player controls (items, money) moves a few times at most between reports. */
+const WATCH_MAX_MOVES = 5;
 
 /**
  * Everything Scruff knows about the game it's attached to: scan results, the values
@@ -35,6 +41,11 @@ export class GameSession extends EventEmitter {
   readonly scanner: Scanner;
   /** What the current search is for ("soup cans"); find_value narrows while it stays the same. */
   searchLabel: string | null = null;
+  /** The number the player last reported for it. */
+  searchValue: number | null = null;
+  /** Places dropped by live watching since the last search step. */
+  watchDropped = 0;
+  private watchTimer: NodeJS.Timeout | null = null;
   readonly watch = new Map<number, WatchEntry>();
   readonly changes: ChangeRecord[] = [];
   private nextChangeId = 1;
@@ -119,11 +130,25 @@ export class GameSession extends EventEmitter {
     return had;
   }
 
+  /** Logs an edit to one of the game's files; undo restores the backup. */
+  recordFileEdit(label: string, file: { path: string; backup: string; summary: string }): ChangeRecord {
+    const record = this.record(0, "int8", 0, 0, label, false);
+    record.file = file;
+    this.emit("change");
+    return record;
+  }
+
   undo(id?: number): ChangeRecord | null {
     const record = id
       ? this.changes.find((c) => c.id === id && !c.undone)
       : [...this.changes].reverse().find((c) => !c.undone);
     if (!record) return null;
+    if (record.file) {
+      fs.copyFileSync(record.file.backup, record.file.path);
+      record.undone = true;
+      this.emit("change");
+      return record;
+    }
     const entry = this.watch.get(record.address);
     if (entry) entry.frozenValue = null;
     this.backend.write(record.address, encode(record.before, record.type));
@@ -146,6 +171,8 @@ export class GameSession extends EventEmitter {
       title: this.target.title,
       scan: {
         what: this.searchLabel,
+        watching: this.watchTimer !== null,
+        droppedLive: this.watchDropped,
         types: this.scanner.hasResults ? this.scanner.types : [],
         count: this.scanner.count,
         truncated: this.scanner.truncated,
@@ -158,13 +185,34 @@ export class GameSession extends EventEmitter {
         frozen: w.frozenValue !== null,
         frozenValue: w.frozenValue,
       })),
-      changes: this.changes.map((c) => ({ ...c, address: hex(c.address) })).reverse(),
+      changes: this.changes.map((c) => ({ ...c, address: c.file ? "file" : hex(c.address) })).reverse(),
     };
+  }
+
+  /**
+   * Keeps an eye on the current results while the player plays and drops the ones that change
+   * on their own. Only for steady values (item counts, money): health that regenerates or a
+   * timer would be dropped too, so the caller decides.
+   */
+  watchLive(on: boolean): void {
+    if (this.watchTimer) clearInterval(this.watchTimer);
+    this.watchTimer = null;
+    this.watchDropped = 0;
+    if (!on) return;
+    this.watchTimer = setInterval(() => {
+      const dropped = this.scanner.watchTick(WATCH_MAX_MOVES);
+      if (dropped) {
+        this.watchDropped += dropped;
+        this.emit("change");
+      }
+    }, WATCH_MS);
+    this.watchTimer.unref();
   }
 
   close(reason: "exited" | "detached" = "detached"): void {
     if (this.closed) return;
     this.closed = true;
+    this.watchLive(false);
     clearInterval(this.freezeTimer);
     clearInterval(this.aliveTimer);
     this.backend.close();

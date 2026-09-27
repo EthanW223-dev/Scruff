@@ -166,3 +166,41 @@ test("a fractional first value skips whole-number types instead of scanning for 
   const summary = await scanner.firstScan(["int32", "float"], { mode: "exact", value: 5.25 });
   assert.deepEqual(summary.byType, { float: 1 });
 });
+
+test("narrowing keeps only places that changed to the new number (5 → 4.75 soup, with static 4.75s around)", async () => {
+  const mem = new FakeBackend(layout);
+  const soup = B + 4096;
+  mem.set(soup, "float", 5);
+  for (let i = 0; i < 200; i++) mem.set(A + i * 32, "float", 4.75); // unrelated values that are 4.75 all along
+  const scanner = new Scanner(mem);
+  // "5" on screen matches 4.5–5.99 for floats, which includes the static 4.75s.
+  await scanner.firstScan(["int32", "float", "double"], { mode: "exact", value: 5 });
+  assert.ok(scanner.count > 200);
+
+  mem.set(soup, "float", 4.75);
+  assert.equal((await scanner.refine({ mode: "exact", value: 4.75 })).count > 1, true, "plain exact keeps the static ones");
+  const again = new Scanner(mem);
+  mem.set(soup, "float", 5);
+  await again.firstScan(["int32", "float", "double"], { mode: "exact", value: 5 });
+  mem.set(soup, "float", 4.75);
+  const narrowed = await again.refine({ mode: "changed_to", value: 4.75 });
+  assert.equal(narrowed.count, 1);
+  assert.equal(again.typeOf(soup), "float");
+});
+
+test("live watching drops values that change on their own and keeps the player's number", async () => {
+  const mem = new FakeBackend(layout);
+  const soup = A + 8;
+  const noise = [A + 64, A + 128, A + 192];
+  mem.set(soup, "float", 4.75);
+  for (const n of noise) mem.set(n, "float", 4.75);
+  const scanner = new Scanner(mem);
+  await scanner.firstScan("float", { mode: "exact", value: 4.75 });
+  assert.equal(scanner.count, 4);
+  for (let tick = 1; tick <= 5; tick++) {
+    noise.forEach((n, i) => mem.set(n, "float", 4.75 + tick * 0.1 + i)); // animations, timers...
+    if (tick === 2) mem.set(soup, "float", 4.5); // the family eats once
+    scanner.watchTick(5);
+  }
+  assert.deepEqual(scanner.resultAddresses(10), [soup]);
+});

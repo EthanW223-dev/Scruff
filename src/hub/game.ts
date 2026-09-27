@@ -1,9 +1,10 @@
 import { EventEmitter } from "node:events";
+import { buildProfile, type GameProfile } from "../games/profile.ts";
 import { z } from "zod";
 import { listProcesses, memorySupported, openBackend } from "../memory/platform.ts";
 import { checkAttachSafety } from "../memory/safety.ts";
 import { GameSession } from "../memory/session.ts";
-import type { ScanRequest } from "../memory/scanner.ts";
+import { WATCH_LIMIT, type ScanRequest } from "../memory/scanner.ts";
 import { VALUE_TYPES, hex, isFloatType, parseAddress, type ProcessInfo, type ValueType } from "../memory/types.ts";
 import { defineTool, json, type HubTool } from "./tools.ts";
 
@@ -27,6 +28,8 @@ function baseName(name: string): string {
 /** Owns the attached game (if any). Emits "update" whenever the dashboard should refresh. */
 export class GameManager extends EventEmitter {
   session: GameSession | null = null;
+  /** What Scruff learned from the attached game's files. */
+  profile: GameProfile | null = null;
   scanProgress: number | null = null;
 
   async listGames(search?: string): Promise<ProcessInfo[]> {
@@ -58,6 +61,11 @@ export class GameManager extends EventEmitter {
 
     this.detach();
     const session = new GameSession(target, openBackend(pid));
+    try {
+      this.profile = target.exe ? buildProfile(target.exe) : null;
+    } catch {
+      this.profile = null; // unreadable install folder: memory editing still works
+    }
     session.on("change", () => this.emit("update"));
     session.on("detached", () => {
       if (this.session === session) this.session = null;
@@ -71,6 +79,7 @@ export class GameManager extends EventEmitter {
   detach(): void {
     this.session?.close("detached");
     this.session = null;
+    this.profile = null;
     this.emit("update");
   }
 
@@ -85,6 +94,13 @@ export class GameManager extends EventEmitter {
     return {
       supported: memorySupported(),
       attached: this.session && !this.session.isClosed ? this.session.snapshot() : null,
+      profile: this.profile && {
+        name: this.profile.name,
+        engine: this.profile.engine,
+        installDir: this.profile.installDir,
+        saveDirs: this.profile.saveDirs,
+        code: this.profile.codeKind,
+      },
       scanProgress: this.scanProgress,
     };
   }
@@ -214,13 +230,20 @@ export function memoryTools(games: GameManager, status: () => Record<string, unk
           .optional()
           .describe("When narrowing without a number: how it moved since the last call"),
         by: z.number().optional().describe("With change decreased/increased: by exactly how much"),
+        steady: z
+          .boolean()
+          .default(true)
+          .describe(
+            "true for numbers that only change when the player does something (items, money, ammo): Scruff then " +
+              "watches the results live and drops ones that change on their own. false for health that regenerates, timers, positions.",
+          ),
         type: z
           .enum(["auto", ...VALUE_TYPES])
           .default("auto")
           .describe("Leave as auto unless you know how the game stores it"),
         new_search: z.boolean().default(false).describe("Start over instead of narrowing"),
       }),
-      async run({ what, value, min, max, change, by, type, new_search }, ctx) {
+      async run({ what, value, min, max, change, by, type, new_search, steady }, ctx) {
         const s = games.requireSession();
         const key = what.trim().toLowerCase();
         const narrowing = !new_search && s.searchLabel === key && s.scanner.count > 0;
@@ -231,7 +254,9 @@ export function memoryTools(games: GameManager, status: () => Record<string, unk
               ? { mode: change === "decreased" ? "decreased_by" : "increased_by", value: Math.abs(by) }
               : { mode: change }
             : value !== undefined
-              ? { mode: "exact", value }
+              ? // The player changed it: keep only places that moved to the new number, not ones that
+                // happened to hold it all along.
+                { mode: value !== s.searchValue ? "changed_to" : "exact", value }
               : { mode: "range", min, max };
           if (request.mode === "range" && (min === undefined || max === undefined)) {
             throw new Error("Give the new number (value), a min/max range, or how it changed (change).");
@@ -247,6 +272,8 @@ export function memoryTools(games: GameManager, status: () => Record<string, unk
           await trackScan((p) => s.scanner.firstScan(type === "auto" ? AUTO_TYPES : [type], request, p));
           s.searchLabel = key;
         }
+        if (value !== undefined) s.searchValue = value;
+        s.watchLive(steady);
 
         const count = s.scanner.count;
         const next =
@@ -258,11 +285,16 @@ export function memoryTools(games: GameManager, status: () => Record<string, unk
             : count <= FEW
               ? `Found it. Set it with write_value (or freeze_value to hold it) on these addresses, labelled "${what}".`
               : `${count.toLocaleString()} places still match. Ask the player to change the ${what} in-game (use, ` +
-                `spend, eat, drop or pick up some), then call find_value again with what: "${what}" and the new number.`;
+                `spend, eat, drop or pick up some), then call find_value again with what: "${what}" and the new number.` +
+                (steady && count <= WATCH_LIMIT
+                  ? ` Meanwhile Scruff watches them live and drops ones that change on their own, so calling ` +
+                    `find_value again with the same number in a little while may already show fewer.`
+                  : "");
         return json({
           what,
           search: narrowing ? "narrowed" : "started",
           count,
+          dropped_live_since_last_step: narrowing ? s.watchDropped : undefined,
           by_type: s.scanner.countsByType(),
           addresses: results(count <= FEW ? FEW : 5),
           truncated: s.scanner.truncated ? "Stopped early: this number is very common. Narrowing still works." : undefined,
@@ -335,7 +367,15 @@ export function memoryTools(games: GameManager, status: () => Record<string, unk
           const held = now !== null && Math.abs(now - value) <= (isFloatType(r.type) ? Math.max(0.01, Math.abs(value) * 1e-4) : 0);
           return held ? { ...rest, now } : { ...rest, now, warning: `The game changed it back to ${now}. Use freeze_value to hold it.` };
         });
-        return json(report);
+        const anyHeld = report.some((r) => "now" in r && !("warning" in r));
+        return json({
+          results: report,
+          note: anyHeld
+            ? "Set in memory. That doesn't prove the game shows it: some games redraw a number only later (next day, " +
+              "reopening a menu) or keep the real value somewhere else. Look at the screen, or ask the player, before " +
+              "saying it worked. If the game still shows the old number, undo this and keep narrowing."
+            : undefined,
+        });
       },
     }),
 
@@ -349,7 +389,10 @@ export function memoryTools(games: GameManager, status: () => Record<string, unk
         const addr = parseAddress(a);
         checkKnown(addr);
         const change = games.requireSession().freeze(addr, typeFor(addr, type), value, label);
-        return `Frozen ${label} at ${value} (was ${change.before}). change_id ${change.id}.`;
+        return (
+          `Holding ${label} at ${value} in memory (was ${change.before}). change_id ${change.id}. ` +
+          "Check the game shows it (look at the screen or ask) before saying it worked."
+        );
       },
     }),
 
@@ -379,7 +422,8 @@ export function memoryTools(games: GameManager, status: () => Record<string, unk
       input: z.object({ change_id: z.number().int().optional() }),
       run({ change_id }) {
         const undone = games.requireSession().undo(change_id);
-        return undone ? `Restored ${undone.label} to ${undone.before}.` : "Nothing to undo.";
+        if (!undone) return "Nothing to undo.";
+        return undone.file ? `Restored ${undone.file.path} from its backup.` : `Restored ${undone.label} to ${undone.before}.`;
       },
     }),
 

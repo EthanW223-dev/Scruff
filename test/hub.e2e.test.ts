@@ -24,8 +24,9 @@ const policy = (params: Parameters<typeof lastUserText>[0]): Reply => {
   assert.ok(!last.isError, `${last.name} failed: ${last.result}`);
   switch (last.name) {
     case "list_running_games": {
-      const game = JSON.parse(last.result).find((p: { name: string }) => /dungeon/i.test(p.name));
-      return { content: [toolUse("attach_to_game", { pid: game.pid })] };
+      // Other test files run their own copy of the demo game at the same time: pick ours.
+      const ours = JSON.parse(last.result).find((p: { pid: number }) => p.pid === game.pid);
+      return { content: [toolUse("attach_to_game", { pid: ours.pid })] };
     }
     case "attach_to_game":
       return { content: [toolUse("find_value", { what: "gold", value: 350 })] };

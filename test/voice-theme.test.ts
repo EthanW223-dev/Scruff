@@ -31,7 +31,10 @@ const model = fakeModel((p): Reply => {
     return { content: [text("ok")] };
   }
   const last = lastToolResult(p)!;
-  if (last.name === "list_running_games") return { content: [toolUse("attach_to_game", { pid: JSON.parse(last.result)[0].pid })] };
+  // Other test files run their own copy of the demo game at the same time: pick ours.
+  if (last.name === "list_running_games") {
+    return { content: [toolUse("attach_to_game", { pid: JSON.parse(last.result).find((g: any) => g.pid === game.pid).pid })] };
+  }
   return { content: [text("done")] };
 });
 

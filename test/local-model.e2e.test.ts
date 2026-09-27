@@ -31,7 +31,8 @@ function decide(messages: Msg[]): { content?: string; call?: { name: string; arg
   const result = String(last.content);
   switch (name) {
     case "list_running_games":
-      return { call: { name: "attach_to_game", args: { pid: JSON.parse(result)[0].pid } } };
+      // Other test files run their own copy of the demo game at the same time: pick ours.
+      return { call: { name: "attach_to_game", args: { pid: JSON.parse(result).find((p: any) => p.pid === game.pid).pid } } };
     case "attach_to_game":
       return { call: { name: "find_value", args: { what: "gold", value: 350 } } };
     case "find_value": {

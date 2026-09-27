@@ -25,9 +25,9 @@ export interface Theme {
 }
 
 export const DEFAULT_THEME: Theme = {
-  accent: "#8b5cf6",
-  background: "#0b0d14",
-  text: "#e8eaf2",
+  accent: "#ef7b9c",
+  background: "#f3f2ee",
+  text: "#1e1e1e",
   font: "clean",
   corner: "top-right",
   source: "default",
@@ -147,8 +147,10 @@ function readable(theme: Theme): Theme {
   if (contrast(out.text, out.background) < 4.5) {
     out.text = contrast("#f5f5f7", out.background) >= contrast("#111318", out.background) ? "#f5f5f7" : "#111318";
   }
-  if (contrast(out.accent, out.background) < 2.5) {
-    out.accent = luminance(out.background) < 0.2 ? "#f5c451" : "#5b3bd6";
+  // The accent is a fill (buttons, highlights, shadows) with its own ink, so it only has to
+  // stand apart from the background, not carry text on it.
+  if (contrast(out.accent, out.background) < 1.6) {
+    out.accent = luminance(out.background) < 0.2 ? "#f5c451" : "#d45bb6";
   }
   return out;
 }

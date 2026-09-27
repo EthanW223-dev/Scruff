@@ -12,8 +12,15 @@ Pro/Max subscription through Claude Desktop or Claude Code, or any model running
 (Ollama, LM Studio, ...).
 
 - **Memory editing, for almost any single-player game.** Scruff scans the game's memory for a
-  number you can see (gold, health, ammo, XP), narrows it down as the number changes, then sets
-  it or freezes it. Same idea as Cheat Engine, except you just ask.
+  number you can see (gold, health, ammo, XP, even decimals like 4.75 cans of soup), narrows it
+  down as the number changes, then sets it or freezes it. Same idea as Cheat Engine, except you
+  just ask. While you play it quietly drops places that change on their own (timers,
+  animations), and it checks the game actually shows a change before telling you it worked.
+- **It reads the game's files.** When you pick a game, Scruff works out its engine (Unity,
+  Unreal, Godot, GameMaker, RPG Maker, Ren'Py, Source), finds its save and settings folders, and
+  for Unity games reads the code's own variable names and types ("soup is a float"), so the AI
+  knows what to look for and how the game stores it. It can also edit text saves and settings,
+  with a backup and undo.
 - **An overlay that fits the game.** It follows the game window, stays out of your way (clicks
   pass through to the game), and restyles itself for each game: colors lifted from the game's
   own UI, a font that matches its genre, and a corner the game's HUD leaves free.
@@ -38,8 +45,9 @@ npm install
 npm start
 ```
 
-The overlay appears in the top-right corner. Press **Ctrl+Shift+S** to open it, pick your AI
-(below), start your game, click **Pick a game**, and tell Scruff what you want. If Windows refuses
+A small Scruff button appears in the top-right corner. Click it (or press **Ctrl+Shift+S**) to
+open the panel, pick your AI (below), start your game, click **Pick a game**, and tell Scruff
+what you want. If Windows refuses
 access to the game, run the terminal as administrator.
 
 ## The overlay
@@ -48,8 +56,10 @@ access to the game, run the terminal as administrator.
   hands control back to the game.
 - **Ctrl+Shift+Space** is push-to-talk: press, speak, press again. Speech is turned into text
   on your PC with Whisper; the first use downloads an ~80 MB voice model.
-- Scruff's replies and the values it's holding show up as small notes under the status pill, so
-  you can keep playing.
+- The overlay is just one small button while you play. A dashed frame around it means Scruff is
+  working, a red one that it's listening; hover it for details. Replies and the values it's
+  holding show up as small notes under it, so you can keep playing.
+- To use your own button art, save it over `dashboard/button.svg` (keep it square).
 - Run the game in **windowed or borderless fullscreen**. No overlay app can draw over
   *exclusive* fullscreen without hooking into the game, which is exactly what anti-cheat looks
   for. Most games call borderless "Windowed Fullscreen" or "Borderless" in their video settings.
@@ -129,13 +139,15 @@ in raw memory like a real game, and also connects to Scruff as a game adapter. A
  Claude Desktop / Code ──MCP──►  └─ /mcp: the same tools, for your Claude subscription
 ```
 
+- `src/games/` reads a game's files: `profile.ts` (engine, install, save and settings folders),
+  `dotnet.ts` (variable names and types from a Unity game's `Assembly-CSharp.dll`).
 - `src/memory/` scans and edits another process's memory: `windows.ts` (Win32 via koffi),
   `linux.ts` (`/proc/<pid>/mem`), `scanner.ts` (first scan + refine, ~1.3 GB/s), `session.ts`
   (watch list, freezing, undo log), `safety.ts` (anti-cheat check).
 - `src/hub/` is the local server: `agent.ts` runs the conversation and its tools, `models.ts`
   picks the AI (`providers/anthropic.ts` for Claude, `providers/openai.ts` for everything
   OpenAI-compatible), `mcp.ts` serves the tools to Claude apps, `game.ts` defines the memory
-  tools, `adapters.ts` and `screen.ts` connect adapters and the shared screen, `server.ts`
+  tools, `gamefiles.ts` the game-file tools, `adapters.ts` and `screen.ts` connect adapters and the shared screen, `server.ts`
   serves the dashboard.
 - `src/mcp-stdio.ts` is what Claude Desktop launches: it starts the hub if needed and relays MCP.
 - `overlay/` is the Electron app: a transparent, click-through window that follows the game
@@ -164,6 +176,9 @@ In `.env` (all optional):
 - Addresses only last until the game restarts; you re-scan each session (no pointer scanning yet).
 - No "unknown initial value" scan yet, so the value has to be a number you can see or estimate.
 - macOS isn't supported for memory editing.
+- Only text saves and settings (JSON, INI, XML, ...) can be edited; most games use binary saves,
+  where memory editing is the way in. The game reads a save when it loads it, so save and quit
+  to the menu first. Unity IL2CPP games give variable names but not their types.
 - With a Claude subscription you chat in the Claude app, so Scruff's own chat box and voice
   input need an API key or a local model.
 - The overlay can't draw over exclusive-fullscreen games (see above).
@@ -171,6 +186,14 @@ In `.env` (all optional):
   features; on Linux the overlay simply covers the main screen.
 - The Windows memory backend and the overlay's window tracking follow the Win32 API docs but have
   only been run on Linux so far; please report what happens on your games.
+
+## Updating
+
+```sh
+git pull
+npm install
+npm start
+```
 
 ## Development
 
@@ -182,3 +205,6 @@ npm run typecheck
 The live memory tests need permission to read another process's memory (Windows: normally
 fine; Linux: root or `kernel.yama.ptrace_scope=0`). On Linux, install with
 `ONNXRUNTIME_NODE_INSTALL=skip npm install` to skip a 400 MB CUDA download Scruff doesn't use.
+
+The interface bundles Inter Tight, JetBrains Mono and VT323 under the SIL Open Font License
+(`dashboard/fonts/`).

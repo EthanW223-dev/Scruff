@@ -12,6 +12,9 @@ const FONTS = {
   military: { display: "Black Ops One", body: "Share Tech Mono" },
 };
 const SYSTEM = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+// Shipped in dashboard/fonts, so they work offline and never go to Google.
+const BUNDLED = new Set(["Inter Tight", "VT323"]);
+const CLEAN = '"Inter Tight"';
 
 let applied = "";
 
@@ -23,24 +26,27 @@ export function applyTheme(theme) {
   const { accent, background: bg, text } = theme;
   root.setProperty("--accent", accent);
   root.setProperty("--accent-2", mix(accent, "#ffffff", 0.35));
-  root.setProperty("--bg", bg);
-  root.setProperty("--surface", mix(bg, text, 0.05));
-  root.setProperty("--surface-2", mix(bg, text, 0.09));
-  root.setProperty("--border", mix(bg, text, 0.16));
-  root.setProperty("--text", text);
-  root.setProperty("--muted", mix(text, bg, 0.42));
   root.setProperty("--accent-ink", readableOn(accent));
+  root.setProperty("--bg", bg);
+  root.setProperty("--page", mix(bg, text, 0.1));
+  root.setProperty("--surface", mix(bg, text, 0.035));
+  root.setProperty("--surface-2", mix(bg, text, 0.07));
+  root.setProperty("--soft", mix(bg, text, 0.2));
+  root.setProperty("--text", text);
+  root.setProperty("--line", text);
+  root.setProperty("--muted", mix(text, bg, 0.42));
 
   const fonts = FONTS[theme.font] ?? FONTS.clean;
   loadFonts(fonts);
-  root.setProperty("--font", fonts.body ? `"${fonts.body}", ${SYSTEM}` : SYSTEM);
-  root.setProperty("--font-display", fonts.display ? `"${fonts.display}", ${SYSTEM}` : SYSTEM);
+  const stack = (family) => (family ? `"${family}", ${CLEAN}, ${SYSTEM}` : `${CLEAN}, ${SYSTEM}`);
+  root.setProperty("--font", stack(fonts.body));
+  root.setProperty("--font-display", stack(fonts.display));
   document.body.dataset.corner = theme.corner ?? "top-right";
   document.body.dataset.font = theme.font ?? "clean";
 }
 
 function loadFonts({ display, body }) {
-  const families = [display, body].filter(Boolean);
+  const families = [display, body].filter((f) => f && !BUNDLED.has(f));
   if (!families.length) return;
   const id = `font-${families.join("-").replace(/\W+/g, "")}`;
   if (document.getElementById(id)) return;
@@ -73,7 +79,7 @@ function luminance(hex) {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 function readableOn(hex) {
-  return luminance(hex) > 0.35 ? "#111318" : "#ffffff";
+  return luminance(hex) > 0.3 ? "#1e1e1e" : "#ffffff";
 }
 function hsl(h, s, l) {
   const k = (n) => (n + h / 30) % 12;

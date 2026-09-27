@@ -311,6 +311,28 @@ function renderState() {
   renderChanges(attached?.changes ?? []);
   $("revert-all").hidden = !(attached?.changes ?? []).some((c) => !c.undone);
   $("detach").hidden = !attached;
+  $("app-bar-game").textContent = attached ? attached.title || attached.name.replace(/\.exe$/i, "") : "";
+  renderGameFiles(attached ? game.profile : null);
+}
+
+// What Scruff read from the game's files when it attached.
+function renderGameFiles(profile) {
+  $("game-panel").hidden = !profile;
+  if (!profile) return;
+  const code = { dotnet: "readable (names + types)", il2cpp: "names only" }[profile.code] ?? "not readable";
+  const rows = [
+    ["Engine", profile.engine],
+    ["Code", code],
+    ["Installed", profile.installDir],
+    ["Saves", profile.saveDirs.length ? profile.saveDirs.join("\n") : "not found"],
+  ];
+  $("game-info").replaceChildren(
+    ...rows.flatMap(([k, v]) => {
+      const dd = el("dd", "", v);
+      dd.style.whiteSpace = "pre-line";
+      return [el("dt", "", k), dd];
+    }),
+  );
 }
 
 function renderWatch(watch) {
@@ -371,7 +393,7 @@ function renderChanges(changes) {
       const li = el("li", c.undone ? "undone" : "");
       li.append(
         el("span", "what", `${c.frozen ? "🔒 " : ""}${c.label}`),
-        el("span", "vals", `${formatValue(c.before, c.type)} → ${formatValue(c.after, c.type)}`),
+        el("span", "vals", c.file ? c.file.summary : `${formatValue(c.before, c.type)} → ${formatValue(c.after, c.type)}`),
       );
       if (!c.undone) {
         const undo = el("button", "link", "undo");
@@ -862,6 +884,7 @@ if (overlay) {
     document.body.classList.toggle("panel-open", open);
     if (open) setTimeout(() => $("input").focus(), 30);
   });
+  $("app-close").addEventListener("click", () => overlay.setPanel(false));
   import("./overlay.js").then((m) => m.startHud({ toolLabel }));
 }
 

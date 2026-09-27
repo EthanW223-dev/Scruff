@@ -8,20 +8,21 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- In-game overlay only: status pill, reply toasts, active mods. -->
+  <!-- In-game overlay only: one button, reply notes, active mods. Swap dashboard/button.svg for your own art. -->
   <div id="hud" class="hud" hidden>
-    <button id="hud-pill" class="hud-pill interactive" type="button" title="Open Scruff">
-      <img src="icon.svg" alt="" width="22" height="22">
-      <span id="hud-status" class="hud-status">Scruff</span>
-      <span id="hud-keys" class="hud-keys"></span>
+    <button id="hud-button" class="hud-button interactive" type="button" title="Scruff">
+      <img src="button.svg" alt="Scruff" width="44" height="44">
     </button>
     <div id="hud-mods" class="hud-mods"></div>
     <div id="hud-toasts" class="hud-toasts" aria-live="polite"></div>
   </div>
 
   <div id="app" class="app">
+  <div class="win-bar app-bar">
+    <span class="win-title">Scruff.exe<span id="app-bar-game"></span></span>
+    <button id="app-close" class="win-close" type="button" aria-label="Close" hidden>×</button>
+  </div>
   <header class="topbar">
-    <div class="brand"><img src="icon.svg" alt="" width="22" height="22"> Scruff</div>
     <div class="chips">
       <button class="chip" id="ai-chip" title="Choose the AI"><span class="dot"></span><span id="ai-label">AI</span></button>
       <button class="chip" id="game-chip" title="Pick the game to mod"><span class="dot"></span><span id="game-label">No game</span></button>
@@ -40,6 +41,7 @@
     <section class="chat" aria-label="Chat">
       <div id="log" class="log" aria-live="polite">
         <div class="empty" id="empty">
+          <p class="kicker">[ UNIVERSAL LIVE MOD ]</p>
           <h1>What are we modding?</h1>
           <p>Start a game, then just say what you want.</p>
           <div class="examples">
@@ -86,6 +88,10 @@
         <div class="panel-head"><h2>Changes</h2></div>
         <ul id="changes" class="changes"></ul>
         <p id="changes-empty" class="muted small">Nothing changed yet. Every change can be undone.</p>
+      </div>
+      <div class="panel" id="game-panel" hidden>
+        <div class="panel-head"><h2>Game files</h2></div>
+        <dl id="game-info" class="game-info"></dl>
       </div>
       <div class="panel" id="adapters-panel" hidden>
         <div class="panel-head"><h2>Game adapters</h2></div>

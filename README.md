@@ -65,7 +65,10 @@ your paths filled in.
 them automatically. Tips:
 
 - Use 7B+ models (qwen3:8b or 14b, llama3.1:8b, mistral-small). Tiny ones get muddled: in
-  testing, qwen3:1.7b worked but reused stale addresses, which Scruff now refuses with a hint.
+  testing, qwen3:1.7b did set the demo game's gold, but along the way it made up a process id
+  and once reused a stale address. Scruff now refuses writes to addresses that aren't in the
+  current results, and the error tells the model which ones are.
+- Without a GPU it's slow: on a 4-core CPU each reply took 2–3 minutes. A GPU makes it seconds.
 - Scruff's instructions and tools take about 4k tokens. If replies seem confused, raise Ollama's
   context: set `OLLAMA_CONTEXT_LENGTH=16384` before starting it.
 - A local model shares your GPU with the game. If that hurts your frame rate, run Ollama on

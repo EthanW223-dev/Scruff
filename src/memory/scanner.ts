@@ -232,6 +232,20 @@ export class Scanner {
     return hits;
   }
 
+  /** Whether an address is among the current results (they're kept sorted). */
+  includes(address: number): boolean {
+    let lo = 0;
+    let hi = this.count - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const v = this.addresses[mid];
+      if (v === address) return true;
+      if (v < address) lo = mid + 1;
+      else hi = mid - 1;
+    }
+    return false;
+  }
+
   resultAddresses(limit: number): number[] {
     return Array.from(this.addresses.subarray(0, Math.min(limit, this.count)));
   }

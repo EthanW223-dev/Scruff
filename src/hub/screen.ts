@@ -61,6 +61,7 @@ export class ScreenBridge extends EventEmitter {
     return [
       defineTool({
         name: "look_at_screen",
+        readOnly: true,
         description:
           "Take a screenshot of the game (shared from the dashboard) to see what the player sees: numbers on the HUD, " +
           "menus, what's happening. Useful before a memory scan to read the exact value to search for.",

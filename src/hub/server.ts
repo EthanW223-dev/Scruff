@@ -1,10 +1,13 @@
 import fs from "node:fs";
 import http from "node:http";
+import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { AdapterRegistry } from "./adapters.ts";
 import type { Agent, AgentEvent } from "./agent.ts";
 import type { GameManager } from "./game.ts";
+import type { McpEndpoint } from "./mcp.ts";
+import type { ModelRouter, ProviderId } from "./models.ts";
 import type { ScreenBridge } from "./screen.ts";
 import { parseAddress } from "../memory/types.ts";
 
@@ -13,12 +16,14 @@ export interface ServerOptions {
   host: string;
   /** Required from anything that isn't this machine. */
   token: string;
+  root: string;
   dashboardDir: string;
-  ai: { model: string; keyFound: boolean };
+  router?: ModelRouter;
   agent: Agent;
   games: GameManager;
   adapters: AdapterRegistry;
   screen: ScreenBridge;
+  mcp: McpEndpoint;
 }
 
 const MIME: Record<string, string> = {
@@ -53,8 +58,35 @@ function trustedRequest(req: http.IncomingMessage, token: string): boolean {
   return url.searchParams.get("token") === token;
 }
 
+/** How to plug Scruff into a Claude app, shown in the dashboard's AI menu. */
+function connectInfo(root: string, port: number) {
+  const mcpUrl = `http://localhost:${port}/mcp`;
+  const desktop = {
+    mcpServers: {
+      scruff: {
+        command: "node",
+        args: [path.join(root, "node_modules", "tsx", "dist", "cli.mjs"), path.join(root, "src", "mcp-stdio.ts")],
+        ...(port !== 7777 ? { env: { SCRUFF_PORT: String(port) } } : {}),
+      },
+    },
+  };
+  return {
+    mcpUrl,
+    claudeCode: `claude mcp add --transport http scruff ${mcpUrl}`,
+    desktopConfig: JSON.stringify(desktop, null, 2),
+    desktopConfigPath:
+      process.platform === "win32"
+        ? "%APPDATA%\\Claude\\claude_desktop_config.json"
+        : process.platform === "darwin"
+          ? "~/Library/Application Support/Claude/claude_desktop_config.json"
+          : "~/.config/Claude/claude_desktop_config.json",
+  };
+}
+
 export function startServer(opts: ServerOptions): Promise<http.Server> {
-  const { agent, games, adapters, screen } = opts;
+  const { agent, games, adapters, screen, mcp, router } = opts;
+  const aiInfo = () =>
+    router?.describe() ?? { provider: "custom", model: agent.brain.model, providerLabel: "Custom", ready: true, problem: undefined };
   const dashboards = new Set<WebSocket>();
   const transcript: AgentEvent[] = [];
 
@@ -87,7 +119,7 @@ export function startServer(opts: ServerOptions): Promise<http.Server> {
     if (dashboards.size && games.session?.watch.size) pushState();
   }, LIVE_REFRESH_MS).unref();
 
-  agent.on("event", (event: AgentEvent) => {
+  const record = (event: AgentEvent) => {
     const last = transcript.at(-1);
     // Stored with streamed deltas merged, so a dashboard that connects later gets whole messages.
     if ((event.type === "text" || event.type === "thinking") && last?.type === event.type) {
@@ -98,7 +130,9 @@ export function startServer(opts: ServerOptions): Promise<http.Server> {
     if (transcript.length > TRANSCRIPT_LIMIT) transcript.splice(0, transcript.length - TRANSCRIPT_LIMIT);
     broadcast({ type: "agent", event });
     if (event.type === "turn_start" || event.type === "turn_end") pushState();
-  });
+  };
+  agent.on("event", record);
+  mcp.on("event", record);
 
   const toast = (ws: WebSocket, text: string, level: "info" | "error" = "error") =>
     ws.send(JSON.stringify({ type: "toast", text, level }));
@@ -116,6 +150,25 @@ export function startServer(opts: ServerOptions): Promise<http.Server> {
         transcript.length = 0;
         broadcast({ type: "history", events: [] });
         break;
+      case "list_models":
+        ws.send(
+          JSON.stringify({
+            type: "models",
+            current: aiInfo(),
+            providers: router ? await router.status() : [],
+            connect: connectInfo(opts.root, (server.address() as AddressInfo).port),
+          }),
+        );
+        break;
+      case "set_model": {
+        if (!router) throw new Error("This Scruff can't switch models.");
+        agent.setBrain(router.select({ provider: msg.provider as ProviderId, model: String(msg.model ?? "") }));
+        transcript.length = 0;
+        broadcast({ type: "hello", ai: aiInfo() });
+        broadcast({ type: "history", events: [] });
+        toast(ws, `Now using ${aiInfo().model}. Started a new chat.`, "info");
+        break;
+      }
       case "list_games":
         ws.send(JSON.stringify({ type: "games", list: await games.listGames(msg.search) }));
         break;
@@ -173,6 +226,16 @@ export function startServer(opts: ServerOptions): Promise<http.Server> {
       return;
     }
     const url = new URL(req.url ?? "/", "http://x");
+    if (url.pathname === "/mcp") {
+      mcp.handle(req, res).catch((err) => {
+        if (!res.headersSent) res.writeHead(500).end(String((err as Error).message));
+      });
+      return;
+    }
+    if (url.pathname === "/health") {
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ app: "scruff" }));
+      return;
+    }
     const rel = url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname).replace(/^\/+/, "");
     const file = path.resolve(opts.dashboardDir, rel);
     if (!file.startsWith(path.resolve(opts.dashboardDir) + path.sep)) {
@@ -203,7 +266,7 @@ export function startServer(opts: ServerOptions): Promise<http.Server> {
         return;
       }
       dashboards.add(ws);
-      ws.send(JSON.stringify({ type: "hello", ai: opts.ai }));
+      ws.send(JSON.stringify({ type: "hello", ai: aiInfo() }));
       ws.send(JSON.stringify({ type: "history", events: transcript }));
       ws.send(JSON.stringify(state()));
       ws.on("message", (raw) => {

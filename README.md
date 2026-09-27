@@ -7,7 +7,9 @@ Talk to an AI while you play, and it mods your game live.
 > "Undo that, it's too easy now."
 
 Scruff runs on your PC next to the game. You talk to it from a small dashboard (type, push to
-talk, or hands-free: *"Scruff, give me more ammo"*), and Claude does the modding:
+talk, or hands-free: *"Scruff, give me more ammo"*), and an AI does the modding: Claude with an
+API key, your Claude Pro/Max subscription through Claude Desktop or Claude Code, or any model
+running on your own PC (Ollama, LM Studio, ...).
 
 - **Memory editing, for almost any single-player game.** Scruff scans the game's memory for a
   number you can see (gold, health, ammo, XP), narrows it down as the number changes, then sets
@@ -24,19 +26,53 @@ game: memory editing gets accounts banned, and cheating in multiplayer ruins it 
 
 ## Quick start (Windows)
 
-You need [Node.js 22+](https://nodejs.org) and an [Anthropic API key](https://console.anthropic.com/).
+You need [Node.js 22+](https://nodejs.org).
 
 ```sh
 git clone https://github.com/EthanW223-dev/Scruff.git
 cd Scruff
 npm install
-copy .env.example .env      # then paste your API key into .env
 npm start
 ```
 
-Open **http://localhost:7777** in Chrome or Edge, start your game, click **Pick a game**, and
-tell Scruff what you want. If Windows refuses access to the game, run the terminal as
-administrator.
+Open **http://localhost:7777** in Chrome or Edge, pick your AI (below), start your game, click
+**Pick a game**, and tell Scruff what you want. If Windows refuses access to the game, run the
+terminal as administrator.
+
+## Pick your AI
+
+Click the AI chip in the top-left of the dashboard. Switching starts a new chat, and Scruff
+remembers your choice.
+
+**Claude with an API key** (best results). Get a key at
+[console.anthropic.com](https://console.anthropic.com/), then `copy .env.example .env`, paste it
+in as `ANTHROPIC_API_KEY`, and restart Scruff. Any Claude model works; the default is
+`claude-opus-5`.
+
+**Your Claude subscription (Pro/Max), no API key.** Claude's own apps run on your plan, so Scruff
+plugs into them as an MCP tool server: you chat in the Claude app, it calls Scruff's tools, and
+every change still shows up in the dashboard with undo. The AI menu shows these commands with
+your paths filled in.
+
+- *Claude Code:* start Scruff (`npm start`), then run once:
+  `claude mcp add --transport http scruff http://localhost:7777/mcp`
+- *Claude Desktop:* Settings → Developer → Edit Config, add the `scruff` entry the AI menu gives
+  you, and restart Claude Desktop. It starts Scruff by itself whenever it opens.
+
+**A model on your own PC** (free, private, works offline). Install
+[Ollama](https://ollama.com) and pull a model that supports tool calling, e.g.
+`ollama pull qwen3:8b`, or start [LM Studio](https://lmstudio.ai)'s local server. Scruff finds
+them automatically. Tips:
+
+- Use 7B+ models (qwen3:8b or 14b, llama3.1:8b, mistral-small). Tiny ones get muddled: in
+  testing, qwen3:1.7b worked but reused stale addresses, which Scruff now refuses with a hint.
+- Scruff's instructions and tools take about 4k tokens. If replies seem confused, raise Ollama's
+  context: set `OLLAMA_CONTEXT_LENGTH=16384` before starting it.
+- A local model shares your GPU with the game. If that hurts your frame rate, run Ollama on
+  another PC and point `OLLAMA_URL` at it.
+
+**Anything else with an OpenAI-compatible API** (OpenRouter, OpenAI, Groq, Gemini, DeepSeek,
+llama.cpp, vLLM, ...): set `OPENAI_BASE_URL` and `OPENAI_API_KEY` in `.env`.
 
 ### Try it on the demo game first
 
@@ -62,29 +98,36 @@ in raw memory like a real game, and also connects to Scruff as a game adapter. A
 ## How it works
 
 ```
- dashboard (browser)  ──ws──►  Scruff hub (Node, on your PC)  ──►  Claude API
-   chat, voice, mods              │  agent loop + tools
-   screen capture                 ├─ memory engine ──► game process (ReadProcessMemory / /proc/pid/mem)
-                                  └─ adapters ◄──ws── plugins inside specific games
+ dashboard (browser) ──ws──►  Scruff hub (Node, on your PC) ──► Claude API / Ollama / LM Studio / ...
+   chat, voice, mods             │  agent loop + tools
+   screen capture                ├─ memory engine ──► game process (ReadProcessMemory / /proc/pid/mem)
+                                 ├─ adapters ◄──ws── plugins inside specific games
+ Claude Desktop / Code ──MCP──►  └─ /mcp: the same tools, for your Claude subscription
 ```
 
 - `src/memory/` scans and edits another process's memory: `windows.ts` (Win32 via koffi),
   `linux.ts` (`/proc/<pid>/mem`), `scanner.ts` (first scan + refine, ~1.3 GB/s), `session.ts`
   (watch list, freezing, undo log), `safety.ts` (anti-cheat check).
-- `src/hub/` is the local server: `agent.ts` runs the conversation with Claude and its tools,
-  `game.ts` defines the memory tools, `adapters.ts` and `screen.ts` connect adapters and the
-  shared screen, `server.ts` serves the dashboard.
+- `src/hub/` is the local server: `agent.ts` runs the conversation and its tools, `models.ts`
+  picks the AI (`providers/anthropic.ts` for Claude, `providers/openai.ts` for everything
+  OpenAI-compatible), `mcp.ts` serves the tools to Claude apps, `game.ts` defines the memory
+  tools, `adapters.ts` and `screen.ts` connect adapters and the shared screen, `server.ts`
+  serves the dashboard.
+- `src/mcp-stdio.ts` is what Claude Desktop launches: it starts the hub if needed and relays MCP.
 - `dashboard/` is the web UI (plain HTML/JS, no build step).
 
 ## Settings
 
-In `.env`:
+In `.env` (all optional):
 
 | Variable | Default | |
 | --- | --- | --- |
-| `ANTHROPIC_API_KEY` | | Required |
-| `SCRUFF_MODEL` | `claude-opus-5` | Any Claude model id |
-| `SCRUFF_EFFORT` | `medium` | `low` replies fastest; `high` thinks harder about tricky scans |
+| `ANTHROPIC_API_KEY` | | For Claude via the API |
+| `OLLAMA_URL` | `http://127.0.0.1:11434` | Where Ollama runs |
+| `LMSTUDIO_URL` | `http://127.0.0.1:1234` | Where LM Studio's server runs |
+| `OPENAI_BASE_URL`, `OPENAI_API_KEY` | | Any OpenAI-compatible service |
+| `SCRUFF_PROVIDER`, `SCRUFF_MODEL` | first that works | Starting AI (`claude`, `ollama`, `lmstudio`, `openai`); a pick in the dashboard overrides it |
+| `SCRUFF_EFFORT` | `medium` | Claude only: `low` replies fastest; `high` thinks harder about tricky scans |
 | `SCRUFF_PORT` | `7777` | |
 
 ## Known gaps
@@ -92,6 +135,8 @@ In `.env`:
 - Addresses only last until the game restarts; you re-scan each session (no pointer scanning yet).
 - No "unknown initial value" scan yet, so the value has to be a number you can see or estimate.
 - macOS isn't supported for memory editing.
+- With a Claude subscription you chat in the Claude app, so the dashboard's own chat box and
+  voice input need an API key or a local model.
 - The Windows memory backend follows the Win32 API docs but has only been exercised against
   Linux processes so far; please report what happens on your games.
 

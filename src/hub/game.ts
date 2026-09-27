@@ -17,6 +17,8 @@ const NOT_GAMES = new Set(
   ].map((n) => n.toLowerCase()),
 );
 
+const SEARCH_NOISE = new Set(["the", "game", "games", "playing", "exe", "and"]);
+
 function baseName(name: string): string {
   return name.toLowerCase().replace(/\.exe$/, "");
 }
@@ -28,12 +30,19 @@ export class GameManager extends EventEmitter {
 
   async listGames(search?: string): Promise<ProcessInfo[]> {
     const all = await listProcesses();
-    const q = search?.toLowerCase();
+    // Word-based, so "scruff dungeon" finds "Scruff's Dungeon" and "the witcher game" finds "witcher3.exe".
+    const words = (search ?? "")
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((w) => w.length > 2 && !SEARCH_NOISE.has(w));
     return all
       .filter((p) => !NOT_GAMES.has(baseName(p.name)))
       // On Windows, games have a window; searching by name also finds ones that don't.
-      .filter((p) => process.platform !== "win32" || Boolean(p.title) || Boolean(q))
-      .filter((p) => !q || [p.name, p.title, p.command].some((s) => s?.toLowerCase().includes(q)))
+      .filter((p) => process.platform !== "win32" || Boolean(p.title) || words.length > 0)
+      .filter((p) => {
+        const hay = [p.name, p.title, p.command].join(" ").toLowerCase();
+        return words.every((w) => hay.includes(w));
+      })
       .slice(0, 60);
   }
 
@@ -94,11 +103,29 @@ const valueType = z
   );
 const address = z.string().describe("Hex address from a scan result, e.g. 0x1A2B3C40");
 
-export function memoryTools(games: GameManager): HubTool[] {
+/** `status` adds what the game tools don't know about: adapters, screen sharing. */
+export function memoryTools(games: GameManager, status: () => Record<string, unknown> = () => ({})): HubTool[] {
   const describeResults = (limit = 12) => {
     const s = games.requireSession();
     const hits = s.scanner.sample(limit).map((h) => ({ address: hex(h.address), value: h.value }));
     return { count: s.scanner.count, type: s.scanner.type, first_results: hits };
+  };
+
+  /**
+   * Writes only go to addresses from the current scan or the mod list. Models (small local
+   * ones especially) sometimes reuse a stale address from an earlier scan or invent one, and
+   * writing to random memory crashes games; the error lists the addresses they meant.
+   */
+  const checkKnown = (addr: number) => {
+    const s = games.requireSession();
+    if (s.scanner.includes(addr) || s.watch.has(addr)) return;
+    const current = s.scanner.resultAddresses(10).map(hex);
+    const watched = [...s.watch.keys()].map(hex);
+    throw new Error(
+      `${hex(addr)} isn't in the current scan results or the mod list, so Scruff won't write to it. ` +
+        (current.length ? `Current results: ${current.join(", ")}${s.scanner.count > 10 ? ", …" : ""}. ` : "No scan results. ") +
+        (watched.length ? `Mod list: ${watched.join(", ")}.` : ""),
+    );
   };
 
   const trackScan = async <T>(fn: (onProgress: (f: number) => void) => Promise<T>): Promise<T> => {
@@ -118,6 +145,7 @@ export function memoryTools(games: GameManager): HubTool[] {
   return [
     defineTool({
       name: "list_running_games",
+      readOnly: true,
       description:
         "List programs running on the user's PC that could be the game they're playing (windowed apps on Windows). " +
         "Use this to find the game's process id before attaching.",
@@ -144,15 +172,16 @@ export function memoryTools(games: GameManager): HubTool[] {
 
     defineTool({
       name: "game_status",
+      readOnly: true,
       description:
         "What Scruff is attached to, the current scan result count, the values being watched or frozen (with live " +
-        "values), and the recent changes that can be undone.",
+        "values), recent changes that can be undone, connected game adapters, and whether the screen is shared.",
       input: z.object({}),
       run() {
         const state = games.state();
-        if (!state.attached) return "Not attached to any game.";
+        if (!state.attached) return json({ attached: false, ...status() });
         const { changes, ...rest } = state.attached;
-        return json({ ...rest, recent_changes: changes.slice(0, 15) });
+        return json({ attached: true, ...rest, recent_changes: changes.slice(0, 15), ...status() });
       },
     }),
 
@@ -210,6 +239,7 @@ export function memoryTools(games: GameManager): HubTool[] {
 
     defineTool({
       name: "show_scan_results",
+      readOnly: true,
       description: "List current scan results with their live values.",
       input: z.object({ limit: z.number().int().min(1).max(100).default(20) }),
       run({ limit }) {
@@ -219,6 +249,7 @@ export function memoryTools(games: GameManager): HubTool[] {
 
     defineTool({
       name: "read_values",
+      readOnly: true,
       description: "Read the current value at one or more addresses.",
       input: z.object({ addresses: z.array(address).min(1).max(100), type: valueType }),
       run({ addresses, type }) {
@@ -230,7 +261,8 @@ export function memoryTools(games: GameManager): HubTool[] {
     defineTool({
       name: "write_value",
       description:
-        "Set the value at one or more addresses (e.g. all remaining scan results). Every write is logged and can be " +
+        "Set the value at one or more addresses from the current scan results or the mod list (e.g. all remaining " +
+          "results). Every write is logged and can be " +
         "undone. Only write once results are narrowed down: writing to random memory can crash the game. " +
         "The game may overwrite a one-off write; use freeze_value to hold it.",
       input: z.object({
@@ -243,7 +275,9 @@ export function memoryTools(games: GameManager): HubTool[] {
         const s = games.requireSession();
         const results = addresses.map((a) => {
           try {
-            const change = s.write(parseAddress(a), type, value, label);
+            const addr = parseAddress(a);
+            checkKnown(addr);
+            const change = s.write(addr, type, value, label);
             return { address: a, before: change.before, now: value, change_id: change.id };
           } catch (err) {
             return { address: a, error: (err as Error).message };
@@ -260,7 +294,9 @@ export function memoryTools(games: GameManager): HubTool[] {
         "Shows up in the dashboard's mod list with a toggle.",
       input: z.object({ address, type: valueType, value: z.number(), label: z.string() }),
       run({ address: a, type, value, label }) {
-        const change = games.requireSession().freeze(parseAddress(a), type, value, label);
+        const addr = parseAddress(a);
+        checkKnown(addr);
+        const change = games.requireSession().freeze(addr, type, value, label);
         return `Frozen ${label} at ${value} (was ${change.before}). change_id ${change.id}.`;
       },
     }),

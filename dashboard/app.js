@@ -38,9 +38,10 @@ function handle(msg) {
   switch (msg.type) {
     case "hello":
       aiInfo = msg.ai;
-      if (!aiInfo.keyFound) {
-        setBanner('No Anthropic API key found. Add <code>ANTHROPIC_API_KEY=…</code> to a <code>.env</code> file next to package.json and restart Scruff.', true);
-      }
+      renderAi();
+      break;
+    case "models":
+      renderModels(msg);
       break;
     case "history":
       $("log").querySelectorAll(".msg, .sys").forEach((n) => n.remove());
@@ -366,6 +367,86 @@ function renderChanges(changes) {
       return li;
     }),
   );
+}
+
+// ---------- AI menu ----------
+
+function renderAi() {
+  $("ai-chip").querySelector(".dot").className = `dot ${aiInfo.ready ? "on" : ""}`;
+  $("ai-label").textContent = aiInfo.model ? `${aiInfo.providerLabel} · ${aiInfo.model}` : "Pick an AI";
+  if (!aiInfo.ready) {
+    setBanner(`${aiInfo.problem ?? "The AI isn't set up yet"}, or open the AI menu to use a local model or your Claude subscription.`);
+  } else if (!$("banner").textContent.startsWith("Lost connection")) {
+    setBanner(null);
+  }
+}
+
+let modelsMsg = null;
+
+function openAiMenu() {
+  $("provider-list").replaceChildren(el("li", "muted small", "Checking what's available…"));
+  $("ai-dialog").showModal();
+  send({ type: "list_models" });
+}
+
+function renderModels(msg) {
+  modelsMsg = msg;
+  $("provider-list").replaceChildren(
+    ...msg.providers.map((p) => {
+      const li = el("li");
+      const label = el("label");
+      const radio = el("input");
+      radio.type = "radio";
+      radio.name = "provider";
+      radio.value = p.id;
+      radio.checked = p.id === msg.current.provider;
+      radio.addEventListener("change", () => pickProvider(p.id));
+      const name = el("span", "name");
+      name.append(el("span", `dot ${p.ready ? "on" : ""}`), p.label);
+      label.append(radio, name, el("span", "detail", p.ready ? `${p.detail} · ${p.models.length} model${p.models.length === 1 ? "" : "s"}` : p.detail));
+      li.append(label);
+      return li;
+    }),
+  );
+  $("model-input").value = msg.current.model;
+  fillModelOptions(msg.current.provider);
+  $("cc-cmd").textContent = msg.connect.claudeCode;
+  $("desktop-json").textContent = msg.connect.desktopConfig;
+  $("desktop-path").textContent = msg.connect.desktopConfigPath;
+}
+
+function fillModelOptions(providerId) {
+  const provider = modelsMsg.providers.find((p) => p.id === providerId);
+  $("model-options").replaceChildren(...(provider?.models ?? []).map((m) => Object.assign(el("option"), { value: m })));
+  return provider;
+}
+
+function pickProvider(providerId) {
+  const provider = fillModelOptions(providerId);
+  const input = $("model-input");
+  if (providerId === modelsMsg.current.provider) input.value = modelsMsg.current.model;
+  else if (!provider.models.includes(input.value)) input.value = provider.models[0] ?? "";
+  input.focus();
+}
+
+$("ai-chip").addEventListener("click", openAiMenu);
+$("ai-apply").addEventListener("click", () => {
+  const provider = document.querySelector('input[name="provider"]:checked')?.value;
+  const model = $("model-input").value.trim();
+  if (!provider || !model) return toast("Pick a provider and type or choose a model.", "error");
+  send({ type: "set_model", provider, model });
+  $("ai-dialog").close();
+});
+for (const b of document.querySelectorAll("[data-copy]")) {
+  b.addEventListener("click", async () => {
+    const text = $(b.dataset.copy).textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      toast("Copied.");
+    } catch {
+      getSelection().selectAllChildren($(b.dataset.copy)); // no clipboard over plain http: select it instead
+    }
+  });
 }
 
 // ---------- game picker ----------

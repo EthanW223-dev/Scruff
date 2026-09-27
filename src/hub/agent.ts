@@ -8,7 +8,10 @@ type Params = BetaMessageStreamParams;
 type Message = Anthropic.Beta.BetaMessage;
 type MessageParam = Anthropic.Beta.BetaMessageParam;
 
-/** The slice of the SDK's BetaMessageStream the agent uses; tests substitute a fake. */
+/**
+ * The slice of the SDK's BetaMessageStream the agent uses. Every provider (Claude, local
+ * models, tests) produces this shape; history is always kept in the Claude message format.
+ */
 export interface ModelStream {
   on(event: "text", listener: (delta: string) => void): unknown;
   on(event: "thinking", listener: (delta: string) => void): unknown;
@@ -16,14 +19,18 @@ export interface ModelStream {
 }
 export type StreamFactory = (params: Params, signal: AbortSignal) => ModelStream;
 
-export interface AgentOptions {
+/** Which model answers, and how to reach it. */
+export interface Brain {
   model: string;
-  effort: "low" | "medium" | "high" | "xhigh" | "max";
+  createStream: StreamFactory;
+}
+
+export interface AgentOptions {
+  brain: Brain;
   /** Fixed for the session; see prompt.ts for why. */
   tools: HubTool[];
   /** Status text (attached game, adapters, events). Sent with a user message when it changes. */
   status: () => { note: string; events: string[] };
-  createStream: StreamFactory;
 }
 
 /** Events for the dashboard. */
@@ -43,13 +50,9 @@ const MAX_TOKENS = 16000;
 const MAX_STEPS = 40;
 const MAX_JSON_RETRIES = 2;
 
-export function sdkStreamFactory(client: Anthropic): StreamFactory {
-  return (params, signal) => client.beta.messages.stream(params, { signal });
-}
-
 /**
- * One ongoing conversation with Claude. The history is append-only (never edited), which
- * keeps the prompt cache warm and replayed thinking blocks valid.
+ * One ongoing conversation with the AI. The history is append-only (never edited), which
+ * keeps Claude's prompt cache warm and its replayed thinking blocks valid.
  */
 export class Agent extends EventEmitter {
   private messages: MessageParam[] = [];
@@ -86,6 +89,16 @@ export class Agent extends EventEmitter {
     this.stop();
     this.messages = [];
     this.lastNote = "";
+  }
+
+  get brain(): Brain {
+    return this.opts.brain;
+  }
+
+  /** Switches models. Starts a new conversation: histories don't carry across models cleanly. */
+  setBrain(brain: Brain): void {
+    this.reset();
+    this.opts.brain = brain;
   }
 
   private emitEvent(event: AgentEvent): void {
@@ -138,7 +151,7 @@ export class Agent extends EventEmitter {
     let jsonRetries = 0;
 
     for (let step = 0; step < MAX_STEPS; step++) {
-      const stream = this.opts.createStream(this.params(messages), signal);
+      const stream = this.opts.brain.createStream(this.params(messages), signal);
       stream.on("text", (delta) => this.emitEvent({ type: "text", text: delta }));
       stream.on("thinking", (delta) => this.emitEvent({ type: "thinking", text: delta }));
 
@@ -211,20 +224,14 @@ export class Agent extends EventEmitter {
     return { type: "tool_result", tool_use_id: use.id, content, ...(isError ? { is_error: true } : {}) };
   }
 
+  /** Provider-neutral request; each provider adds its own options (see providers/). */
   private params(messages: MessageParam[]): Params {
     return {
-      model: this.opts.model,
+      model: this.opts.brain.model,
       max_tokens: MAX_TOKENS,
       system: SYSTEM_PROMPT,
       tools: this.apiTools,
       messages,
-      thinking: { type: "adaptive", display: "summarized" },
-      output_config: { effort: this.opts.effort },
-      // Caches the whole prefix up to the latest message, so each step only pays for what's new.
-      cache_control: { type: "ephemeral" },
-      // If a safety classifier declines (memory editing can look like hacking), retry on the recommended model.
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
     };
   }
 }
@@ -255,7 +262,7 @@ function describeError(err: unknown): string {
   if (err instanceof Anthropic.APIConnectionError) return "Couldn't reach the Anthropic API. Check your internet connection.";
   if (err instanceof Anthropic.APIError) return `Anthropic API error ${err.status ?? ""}: ${err.message}`;
   if (err instanceof Anthropic.AnthropicError && /authentication method/i.test(err.message)) {
-    return "No Anthropic API key found. Add ANTHROPIC_API_KEY to a .env file next to package.json and restart Scruff.";
+    return "No Anthropic API key found. Add ANTHROPIC_API_KEY to .env, or pick a local model in the AI menu.";
   }
   return (err as Error)?.message ?? String(err);
 }

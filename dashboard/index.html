@@ -11,6 +11,7 @@
   <header class="topbar">
     <div class="brand"><img src="icon.svg" alt="" width="22" height="22"> Scruff</div>
     <div class="chips">
+      <button class="chip" id="ai-chip" title="Choose the AI"><span class="dot"></span><span id="ai-label">AI</span></button>
       <button class="chip" id="game-chip" title="Pick the game to mod"><span class="dot"></span><span id="game-label">No game</span></button>
       <button class="chip" id="screen-chip" title="Let Scruff see your game"><span class="dot"></span><span id="screen-label">Share screen</span></button>
       <span class="chip static" id="adapter-chip" hidden><span class="dot on"></span><span id="adapter-label"></span></span>
@@ -80,6 +81,42 @@
       </div>
     </aside>
   </main>
+
+  <dialog id="ai-dialog" class="picker ai-dialog">
+    <form method="dialog" class="picker-inner">
+      <div class="picker-head">
+        <h2>Choose the AI</h2>
+        <button value="close" class="icon-btn" aria-label="Close">✕</button>
+      </div>
+      <p class="muted small">Chat right here with Claude, or with a model running on your own PC.</p>
+      <ul id="provider-list" class="providers"></ul>
+      <div class="model-row">
+        <label for="model-input">Model</label>
+        <input id="model-input" list="model-options" autocomplete="off" spellcheck="false" placeholder="e.g. qwen3:8b">
+        <datalist id="model-options"></datalist>
+      </div>
+      <div class="picker-foot">
+        <span class="muted small">Switching starts a new chat.</span>
+        <button type="button" id="ai-apply" class="primary">Use this model</button>
+      </div>
+
+      <section class="subscription">
+        <h3>Use your Claude subscription</h3>
+        <p class="muted small">Let Claude Desktop or Claude Code be the brain instead. They run on your Pro/Max plan, call Scruff's tools, and every change still shows up in this dashboard.</p>
+        <details>
+          <summary>Claude Code</summary>
+          <p class="small">Run this once, then start <code>claude</code> and ask it to mod your game:</p>
+          <div class="copy-block"><pre id="cc-cmd"></pre><button type="button" class="link" data-copy="cc-cmd">copy</button></div>
+        </details>
+        <details>
+          <summary>Claude Desktop</summary>
+          <p class="small">In Claude Desktop open Settings → Developer → Edit Config, put this in the file (merge it into <code>mcpServers</code> if you already have some), then restart Claude Desktop. It starts Scruff for you.</p>
+          <div class="copy-block"><pre id="desktop-json"></pre><button type="button" class="link" data-copy="desktop-json">copy</button></div>
+          <p class="muted small">File: <code id="desktop-path"></code></p>
+        </details>
+      </section>
+    </form>
+  </dialog>
 
   <dialog id="picker" class="picker">
     <form method="dialog" class="picker-inner">

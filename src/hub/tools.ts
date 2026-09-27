@@ -16,6 +16,10 @@ export interface HubTool {
   inputSchema: Anthropic.Beta.BetaTool.InputSchema;
   /** Only set for tools whose input we validate ourselves (required by eager input streaming). */
   eager?: boolean;
+  /** The zod schema behind inputSchema, reused by the MCP server. */
+  schema?: z.ZodObject;
+  /** Only looks; changes nothing in the game. */
+  readOnly?: boolean;
   run(input: unknown, ctx: ToolContext): Promise<ToolResultContent>;
 }
 
@@ -26,6 +30,7 @@ export function defineTool<S extends z.ZodObject>(spec: {
   name: string;
   description: string;
   input: S;
+  readOnly?: boolean;
   run(input: z.output<S>, ctx: ToolContext): Promise<ToolResultContent> | ToolResultContent;
 }): HubTool {
   const { $schema: _ignored, ...schema } = z.toJSONSchema(spec.input, { io: "input" }) as Record<string, unknown>;
@@ -34,6 +39,8 @@ export function defineTool<S extends z.ZodObject>(spec: {
     description: spec.description,
     inputSchema: schema as Anthropic.Beta.BetaTool.InputSchema,
     eager: true,
+    schema: spec.input,
+    readOnly: spec.readOnly,
     async run(input, ctx) {
       const parsed = spec.input.safeParse(input);
       if (!parsed.success) {

@@ -79,10 +79,7 @@ before(async () => {
     port: 0,
     lan: false,
     token: "test-token",
-    model: "claude-opus-5",
-    effort: "medium",
-    keyFound: true,
-    createStream: model.factory,
+    brain: { model: "claude-opus-5", createStream: model.factory },
   });
   port = (hub.server.address() as AddressInfo).port;
 

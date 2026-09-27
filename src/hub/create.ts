@@ -1,7 +1,9 @@
 import path from "node:path";
 import { AdapterRegistry } from "./adapters.ts";
-import { Agent, type AgentOptions, type StreamFactory } from "./agent.ts";
+import { Agent, type Brain } from "./agent.ts";
 import { GameManager, memoryTools } from "./game.ts";
+import { McpEndpoint } from "./mcp.ts";
+import type { ModelRouter } from "./models.ts";
 import { ScreenBridge } from "./screen.ts";
 import { startServer } from "./server.ts";
 
@@ -10,10 +12,9 @@ export interface HubOptions {
   port: number;
   lan: boolean;
   token: string;
-  model: string;
-  effort: AgentOptions["effort"];
-  keyFound: boolean;
-  createStream: StreamFactory;
+  /** Picks and switches models. Tests can pass a fixed brain instead. */
+  router?: ModelRouter;
+  brain?: Brain;
 }
 
 export async function createHub(opts: HubOptions) {
@@ -35,24 +36,35 @@ export async function createHub(opts: HubOptions) {
     ].join("\n");
   };
 
+  const tools = [
+    ...memoryTools(games, () => ({ screen_shared: screen.active, adapters: adapters.describe() })),
+    ...screen.tools(),
+    adapters.dispatchTool(),
+  ];
+
+  const brain = opts.brain ?? opts.router?.brain();
+  if (!brain) throw new Error("createHub needs a router or a brain.");
   const agent = new Agent({
-    model: opts.model,
-    effort: opts.effort,
-    tools: [...memoryTools(games), ...screen.tools(), adapters.dispatchTool()],
+    brain,
+    tools,
     status: () => ({ note: statusNote(), events: adapters.drainEvents().map((e) => `${e.adapter}: ${e.text}`) }),
-    createStream: opts.createStream,
   });
+
+  const dashboardUrl = `http://localhost:${opts.port}`;
+  const mcp = new McpEndpoint({ tools, dashboardUrl });
 
   const server = await startServer({
     port: opts.port,
     host: opts.lan ? "0.0.0.0" : "127.0.0.1",
     token: opts.token,
+    root: opts.root,
     dashboardDir: path.join(opts.root, "dashboard"),
-    ai: { model: opts.model, keyFound: opts.keyFound },
+    router: opts.router,
     agent,
     games,
     adapters,
     screen,
+    mcp,
   });
 
   return {

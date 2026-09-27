@@ -240,6 +240,7 @@ textarea {
 }
 textarea:focus { border-color: var(--accent); }
 .primary, .danger {
+  white-space: nowrap;
   height: 40px;
   padding: 0 16px;
   border-radius: 10px;
@@ -389,3 +390,56 @@ textarea:focus { border-color: var(--accent); }
   font-size: 13px;
 }
 .toast.error { border-color: #7f1d1d; color: #fecaca; }
+
+/* ---------- AI menu ---------- */
+.ai-dialog { width: min(600px, calc(100vw - 32px)); }
+.ai-dialog .picker-inner { overflow-y: auto; }
+.providers { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.providers label {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  align-items: center;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.providers label:has(input:checked) { border-color: var(--accent); background: #1c1733; }
+.providers input { grid-row: span 2; accent-color: var(--accent); }
+.providers .name { font-weight: 600; display: flex; align-items: center; gap: 7px; }
+.providers .detail { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.model-row { display: flex; align-items: center; gap: 10px; }
+.model-row label { color: var(--muted); font-size: 13px; }
+.model-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 11px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  font: 13px var(--mono);
+  outline: none;
+}
+.model-row input:focus { border-color: var(--accent); }
+.picker-foot { align-items: center; gap: 12px; }
+.subscription { border-top: 1px solid var(--border); padding-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.subscription h3 { margin: 0; font-size: 15px; }
+.subscription p { margin: 0; }
+.subscription details { border: 1px solid var(--border); border-radius: 10px; padding: 8px 11px; }
+.subscription summary { cursor: pointer; font-weight: 600; }
+.subscription details p { margin: 8px 0 6px; }
+.copy-block { position: relative; }
+.copy-block pre {
+  margin: 0;
+  padding: 9px 11px;
+  padding-right: 48px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: 12px/1.45 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.copy-block button { position: absolute; top: 7px; right: 9px; }
+code { font-family: var(--mono); font-size: 12px; }

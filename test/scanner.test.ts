@@ -67,6 +67,8 @@ test("finds an int32 and narrows it down as it changes", async () => {
   const second = await scanner.refine({ mode: "exact", value: 325 });
   assert.equal(second.count, 1);
   assert.deepEqual(scanner.sample(5), [{ address: gold, value: 325 }]);
+  assert.equal(scanner.includes(gold), true);
+  assert.equal(scanner.includes(decoys[1]), false);
 });
 
 test("relative refines: decreased, unchanged, decreased_by", async () => {

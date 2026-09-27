@@ -8,11 +8,9 @@ import { fakeModel, lastToolResult, lastUserText, text, toolUse, type Reply } fr
 function makeAgent(policy: Parameters<typeof fakeModel>[0], tools = [echo]) {
   const model = fakeModel(policy);
   const agent = new Agent({
-    model: "claude-opus-5",
-    effort: "medium",
+    brain: { model: "claude-opus-5", createStream: model.factory },
     tools,
     status: () => ({ note: "status", events: [] }),
-    createStream: model.factory,
   });
   const events: AgentEvent[] = [];
   agent.on("event", (e) => events.push(e));

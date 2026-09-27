@@ -244,6 +244,12 @@ namespace Scruff
                     SetDesktopMode(false);
                     MatchPhysicsRateToDisplay();
                 }
+                else if (DesktopMode && modeCheckTimer >= 6f && Application.isEditor)
+                {
+                    Debug.LogWarning("[Scruff] Still no headset, so this is desktop mode. For VR on a Quest: open the Meta Quest Link app on " +
+                                     "this PC, set it as the active OpenXR runtime (Link app > Settings > General), connect with a cable " +
+                                     "or Air Link, start Link in the headset, then press Play again.");
+                }
             }
 
             if (DesktopMode)

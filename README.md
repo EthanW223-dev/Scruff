@@ -47,12 +47,26 @@ preview only; the VR game is the Unity project. Serve the folder with any static
 
 ### VR (Quest via Link / Air Link, or standalone)
 
-1. **Edit > Project Settings > XR Plug-in Management**, install if prompted.
-2. On the **PC** tab (for Link) and the **Android** tab (for standalone Quest) tick **OpenXR**.
-3. Under **XR Plug-in Management > OpenXR** add the **Oculus Touch Controller Profile** to *Interaction Profiles*,
-   and on the Android tab enable **Meta Quest Support**. Render mode: *Single Pass Instanced*.
-4. For standalone Quest: **Scruff > Setup Project For Quest** (IL2CPP, ARM64, Android API 29+, ASTC), then
-   **File > Build Settings > Android > Switch Platform** and Build And Run.
+VR is set up automatically. The first time the project opens, `ScruffVRSetup` turns on OpenXR for PC with the
+Oculus Touch, Valve Index and HTC Vive controller profiles (single-pass instanced). Once **Android Build Support** is
+installed it does the same for standalone Quest, adding **Meta Quest Support** (Quest 2, 3, 3S and Pro).
+**Scruff > VR > Set Up VR Again** re-applies all of it if you change something by accident.
+
+**On PC through Quest Link / Air Link (Windows):**
+
+1. Install the **Meta Quest Link** app. In **Settings > General > OpenXR Runtime**, set Meta Quest Link as active.
+2. Connect the headset (USB-C cable or Air Link) and start Link inside the headset.
+3. Press **Play** in Unity. If the Console says "Still no headset", step 1 or 2 isn't done yet.
+
+SteamVR headsets work the same way with SteamVR set as the OpenXR runtime.
+
+**On the Quest itself (no PC needed while playing):**
+
+1. In Unity Hub add **Android Build Support** (with OpenJDK and Android SDK & NDK Tools) to your 2022.3 install.
+2. Turn on **Developer Mode** for the headset in the Meta Horizon phone app.
+3. Plug the Quest in, accept **Allow USB debugging** in the headset, then **Scruff > VR > Build And Install On Quest**.
+   It applies the Quest settings (Android, IL2CPP, ARM64, Linear colour, landscape), builds `Builds/Scruff.apk` and
+   starts it on the headset. Afterwards it's in the Quest library under **Unknown Sources**.
 
 The game uses Unity's XR `InputDevices` API directly (like the original Gorilla Locomotion), so it doesn't need the
 XR Interaction Toolkit.

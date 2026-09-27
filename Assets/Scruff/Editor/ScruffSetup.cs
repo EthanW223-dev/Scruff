@@ -14,7 +14,7 @@ namespace Scruff.EditorTools
     public static class ScruffSetup
     {
         const string SceneFolder = "Assets/Scruff/Scenes";
-        const string ScenePath = SceneFolder + "/Scruff.unity";
+        internal const string ScenePath = SceneFolder + "/Scruff.unity";
 
         static readonly (int index, string name)[] RequiredLayers =
         {
@@ -71,22 +71,6 @@ namespace Scruff.EditorTools
             EditorUtility.RevealInFinder(Application.persistentDataPath);
         }
 
-        [MenuItem("Scruff/Setup Project For Quest", priority = 40)]
-        static void SetupForQuest()
-        {
-            PlayerSettings.companyName = "Scruff";
-            PlayerSettings.productName = "Scruff";
-            PlayerSettings.SetScriptingBackend(BuildTargetGroup.Android, ScriptingImplementation.IL2CPP);
-            PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
-            PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel29;
-            EditorUserBuildSettings.androidBuildSubtarget = MobileTextureSubtarget.ASTC;
-            AddToBuildSettings();
-            Debug.Log("[Scruff] Android/Quest player settings applied.\n" +
-                      "Next: Edit > Project Settings > XR Plug-in Management > Android tab > tick OpenXR, then under OpenXR add the " +
-                      "'Oculus Touch Controller Profile' and enable the 'Meta Quest Support' feature. Do the same on the PC tab for Link/PCVR. " +
-                      "Then File > Build Settings > Android > Switch Platform.");
-        }
-
         static void CreateScene(bool open, bool askToSave)
         {
             if (askToSave && !EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) return;
@@ -104,7 +88,7 @@ namespace Scruff.EditorTools
                 EditorSceneManager.OpenScene(previous);
         }
 
-        static void AddToBuildSettings()
+        internal static void AddToBuildSettings()
         {
             var scenes = EditorBuildSettings.scenes;
             foreach (var s in scenes)

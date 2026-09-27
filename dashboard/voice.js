@@ -19,6 +19,8 @@ export async function startRecording(onAutoStop) {
     audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
   });
   const ctx = new AudioContext({ sampleRate: 16000 });
+  // A context made outside a click (e.g. from a hotkey) can start suspended and record nothing.
+  await ctx.resume();
   const url = URL.createObjectURL(new Blob([WORKLET], { type: "text/javascript" }));
   await ctx.audioWorklet.addModule(url);
   URL.revokeObjectURL(url);

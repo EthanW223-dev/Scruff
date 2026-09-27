@@ -240,6 +240,7 @@ button { cursor: pointer; }
 textarea {
   flex: 1;
   resize: none;
+  overflow-y: hidden;
   min-height: 40px;
   max-height: 160px;
   padding: 9px 12px;
@@ -502,7 +503,8 @@ body[data-corner^="bottom"] .hud { bottom: 16px; flex-direction: column-reverse;
   font-size: 13.5px;
 }
 .hud-pill img { border-radius: 7px; }
-.hud-status { font-weight: 700; letter-spacing: 0.2px; }
+.hud-pill { white-space: nowrap; max-width: 100%; }
+.hud-status { font-weight: 700; letter-spacing: 0.2px; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
 .hud-keys { color: var(--muted); font-size: 11.5px; }
 .hud[data-mode="listening"] .hud-pill { border-color: var(--danger); animation: glow 1.4s infinite; }
 .hud[data-mode="busy"] .hud-pill img { animation: spin 1.6s linear infinite; }
@@ -535,3 +537,4 @@ body[data-corner^="bottom"] .hud-toasts { flex-direction: column-reverse; }
 .hud-toast.error { border-left-color: var(--danger); }
 .hud-toast.step { font-size: 12.5px; color: var(--muted); padding: 5px 11px; }
 .hud-toast.fade { opacity: 0; transform: translateY(-4px); }
+body.overlay.panel-open .hud-toasts, body.overlay.panel-open .hud-mods { display: none; }

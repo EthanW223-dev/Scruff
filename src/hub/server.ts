@@ -231,7 +231,12 @@ export function startServer(opts: ServerOptions): Promise<http.Server> {
       case "voice": {
         // Push-to-talk from the overlay: 16 kHz mono 16-bit PCM, base64.
         const bytes = Buffer.from(String(msg.pcm ?? ""), "base64");
-        if (bytes.length < 3200) break; // under 0.1 s: a mis-press
+        if (bytes.length < 3200) {
+          // Under 0.1 s: a mis-press, or the mic delivered nothing.
+          ws.send(JSON.stringify({ type: "voice_status", text: "" }));
+          toast(ws, "Didn't hear anything. Is the right microphone selected?", "info");
+          break;
+        }
         // Copied so the samples are 2-byte aligned whatever Buffer.from handed back.
         const pcm = new Int16Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + (bytes.length & ~1)));
         const status = (text: string) => ws.send(JSON.stringify({ type: "voice_status", text }));

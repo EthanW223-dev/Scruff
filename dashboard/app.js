@@ -1,4 +1,8 @@
 // Scruff dashboard: chat with the AI, see and control what it changed in your game.
+// The same page runs inside the in-game overlay (Electron), which provides window.scruffOverlay.
+
+import { applyTheme, paletteFrom } from "./theme.js";
+import { startRecording } from "./voice.js";
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -13,6 +17,8 @@ let ws = null;
 let busy = false;
 let state = null;
 let aiInfo = null;
+const overlay = window.scruffOverlay ?? null;
+if (overlay) document.body.classList.add("overlay");
 
 // ---------- connection ----------
 
@@ -26,7 +32,8 @@ function connect() {
   };
   ws.onopen = () => {
     setBanner(null);
-    if (screenStream) send({ type: "screen", sharing: true });
+    // The overlay can always capture the game window itself.
+    if (screenStream || overlay) send({ type: "screen", sharing: true });
   };
 }
 
@@ -35,6 +42,8 @@ function send(msg) {
 }
 
 function handle(msg) {
+  // The overlay's HUD listens in on everything.
+  window.dispatchEvent(new CustomEvent("scruff", { detail: msg }));
   switch (msg.type) {
     case "hello":
       aiInfo = msg.ai;
@@ -56,6 +65,11 @@ function handle(msg) {
     case "state":
       state = msg;
       renderState();
+      applyTheme(msg.theme);
+      onGameChange(msg.game.attached, msg.theme);
+      break;
+    case "voice_status":
+      voiceStatus(msg.text || null);
       break;
     case "games":
       renderPicker(msg.list);
@@ -141,6 +155,7 @@ function toolLabel(name, input = {}) {
     case "undo_change": return "Undoing";
     case "revert_all_changes": return "Undoing everything";
     case "look_at_screen": return "Looking at your screen";
+    case "style_overlay": return "Styling the overlay to fit this game";
     case "use_game_adapter": return `${String(input.tool ?? "").replace("__", " → ")}`;
     default: return name;
   }
@@ -523,6 +538,12 @@ async function toggleScreen() {
 
 async function captureFrame(id) {
   try {
+    if (overlay) {
+      const data = await overlay.captureGame();
+      if (!data) throw new Error("Couldn't capture the game window.");
+      send({ type: "frame", id, data });
+      return;
+    }
     const video = $("screen-video");
     if (!screenStream || !video.videoWidth) throw new Error("Screen sharing isn't running.");
     const scale = Math.min(1, 1280 / video.videoWidth);
@@ -535,6 +556,46 @@ async function captureFrame(id) {
   } catch (err) {
     send({ type: "frame", id, error: err.message });
   }
+}
+
+// ---------- following the game ----------
+
+let trackedPid = null;
+let paletteFor = null;
+
+/** When the attached game changes: point the overlay at its window and pick colors from it. */
+function onGameChange(attached, theme) {
+  const pid = attached?.pid ?? null;
+  if (pid !== trackedPid) {
+    trackedPid = pid;
+    overlay?.trackGame(pid);
+  }
+  if (pid && paletteFor !== pid && theme?.source === "default") {
+    paletteFor = pid;
+    setTimeout(suggestPalette, 1500); // give the overlay a moment to find the window
+  }
+}
+
+async function suggestPalette() {
+  let data = null;
+  try {
+    if (overlay) data = await overlay.captureGame();
+    else if (screenStream) data = grabVideoFrame();
+  } catch {}
+  if (!data) return;
+  const img = new Image();
+  img.onload = () => send({ type: "suggest_theme", theme: paletteFrom(img) });
+  img.src = `data:image/jpeg;base64,${data}`;
+}
+
+function grabVideoFrame() {
+  const video = $("screen-video");
+  if (!video.videoWidth) return null;
+  const canvas = document.createElement("canvas");
+  canvas.width = 320;
+  canvas.height = Math.round((320 * video.videoHeight) / video.videoWidth);
+  canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.8).split(",")[1];
 }
 
 // ---------- voice ----------
@@ -658,9 +719,39 @@ function sendVoice(text) {
   send({ type: "chat", text });
 }
 
-if (!Recognition) {
-  $("mic").hidden = true;
+// Local push-to-talk: the overlay (Electron has no speech service) and browsers without one.
+let stopRecording = null;
+
+async function toggleLocalVoice() {
+  if (stopRecording) {
+    const stop = stopRecording;
+    stopRecording = null;
+    setListening(false);
+    voiceStatus("Transcribing…");
+    send({ type: "voice", pcm: await stop() });
+    return;
+  }
+  try {
+    window.speechSynthesis?.cancel();
+    stopRecording = await startRecording(() => toggleLocalVoice());
+    setListening(true);
+    voiceStatus("Listening… press the mic (or your talk hotkey) again to send.");
+  } catch (err) {
+    toast(`Couldn't use the microphone: ${err.message}`, "error");
+  }
+}
+
+function setListening(on) {
+  $("mic").classList.toggle("listening", on);
+  window.dispatchEvent(new CustomEvent("scruff:voice", { detail: on ? "listening" : "idle" }));
+}
+
+const localVoice = Boolean(overlay) || !Recognition;
+if (localVoice) {
   $("handsfree").closest("label").hidden = true;
+  $("mic").title = "Push to talk (transcribed on this PC)";
+  $("mic").addEventListener("click", toggleLocalVoice);
+  overlay?.onTalk(toggleLocalVoice);
 } else {
   $("mic").addEventListener("click", togglePushToTalk);
   $("handsfree").addEventListener("change", () => {
@@ -687,6 +778,7 @@ function autosize() {
   const t = $("input");
   t.style.height = "auto";
   t.style.height = Math.min(160, t.scrollHeight) + "px";
+  t.style.overflowY = t.scrollHeight > 160 ? "auto" : "hidden";
 }
 
 function submit() {
@@ -709,9 +801,10 @@ $("input").addEventListener("keydown", (e) => {
   }
 });
 document.addEventListener("keydown", (e) => {
-  if (e.ctrlKey && e.code === "Space" && Recognition) {
+  if (e.ctrlKey && e.code === "Space") {
     e.preventDefault();
-    togglePushToTalk();
+    if (localVoice) toggleLocalVoice();
+    else togglePushToTalk();
   }
 });
 $("stop").addEventListener("click", () => send({ type: "stop" }));
@@ -744,6 +837,10 @@ function setBanner(html, isHtml = false) {
 }
 
 function toast(text, level = "info") {
+  if (overlay) {
+    window.dispatchEvent(new CustomEvent("scruff:toast", { detail: { text, level } }));
+    return;
+  }
   const t = el("div", `toast ${level}`, text);
   $("toasts").append(t);
   setTimeout(() => t.remove(), level === "error" ? 7000 : 3500);
@@ -759,5 +856,13 @@ try {
   $("speak").checked = Boolean(prefs.speak);
 } catch {}
 $("speak").addEventListener("change", save);
+
+if (overlay) {
+  overlay.onPanel((open) => {
+    document.body.classList.toggle("panel-open", open);
+    if (open) setTimeout(() => $("input").focus(), 30);
+  });
+  import("./overlay.js").then((m) => m.startHud({ toolLabel }));
+}
 
 connect();

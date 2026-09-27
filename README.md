@@ -6,20 +6,23 @@ Talk to an AI while you play, and it mods your game live.
 > "Make my health infinite."
 > "Undo that, it's too easy now."
 
-Scruff runs on your PC next to the game. You talk to it from a small dashboard (type, push to
-talk, or hands-free: *"Scruff, give me more ammo"*), and an AI does the modding: Claude with an
-API key, your Claude Pro/Max subscription through Claude Desktop or Claude Code, or any model
-running on your own PC (Ollama, LM Studio, ...).
+Scruff sits on top of your game as a small overlay. Hold a conversation with it by voice
+(push-to-talk hotkey) or text, and an AI does the modding: Claude with an API key, your Claude
+Pro/Max subscription through Claude Desktop or Claude Code, or any model running on your own PC
+(Ollama, LM Studio, ...).
 
 - **Memory editing, for almost any single-player game.** Scruff scans the game's memory for a
   number you can see (gold, health, ammo, XP), narrows it down as the number changes, then sets
   it or freezes it. Same idea as Cheat Engine, except you just ask.
-- **It can see your game.** Share the game window in the dashboard and Claude reads the HUD
+- **An overlay that fits the game.** It follows the game window, stays out of your way (clicks
+  pass through to the game), and restyles itself for each game: colors lifted from the game's
+  own UI, a font that matches its genre, and a corner the game's HUD leaves free.
+- **It can see your game.** The overlay captures the game window so the AI can read the HUD
   itself instead of asking you what the numbers are.
 - **Game adapters** give it real powers in specific games (spawn items, change weather, run
   console commands). Any plugin that speaks a tiny WebSocket protocol can plug in:
   see [docs/ADAPTERS.md](docs/ADAPTERS.md).
-- **Everything is undoable.** Every change is logged in the dashboard with an undo button.
+- **Everything is undoable.** Every change is logged with an undo button.
 
 Single-player only. Scruff refuses to attach when it sees an anti-cheat running or a known online
 game: memory editing gets accounts banned, and cheating in multiplayer ruins it for everyone else.
@@ -35,13 +38,30 @@ npm install
 npm start
 ```
 
-Open **http://localhost:7777** in Chrome or Edge, pick your AI (below), start your game, click
-**Pick a game**, and tell Scruff what you want. If Windows refuses access to the game, run the
-terminal as administrator.
+The overlay appears in the top-right corner. Press **Ctrl+Shift+S** to open it, pick your AI
+(below), start your game, click **Pick a game**, and tell Scruff what you want. If Windows refuses
+access to the game, run the terminal as administrator.
+
+## The overlay
+
+- **Ctrl+Shift+S** opens and closes the panel (chat, mods, undo). **Esc** or clicking the game
+  hands control back to the game.
+- **Ctrl+Shift+Space** is push-to-talk: press, speak, press again. Speech is turned into text
+  on your PC with Whisper; the first use downloads an ~80 MB voice model.
+- Scruff's replies and the values it's holding show up as small notes under the status pill, so
+  you can keep playing.
+- Run the game in **windowed or borderless fullscreen**. No overlay app can draw over
+  *exclusive* fullscreen without hooking into the game, which is exactly what anti-cheat looks
+  for. Most games call borderless "Windowed Fullscreen" or "Borderless" in their video settings.
+- The overlay follows the game window and hides when you alt-tab away (Windows).
+- Ask "make the overlay match the game" or "move Scruff to the bottom left" any time; each game
+  keeps its own look.
+- Prefer a browser tab or a second screen? `npm run hub` starts Scruff without the overlay, and
+  the same interface is at http://localhost:7777 (also from your phone with `npm run hub -- --lan`).
 
 ## Pick your AI
 
-Click the AI chip in the top-left of the dashboard. Switching starts a new chat, and Scruff
+Open the panel and click the AI chip at the top. Switching starts a new chat, and Scruff
 remembers your choice.
 
 **Claude with an API key** (best results). Get a key at
@@ -87,22 +107,23 @@ in a second terminal starts *Scruff's Dungeon*, a tiny terminal RPG. It keeps it
 in raw memory like a real game, and also connects to Scruff as a game adapter. Ask Scruff to
 "give me 5000 gold" or "make it storm", then press `f` to fight and watch the numbers.
 
-## Using it while you play
+## In the browser instead
 
-- **Push to talk:** click the mic (or Ctrl+Space while the dashboard is focused), speak, click again.
-- **Hands-free:** tick *Hands-free* and start requests with "Scruff, …". It keeps listening
-  while you're in the game.
+`npm run hub` runs Scruff without the overlay; open http://localhost:7777 in Chrome or Edge.
+
+- **Push to talk:** click the mic (or Ctrl+Space while the page is focused), speak, click again.
+- **Hands-free:** tick *Hands-free* and start requests with "Scruff, …".
 - **Read replies aloud:** tick it to hear answers without looking away.
-- **Second screen or phone:** `npm start -- --lan` prints a link for your phone. On a phone, use
-  the keyboard's dictation button to talk (browsers only allow the web mic on localhost/HTTPS).
-- **Screen sharing** works best with the game in *borderless windowed* mode; exclusive
-  fullscreen often captures as black.
+- **Phone or second screen:** `npm run hub -- --lan` prints a link for your phone. On a phone,
+  use the keyboard's dictation button to talk.
+- **Screen sharing:** click *Share screen* and pick the game window so the AI can see it.
 
 ## How it works
 
 ```
- dashboard (browser) ──ws──►  Scruff hub (Node, on your PC) ──► Claude API / Ollama / LM Studio / ...
-   chat, voice, mods             │  agent loop + tools
+ overlay (Electron) ─┐
+ dashboard (browser) ─┴─ws──► Scruff hub (Node, on your PC) ──► Claude API / Ollama / LM Studio / ...
+   chat, voice, mods             │  agent loop + tools, Whisper speech-to-text, per-game themes
    screen capture                ├─ memory engine ──► game process (ReadProcessMemory / /proc/pid/mem)
                                  ├─ adapters ◄──ws── plugins inside specific games
  Claude Desktop / Code ──MCP──►  └─ /mcp: the same tools, for your Claude subscription
@@ -117,7 +138,10 @@ in raw memory like a real game, and also connects to Scruff as a game adapter. A
   tools, `adapters.ts` and `screen.ts` connect adapters and the shared screen, `server.ts`
   serves the dashboard.
 - `src/mcp-stdio.ts` is what Claude Desktop launches: it starts the hub if needed and relays MCP.
-- `dashboard/` is the web UI (plain HTML/JS, no build step).
+- `overlay/` is the Electron app: a transparent, click-through window that follows the game
+  window (`win32.mjs`), global hotkeys, the tray icon, and direct game capture.
+- `dashboard/` is the interface (plain HTML/JS, no build step). The overlay loads the same page;
+  `overlay.js` adds the in-game HUD, `theme.js` the per-game look, `voice.js` push-to-talk.
 
 ## Settings
 
@@ -132,16 +156,21 @@ In `.env` (all optional):
 | `SCRUFF_PROVIDER`, `SCRUFF_MODEL` | first that works | Starting AI (`claude`, `ollama`, `lmstudio`, `openai`); a pick in the dashboard overrides it |
 | `SCRUFF_EFFORT` | `medium` | Claude only: `low` replies fastest; `high` thinks harder about tricky scans |
 | `SCRUFF_PORT` | `7777` | |
+| `SCRUFF_HOTKEY_PANEL`, `SCRUFF_HOTKEY_TALK` | `CommandOrControl+Shift+S`, `CommandOrControl+Shift+Space` | Overlay hotkeys ([format](https://www.electronjs.org/docs/latest/api/accelerator)) |
+| `SCRUFF_WHISPER_MODEL` | `onnx-community/whisper-base.en` | Speech-to-text model; `whisper-small` is more accurate but slower |
 
 ## Known gaps
 
 - Addresses only last until the game restarts; you re-scan each session (no pointer scanning yet).
 - No "unknown initial value" scan yet, so the value has to be a number you can see or estimate.
 - macOS isn't supported for memory editing.
-- With a Claude subscription you chat in the Claude app, so the dashboard's own chat box and
-  voice input need an API key or a local model.
-- The Windows memory backend follows the Win32 API docs but has only been exercised against
-  Linux processes so far; please report what happens on your games.
+- With a Claude subscription you chat in the Claude app, so Scruff's own chat box and voice
+  input need an API key or a local model.
+- The overlay can't draw over exclusive-fullscreen games (see above).
+- Following the game window, hiding on alt-tab and handing focus back to the game are Windows
+  features; on Linux the overlay simply covers the main screen.
+- The Windows memory backend and the overlay's window tracking follow the Win32 API docs but have
+  only been run on Linux so far; please report what happens on your games.
 
 ## Development
 
@@ -151,4 +180,5 @@ npm run typecheck
 ```
 
 The live memory tests need permission to read another process's memory (Windows: normally
-fine; Linux: root or `kernel.yama.ptrace_scope=0`).
+fine; Linux: root or `kernel.yama.ptrace_scope=0`). On Linux, install with
+`ONNXRUNTIME_NODE_INSTALL=skip npm install` to skip a 400 MB CUDA download Scruff doesn't use.

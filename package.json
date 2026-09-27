@@ -1,7 +1,7 @@
 {
   "name": "scruff",
   "version": "0.1.0",
-  "description": "Talk to an AI (Claude, your Claude subscription, or a local model) while you play and have it live-mod your game.",
+  "description": "An in-game overlay you talk to (Claude, your Claude subscription, or a local model) that live-mods single-player games.",
   "type": "module",
   "private": true,
   "license": "MIT",
@@ -9,11 +9,12 @@
     "node": ">=22"
   },
   "scripts": {
-    "start": "tsx src/index.ts",
+    "start": "electron overlay/main.mjs",
+    "hub": "tsx src/index.ts",
+    "mcp": "tsx src/mcp-stdio.ts",
     "demo-game": "node examples/demo-game/game.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test \"test/*.test.ts\"",
-    "mcp": "tsx src/mcp-stdio.ts"
+    "test": "tsx --test \"test/*.test.ts\""
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.128.0",

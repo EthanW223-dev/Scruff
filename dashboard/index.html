@@ -121,13 +121,14 @@
 
       <section class="subscription jev">
         <h3>Jev by TypeSafe <span id="jev-status" class="tag">off</span></h3>
-        <p class="muted small">Jev reads each message in a fraction of a second, and when it's a quick command Scruff does it right away instead of waiting on the chat AI: undo, setting or locking values it found, picking your game, and "I have 5 cans, give me 99" then "now it's 4.75". Everything else still goes to the AI above. Get a key at <a href="https://console.typesafe.ai/keys" target="_blank" rel="noreferrer">console.typesafe.ai</a>.</p>
+        <p class="muted small">Jev reads each message in a fraction of a second, and when it's a quick command Scruff does it right away instead of waiting on the chat AI: undo, setting or locking values it found, picking your game, "I have 5 cans, give me 99" then "now it's 4.75", and "give me max health" then "it went down". Everything else still goes to the AI above. Get a key at <a href="https://console.typesafe.ai/keys" target="_blank" rel="noreferrer">console.typesafe.ai</a>.</p>
         <div class="model-row" id="jev-key-row">
           <label for="jev-key">API key</label>
           <input id="jev-key" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your TypeSafe key">
           <button type="button" id="jev-save" class="primary">Save</button>
         </div>
-        <p id="jev-env" class="muted small" hidden>Using TYPESAFE_API_KEY from .env.</p>
+        <p id="jev-problem" class="small jev-problem" hidden></p>
+        <p id="jev-env" class="muted small" hidden>Using TYPESAFE_API_KEY from .env. A key you paste here replaces it.</p>
         <button type="button" id="jev-remove" class="link" hidden>Turn Jev off (forget the key)</button>
       </section>
 

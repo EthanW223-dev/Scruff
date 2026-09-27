@@ -45,6 +45,8 @@ export class GameSession extends EventEmitter {
   searchValue: number | null = null;
   /** What the player wants it to become, once found (so a quick "now it's 4.75" can finish the job). */
   searchGoal: number | null = null;
+  /** "number": searched by what the game shows; "unknown": no number, narrowed by how it changes. */
+  searchKind: "number" | "unknown" | null = null;
   /** Places dropped by live watching since the last search step. */
   watchDropped = 0;
   private watchTimer: NodeJS.Timeout | null = null;
@@ -174,6 +176,7 @@ export class GameSession extends EventEmitter {
       scan: {
         what: this.searchLabel,
         goal: this.searchGoal,
+        kind: this.searchKind,
         watching: this.watchTimer !== null,
         droppedLive: this.watchDropped,
         types: this.scanner.hasResults ? this.scanner.types : [],
@@ -216,6 +219,7 @@ export class GameSession extends EventEmitter {
     if (this.closed) return;
     this.closed = true;
     this.watchLive(false);
+    this.scanner.reset(); // deletes a snapshot file, if any
     clearInterval(this.freezeTimer);
     clearInterval(this.aliveTimer);
     this.backend.close();

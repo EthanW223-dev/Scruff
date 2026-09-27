@@ -143,8 +143,8 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 /**
- * Where the key comes from: TYPESAFE_API_KEY in .env, or one pasted into the AI menu (kept in
- * .scruff/typesafe.json, never sent back to the dashboard).
+ * Where the key comes from: one pasted into the AI menu (kept in .scruff/typesafe.json, never
+ * sent back to the dashboard) or TYPESAFE_API_KEY in .env. A pasted key wins.
  */
 export class JevSettings {
   private saved: string | null = null;
@@ -154,24 +154,23 @@ export class JevSettings {
     private env: NodeJS.ProcessEnv = process.env,
   ) {
     try {
-      this.saved = JSON.parse(fs.readFileSync(file, "utf8")).apiKey ?? null;
+      this.saved = cleanKey(JSON.parse(fs.readFileSync(file, "utf8")).apiKey);
     } catch {
       this.saved = null;
     }
   }
 
   get source(): "env" | "saved" | null {
-    return this.env.TYPESAFE_API_KEY ? "env" : this.saved ? "saved" : null;
+    return this.saved ? "saved" : cleanKey(this.env.TYPESAFE_API_KEY) ? "env" : null;
   }
 
-  client(): JevClient | null {
-    const key = this.env.TYPESAFE_API_KEY || this.saved;
+  client(key = this.saved ?? cleanKey(this.env.TYPESAFE_API_KEY)): JevClient | null {
     if (!key) return null;
     return new JevClient(key, { baseUrl: this.env.TYPESAFE_BASE_URL, model: this.env.TYPESAFE_MODEL });
   }
 
   save(apiKey: string | null): void {
-    this.saved = apiKey?.trim() || null;
+    this.saved = cleanKey(apiKey);
     if (!this.saved) {
       fs.rmSync(this.file, { force: true });
       return;
@@ -181,16 +180,31 @@ export class JevSettings {
   }
 }
 
+/** Tolerates what people paste: spaces, quotes, a "Bearer " prefix, placeholder text. */
+function cleanKey(key: unknown): string | null {
+  if (typeof key !== "string") return null;
+  const k = key.trim().replace(/^["']|["']$/g, "").replace(/^Bearer\s+/i, "").trim();
+  return k && !/\s/.test(k) && !/^(your|paste|<)/i.test(k) ? k : null;
+}
+
+export type JevStatus = "off" | "checking" | "working" | "rejected" | "unreachable";
+
 export interface JevInfo {
   enabled: boolean;
+  status: JevStatus;
   source: "env" | "saved" | "test" | null;
   model: string | null;
   problem: string | null;
 }
 
-/** The Jev the hub uses right now, and switching it on or off from the AI menu. Emits "change". */
+/**
+ * The Jev the hub uses right now. Its status comes from real calls (a key check at start and
+ * after saving, then every fast-path request), so "on" means TypeSafe actually answered.
+ * Emits "change".
+ */
 export class JevService extends EventEmitter {
   private client: Jev | null;
+  private status: JevStatus;
   private problem: string | null = null;
 
   /** `fixed` replaces the key-based client (tests). */
@@ -200,43 +214,74 @@ export class JevService extends EventEmitter {
   ) {
     super();
     this.client = fixed !== undefined ? fixed : settings.client();
+    this.status = !this.client ? "off" : fixed !== undefined ? "working" : "checking";
+    if (this.status === "checking") void this.check();
   }
 
+  /** Null when off or the key was rejected; "unreachable" keeps trying (the network may be back). */
   get current(): Jev | null {
-    return this.problem ? null : this.client;
+    return this.status === "off" || this.status === "rejected" ? null : this.client;
   }
 
   info(): JevInfo {
     return {
-      enabled: Boolean(this.current),
+      enabled: this.status === "working" || this.status === "checking",
+      status: this.status,
       source: this.fixed !== undefined ? (this.fixed ? "test" : null) : this.settings.source,
       model: this.client?.model ?? null,
       problem: this.problem,
     };
   }
 
-  /** Stops using Jev (e.g. the key was rejected) until a new key is saved. */
-  disable(reason: string): void {
-    this.problem = reason;
+  /** How the last call went: null for fine, else the error. */
+  report(err: unknown): void {
+    const [status, problem] = describe(err);
+    if (status === this.status && problem === this.problem) return;
+    this.status = status;
+    this.problem = problem;
     this.emit("change");
   }
 
+  async check(): Promise<void> {
+    const client = this.client;
+    if (!(client instanceof JevClient)) return;
+    try {
+      await client.listModels();
+      if (this.client === client) this.report(null);
+    } catch (err) {
+      if (this.client === client) this.report(err);
+    }
+  }
+
+  /** Saves a key from the AI menu (null forgets it). A key TypeSafe rejects isn't saved. */
   async setKey(key: string | null): Promise<void> {
-    if (this.settings.source === "env") {
-      throw new Error("TYPESAFE_API_KEY in .env is in use; change or remove it there.");
-    }
-    const trimmed = key?.trim() || null;
+    const trimmed = cleanKey(key);
+    if (key && !trimmed) throw new Error("That doesn't look like an API key. Copy it from console.typesafe.ai/keys.");
     if (trimmed) {
-      const probe = new JevClient(trimmed, { baseUrl: process.env.TYPESAFE_BASE_URL });
-      try {
-        await probe.listModels();
-      } catch (err) {
-        throw new Error(err instanceof JevError && err.status === 401 ? "TypeSafe didn't accept that key." : (err as Error).message);
-      }
+      const [status, problem] = await this.settings
+        .client(trimmed)!
+        .listModels()
+        .then(() => describe(null), describe);
+      if (status === "rejected") throw new Error(problem ?? "TypeSafe didn't accept that key.");
+      this.settings.save(trimmed);
+      this.client = this.settings.client();
+      this.status = status;
+      this.problem = problem;
+    } else {
+      this.settings.save(null);
+      this.client = this.settings.client(); // falls back to .env, if it has one
+      this.status = this.client ? "checking" : "off";
+      this.problem = null;
+      if (this.client) void this.check();
     }
-    this.settings.save(trimmed);
-    this.client = this.settings.client();
-    this.problem = null;
     this.emit("change");
   }
+}
+
+function describe(err: unknown): [JevStatus, string | null] {
+  if (!err) return ["working", null];
+  if (err instanceof JevError && (err.status === 401 || err.status === 403)) {
+    return ["rejected", err.status === 401 ? "TypeSafe didn't accept the API key." : err.message];
+  }
+  return ["unreachable", (err as Error).message];
 }

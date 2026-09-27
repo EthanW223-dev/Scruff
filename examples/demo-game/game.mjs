@@ -160,6 +160,8 @@ if (headless) {
     else if (cmd === "earn") gold[0] += Number(arg);
     else if (cmd === "damage") health[0] -= Number(arg);
     else if (cmd === "fight") fight();
+    else if (cmd === "drink") drinkPotion();
+    else if (cmd === "heal") health[0] = Math.min(maxHealth[0], health[0] + Number(arg));
     else if (cmd === "quit") process.exit(0);
     console.log(JSON.stringify(snapshot()));
   });

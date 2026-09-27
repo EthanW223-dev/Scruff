@@ -14,7 +14,9 @@ Pro/Max subscription through Claude Desktop or Claude Code, or any model running
 - **Memory editing, for almost any single-player game.** Scruff scans the game's memory for a
   number you can see (gold, health, ammo, XP, even decimals like 4.75 cans of soup), narrows it
   down as the number changes, then sets it or freezes it. Same idea as Cheat Engine, except you
-  just ask. While you play it quietly drops places that change on their own (timers,
+  just ask. **No number on screen** (a health bar, a hunger meter)? Say "give me max health":
+  Scruff snapshots the game's memory, you play a little and tell it "it went down", "same" or
+  "it went up", and a few answers later it's found and filled. While you play it quietly drops places that change on their own (timers,
   animations), and it checks the game actually shows a change before telling you it worked.
 - **It reads the game's files.** When you pick a game, Scruff works out its engine (Unity,
   Unreal, Godot, GameMaker, RPG Maker, Ren'Py, Source), finds its save and settings folders, and
@@ -113,6 +115,7 @@ without waiting on the chat AI:
 - picking your game ("I'm playing 60 Seconds"),
 - the whole find-and-change loop: "I have 5 soup cans, give me 99" → change it in-game → "now
   it's 4.75" → set,
+- values with no number: "give me max health" → "it went down" → "same" → "it went up" → full,
 - setting, locking, unlocking or reading a value Scruff already found, undo and undo all.
 
 Anything else, or anything Jev isn't sure about, goes to the chat AI, which is told what Jev
@@ -194,7 +197,10 @@ In `.env` (all optional):
 ## Known gaps
 
 - Addresses only last until the game restarts; you re-scan each session (no pointer scanning yet).
-- No "unknown initial value" scan yet, so the value has to be a number you can see or estimate.
+- A search without a number copies the game's writable memory to your temp folder while it runs
+  (about as big as the game's RAM use; deleted as soon as it narrows down, or when Scruff exits).
+- Games that hide or encrypt their values in memory (usually ones with anti-cheat) can't be
+  found this way.
 - macOS isn't supported for memory editing.
 - Only text saves and settings (JSON, INI, XML, ...) can be edited; most games use binary saves,
   where memory editing is the way in. The game reads a save when it loads it, so save and quit

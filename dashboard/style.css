@@ -406,6 +406,8 @@ textarea:focus { box-shadow: 3px 3px 0 var(--accent); }
 .subscription p { margin: 0; }
 .subscription h3 .tag { display: inline-block; margin-left: 6px; padding: 1px 6px; background: var(--surface-2); color: var(--muted); font: 12px/1.4 var(--mono); vertical-align: 3px; letter-spacing: 0; }
 .subscription h3 .tag.on { background: var(--accent); color: var(--accent-ink); }
+.subscription h3 .tag.bad { background: var(--danger); color: #fff; }
+.jev-problem { color: var(--danger); font-family: var(--mono); overflow-wrap: anywhere; }
 .subscription a { color: inherit; }
 .subscription .primary { height: 34px; padding: 0 14px; font-size: 19px; }
 .subscription details { border: 1px solid var(--line); padding: 7px 10px; }

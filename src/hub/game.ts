@@ -215,11 +215,13 @@ export function memoryTools(games: GameManager, status: () => Record<string, unk
     defineTool({
       name: "find_value",
       description:
-        "Find where the game keeps a number (gold, soup cans, ammo, health...). Give `what` it is and the number the " +
-        "game shows right now. The first call searches all memory, checking whole numbers and decimals at once. " +
-        "When many places match, have the player change that number in-game, then call again with the SAME `what` " +
-        "and the new number: Scruff narrows the existing results (it does not start over). For bars without a " +
-        "number, start with min/max and narrow with `change`. Set new_search to start over.",
+        "Find where the game keeps a value (gold, soup cans, ammo, health, hunger...). Give `what` it is and, if the " +
+        "game shows one, the number right now. The first call searches all memory, checking whole numbers and " +
+        "decimals at once. When many places match, have the player change it in-game, then call again with the SAME " +
+        "`what` and the new number: Scruff narrows the existing results (it does not start over). NO NUMBER (a bar, a " +
+        "meter, or the player doesn't know it)? Call with just `what`: Scruff snapshots the game's memory, then narrow " +
+        "with `change` (decreased / increased / unchanged) as the player makes it go down or up. Never give up for lack " +
+        "of a number. Set new_search to start over.",
       input: z.object({
         what: z.string().describe("What the number is, e.g. 'soup cans'. Keep it the same while narrowing."),
         value: z.number().optional().describe("The number the game shows now, exactly (decimals included)"),
@@ -251,6 +253,7 @@ export function memoryTools(games: GameManager, status: () => Record<string, unk
         const s = games.requireSession();
         const key = what.trim().toLowerCase();
         const narrowing = !new_search && s.searchLabel === key && s.scanner.count > 0;
+        let unknown = false;
         let request: ScanRequest;
         if (narrowing) {
           request = change
@@ -259,8 +262,8 @@ export function memoryTools(games: GameManager, status: () => Record<string, unk
               : { mode: change }
             : value !== undefined
               ? // The player changed it: keep only places that moved to the new number, not ones that
-                // happened to hold it all along.
-                { mode: value !== s.searchValue ? "changed_to" : "exact", value }
+                // happened to hold it all along. (After a search without a number, just match it.)
+                { mode: s.searchValue !== null && value !== s.searchValue ? "changed_to" : "exact", value }
               : { mode: "range", min, max };
           if (request.mode === "range" && (min === undefined || max === undefined)) {
             throw new Error("Give the new number (value), a min/max range, or how it changed (change).");
@@ -268,29 +271,47 @@ export function memoryTools(games: GameManager, status: () => Record<string, unk
           ctx.progress(`Narrowing ${s.scanner.count.toLocaleString()} places down…`);
           await trackScan((p) => s.scanner.refine(request, p));
         } else {
-          if (value === undefined && (min === undefined || max === undefined)) {
-            throw new Error("To start a search, give the number the game shows (value), or min/max if it's only a bar.");
-          }
-          request = value !== undefined ? { mode: "exact", value } : { mode: "range", min, max };
-          ctx.progress(`Searching ${s.target.name} for ${what}…`);
-          await trackScan((p) => s.scanner.firstScan(type === "auto" ? AUTO_TYPES : [type], request, p));
-          s.searchLabel = key;
+          s.searchValue = null;
           s.searchGoal = null;
+          if (value === undefined && min === undefined && max === undefined) {
+            // No number to go on: remember everything, then narrow by how it changes.
+            unknown = true;
+            ctx.progress(`Taking a snapshot of ${s.target.name}'s memory…`);
+            await trackScan((p) => s.scanner.unknownScan(type === "auto" ? AUTO_TYPES : [type], p));
+          } else {
+            if (value === undefined && (min === undefined || max === undefined)) {
+              throw new Error("Give both min and max, or the number the game shows (value), or neither to search without a number.");
+            }
+            request = value !== undefined ? { mode: "exact", value } : { mode: "range", min, max };
+            ctx.progress(`Searching ${s.target.name} for ${what}…`);
+            await trackScan((p) => s.scanner.firstScan(type === "auto" ? AUTO_TYPES : [type], request, p));
+          }
+          s.searchLabel = key;
+          s.searchKind = unknown ? "unknown" : "number";
         }
         if (value !== undefined) s.searchValue = value;
         if (goal !== undefined) s.searchGoal = goal;
         s.watchLive(steady);
 
         const count = s.scanner.count;
+        const byChange = s.searchKind === "unknown" && value === undefined;
         const next =
           count === 0
-            ? narrowing
+            ? byChange
+              ? `Nothing fits that. It may have moved the other way, or changed and changed back. Start over with ` +
+                `new_search: true (just what), then narrow step by step.`
+              : narrowing
               ? `Nothing matched: no place went from the last number to this one. Check the number with the player, ` +
                 `or start over with new_search: true and the current number.`
               : `Nothing holds that number. Double-check it (exactly as shown); if it's a bar with no number, use min/max.`
             : count <= FEW
               ? `Found it. Set it with write_value (or freeze_value to hold it) on these addresses, labelled "${what}".`
-              : `${count.toLocaleString()} places still match. Ask the player to change the ${what} in-game (use, ` +
+              : byChange
+                ? `${count.toLocaleString()} places could be it. Ask the player to make the ${what} go down or up in-game ` +
+                  `(take damage, eat, spend, wait...), then call find_value with what: "${what}" and change: decreased or ` +
+                  `increased. When nothing happened to it, change: unchanged drops everything that moved on its own. ` +
+                  `If the player can read a number for it now, pass value instead.`
+                : `${count.toLocaleString()} places still match. Ask the player to change the ${what} in-game (use, ` +
                 `spend, eat, drop or pick up some), then call find_value again with what: "${what}" and the new number.` +
                 (steady && count <= WATCH_LIMIT
                   ? ` Meanwhile Scruff watches them live and drops ones that change on their own, so calling ` +
@@ -298,7 +319,7 @@ export function memoryTools(games: GameManager, status: () => Record<string, unk
                   : "");
         return json({
           what,
-          search: narrowing ? "narrowed" : "started",
+          search: narrowing ? "narrowed" : unknown ? "started without a number (snapshot)" : "started",
           count,
           dropped_live_since_last_step: narrowing ? s.watchDropped : undefined,
           by_type: s.scanner.countsByType(),

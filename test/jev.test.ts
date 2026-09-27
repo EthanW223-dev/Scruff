@@ -278,7 +278,9 @@ test("when Jev isn't sure, or TypeSafe is down, the chat model takes the message
   brainReplies.push("Sure.");
   turn = await chat("undo everything");
   assert.equal(turn.reply, "Sure.");
-  assert.equal(hub.jev.info().enabled, true, "an overload doesn't turn Jev off");
+  assert.ok(turn.events.some((e) => e.type === "notice" && /Jev returned 529.*chat AI is taking this one/.test(e.text)), "says why");
+  assert.equal(hub.jev.info().status, "unreachable", "the AI menu shows it");
+  assert.ok(hub.jev.current, "an overload doesn't turn Jev off: the next message tries again");
 
   api.failNext(-1);
   brainReplies.push("Still here.");
@@ -286,4 +288,73 @@ test("when Jev isn't sure, or TypeSafe is down, the chat model takes the message
   turn = await chat("undo everything");
   assert.equal(turn.reply, "Still here.");
   assert.ok(Date.now() - started < 4500, "a hung TypeSafe doesn't hold the chat model up for long");
+
+  // Back to normal: the status recovers on the next good answer.
+  script = () => ({ intent: "other" });
+  brainReplies.push("ok");
+  await chat("hello again");
+  assert.equal(hub.jev.info().status, "working");
+});
+
+test("keys: a pasted key replaces .env's, TypeSafe checks it, a rejected one isn't kept", async () => {
+  const { JevService, JevSettings } = await import("../src/hub/jev.ts");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "scruff-jev-key-"));
+  const mock = mockTypeSafe(() => ({}));
+  const url = await mock.listen();
+  try {
+    const env = { TYPESAFE_API_KEY: "wrong-env-key", TYPESAFE_BASE_URL: url };
+    const service = new JevService(new JevSettings(path.join(dir, "k.json"), env));
+    await waitFor(() => service.info().status !== "checking", "key check");
+    assert.equal(service.info().status, "rejected", "a bad .env key shows as rejected, not 'on'");
+    assert.equal(service.current, null);
+
+    await assert.rejects(service.setKey("also-wrong"), /didn't accept/);
+    await service.setKey('  "Bearer ts-test-key" ');
+    assert.deepEqual(
+      { status: service.info().status, source: service.info().source },
+      { status: "working", source: "saved" },
+      "the pasted key wins over .env",
+    );
+    assert.ok(!JSON.stringify(service.info()).includes("ts-test-key"), "the key is never sent back");
+    await assert.rejects(service.setKey("paste your key here"), /doesn't look like an API key/);
+  } finally {
+    mock.close();
+  }
+});
+
+test("no number: 'give me max health' snapshots memory, narrows by down/same/up, and fills the bar", async () => {
+  script = (state, q) => {
+    const msg: string = state.player_message;
+    if (/max health/.test(msg)) return { intent: "change_no_number", wanted_number: "max", thing: optionWhere(q.thing, (d) => d === "health") };
+    if (/went down/.test(msg)) return { intent: "report_direction", direction: "decreased" };
+    if (/went up/.test(msg)) return { intent: "report_direction", direction: "increased" };
+    if (/same/.test(msg)) return { intent: "report_direction", direction: "unchanged" };
+    return { intent: "other" };
+  };
+  const calls = model.calls.length;
+  let turn = await chat("give me max health");
+  assert.deepEqual(turn.tools, ["jev", "find_value"]);
+  assert.match(turn.reply, /make it go down or up/);
+  assert.ok(hub.games.session!.scanner.isSnapshot, "no number: a snapshot");
+
+  // The player plays: takes hits, waits, drinks a potion; tells Scruff only which way it went.
+  const moves = ["fight", "wait", "fight", "heal 4", "wait", "fight", "heal 4", "fight", "wait", "fight"];
+  const said: string[] = [];
+  for (const move of moves) {
+    const before = (await gameCommand("print")).health;
+    if (move === "wait") await new Promise((r) => setTimeout(r, 300));
+    else await gameCommand(move);
+    const after = (await gameCommand("print")).health;
+    const report = after < before ? "it went down" : after > before ? "it went up" : "it's the same";
+    turn = await chat(report);
+    said.push(`${report} → ${turn.reply.slice(0, 40)}`);
+    if (/^(Set|Locked) health/.test(turn.reply)) break;
+  }
+  assert.match(turn.reply, /^Set health to 100 \(my guess at full\)/, said.join("\n"));
+  assert.equal((await gameCommand("print")).health, 100, "the game's health bar is full");
+  // It's the real thing: when the game changes its health, the found value follows.
+  await gameCommand("damage 10");
+  const found = hub.games.state().attached!.watch.filter((w) => w.label === "health");
+  assert.ok(found.length >= 1 && found.every((w) => w.value === 90), JSON.stringify(found));
+  assert.equal(model.calls.length, calls, "no chat model involved");
 });

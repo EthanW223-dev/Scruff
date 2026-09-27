@@ -1,4 +1,5 @@
 import { setImmediate as yieldToEventLoop } from "node:timers/promises";
+import { Snapshot } from "./snapshot.ts";
 import {
   TYPE_ALIGN,
   TYPE_SIZE,
@@ -54,6 +55,8 @@ const SPARSE_THRESHOLD = 64;
 const YIELD_EVERY_MS = 30;
 /** Live watching only runs on result sets this small, so a look stays cheap. */
 export const WATCH_LIMIT = 20_000;
+/** A snapshot turns into a plain result list once this few candidates are left. */
+const LIST_AT = 2_000_000;
 
 type Predicate = (value: number, previous: number) => boolean;
 
@@ -112,6 +115,8 @@ class TypedResults {
  */
 export class Scanner {
   private parts: TypedResults[] = [];
+  /** Set while narrowing a search that started without a number. */
+  private snap: Snapshot | null = null;
   private busy = false;
 
   constructor(
@@ -120,11 +125,17 @@ export class Scanner {
   ) {}
 
   get hasResults(): boolean {
-    return this.parts.length > 0;
+    return this.parts.length > 0 || this.snap !== null;
+  }
+
+  /** True while candidates are too many to list (a search without a number, early on). */
+  get isSnapshot(): boolean {
+    return this.snap !== null;
   }
 
   /** The types that still have results (all scanned types before anything is found). */
   get types(): ValueType[] {
+    if (this.snap) return this.snap.liveTypes();
     const live = this.parts.filter((p) => p.count > 0).map((p) => p.type);
     return live.length ? live : this.parts.map((p) => p.type);
   }
@@ -136,7 +147,7 @@ export class Scanner {
   }
 
   get count(): number {
-    return this.parts.reduce((n, p) => n + p.count, 0);
+    return this.snap ? this.snap.count : this.parts.reduce((n, p) => n + p.count, 0);
   }
 
   get truncated(): boolean {
@@ -145,9 +156,12 @@ export class Scanner {
 
   reset(): void {
     this.parts = [];
+    this.snap?.close();
+    this.snap = null;
   }
 
   countsByType(): Partial<Record<ValueType, number>> {
+    if (this.snap) return this.snap.countsByType();
     return Object.fromEntries(this.parts.map((p) => [p.type, p.count]));
   }
 
@@ -161,6 +175,7 @@ export class Scanner {
     }
     const list = [...new Set(Array.isArray(types) ? types : [types])];
     return this.exclusive(async () => {
+      this.reset();
       const started = performance.now();
       const bounds = new Map(list.map((t) => [t, firstScanBounds(t, request)]));
       // Integer types can't hold 5.25: skip them rather than scanning for nothing.
@@ -211,8 +226,22 @@ export class Scanner {
     });
   }
 
+  /**
+   * A search without a number: remembers every plausible value in the game's memory, to narrow
+   * down by how the thing changes (decreased, increased, unchanged...).
+   */
+  async unknownScan(types: ValueType[], onProgress?: (fraction: number) => void, dir?: string): Promise<ScanSummary> {
+    return this.exclusive(async () => {
+      this.reset();
+      const started = performance.now();
+      this.snap = await Snapshot.take(this.backend, types, onProgress, dir);
+      return this.summary(started, this.snap.bytes);
+    });
+  }
+
   async refine(request: ScanRequest, onProgress?: (fraction: number) => void): Promise<ScanSummary> {
-    if (!this.parts.length) throw new Error("No scan results yet. Run a new scan first.");
+    if (!this.hasResults) throw new Error("No scan results yet. Run a new scan first.");
+    if (this.snap) return this.exclusive(() => this.refineSnapshot(request, onProgress));
     return this.exclusive(async () => {
       const started = performance.now();
       const regions = this.backend.regions();
@@ -228,6 +257,24 @@ export class Scanner {
       onProgress?.(1);
       return this.summary(started, scanned);
     });
+  }
+
+  private async refineSnapshot(request: ScanRequest, onProgress?: (fraction: number) => void): Promise<ScanSummary> {
+    const snap = this.snap!;
+    const started = performance.now();
+    const predicates = new Map(snap.types.map((t) => [t as ValueType, buildPredicate(t, request)]));
+    await snap.compare(this.backend, predicates, onProgress);
+    if (snap.count <= Math.min(LIST_AT, this.maxResults)) {
+      // Few enough to list: from here on it's an ordinary result set.
+      this.parts = snap.types.map((t) => {
+        const part = new TypedResults(t, this.maxResults);
+        snap.forEach(t, (address, value) => part.push(address, value));
+        return part;
+      });
+      snap.close();
+      this.snap = null;
+    }
+    return this.summary(started, snap.bytes);
   }
 
   private async refinePart(
@@ -304,7 +351,7 @@ export class Scanner {
    * how many were dropped, or null when a scan is running or there are too many to watch.
    */
   watchTick(maxMoves = 3, limit = WATCH_LIMIT): number | null {
-    if (this.busy || this.count === 0 || this.count > limit) return null;
+    if (this.busy || this.snap || this.count === 0 || this.count > limit) return null;
     let dropped = 0;
     const buf = Buffer.alloc(8);
     for (const part of this.parts) {

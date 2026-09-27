@@ -75,7 +75,7 @@ export async function createHub(opts: HubOptions) {
       games,
       tools,
       chatReady: () => opts.router?.describe().ready ?? true,
-      onDisabled: (reason) => jev.disable(reason),
+      report: (err) => jev.report(err),
     }),
   });
 

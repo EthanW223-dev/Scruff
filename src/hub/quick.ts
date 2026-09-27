@@ -1,4 +1,5 @@
 import type { AgentEvent } from "./agent.ts";
+import type { GameSession } from "../memory/session.ts";
 import type { GameManager } from "./game.ts";
 import { JEV_MAX_OPTIONS, JevError, type ChoiceAnswer, type Jev, type JevQuestion } from "./jev.ts";
 import type { HubTool } from "./tools.ts";
@@ -28,8 +29,8 @@ export interface QuickPathOptions {
   tools: HubTool[];
   /** Whether a chat model is set up to take messages Jev can't handle. */
   chatReady: () => boolean;
-  /** Called once when Jev stops working (bad key), so the UI can say so. */
-  onDisabled?: (reason: string) => void;
+  /** How each Jev call went (null when fine), so the AI menu shows the real status. */
+  report?: (err: unknown) => void;
 }
 
 /** Act on an intent only when Jev is at least this confident. */
@@ -41,7 +42,12 @@ const MAX_PROCESSES = 200;
 const PROCESS_CACHE_MS = 10_000;
 const JEV_BUDGET_MS = 3000;
 const PHRASE_STOP = new Set(
-  "and but so then give make set to can could please now it its it's i im i'm me my we the a an of for in on at with is are was left more".split(" "),
+  (
+    "and but so then give make set to can could please now it its it's i im i'm i've ive me my we our you your the a an " +
+    "of for in on at with is are was be left more less max maximum full infinite unlimited lots tons lot bunch " +
+    "lock locked freeze frozen unlock keep want need get got have has had some all never runs run out go goes went " +
+    "down up same still value amount number how much many what whats what's"
+  ).split(" "),
 );
 const WORD_NUMBERS: Record<string, number> = {
   zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
@@ -103,6 +109,14 @@ export function findPhrases(text: string, numbers: Mention[]): string[] {
     if (tail.length) addAll(tail);
   }
   for (const m of text.toLowerCase().matchAll(/\b(?:my|the|our)\s+([a-z][a-z' -]{1,30})/g)) addAll(take(words(m[1])));
+  // Runs of words between command words: "give me max health" → "health", "more soup cans" → "soup cans".
+  let run: string[] = [];
+  for (const w of [...words(text.replace(/[\d.,]+/g, " , ")), "and"]) {
+    if (PHRASE_STOP.has(w) || WORD_NUMBERS[w] !== undefined) {
+      if (run.length && run.length <= 3) addAll(run);
+      run = [];
+    } else run.push(w);
+  }
   return [...out].filter((p) => p.length > 1).slice(0, 20);
 }
 
@@ -111,12 +125,22 @@ export function maxFor(current: number): number {
   return Math.abs(current) < 1000 ? 999 : Math.abs(current) < 100_000 ? 99_999 : 999_999;
 }
 
+/** "Full" for a bar: bars are usually out of 1, 100 or 1000. */
+export function barMax(current: number): number {
+  return current <= 1 ? 1 : current <= 100 ? 100 : current <= 1000 ? 1000 : maxFor(current);
+}
+
+/** What the player wants a value to become: a number, as much as possible, or never running out. */
+type Goal = number | "max" | "infinite";
+
 const fmt = (n: number) => (Number.isInteger(n) ? n.toLocaleString("en-US") : String(Math.round(n * 1000) / 1000));
 
 export function quickPath(opts: QuickPathOptions): QuickHandler {
   const tools = new Map(opts.tools.map((t) => [t.name, t]));
-  let disabled: string | null = null;
+  let lastError: string | null = null;
   let callId = 0;
+  /** The goal for the current search, when the fast path started it ("max" and "infinite" can't go in find_value). */
+  let want: { what: string; goal: Goal; bar: boolean; session: GameSession } | null = null;
   // Listing processes spawns PowerShell on Windows (about a second); reuse it for a little while.
   let processCache: { at: number; list: Awaited<ReturnType<GameManager["listGames"]>> } | null = null;
   const runningPrograms = async () => {
@@ -128,7 +152,7 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
 
   return async (text, emit, signal) => {
     const jev = opts.jev();
-    if (!jev || disabled) return { handled: false };
+    if (!jev) return { handled: false };
     const { games } = opts;
     const session = games.session && !games.session.isClosed ? games.session : null;
     const supported = games.state().supported.ok;
@@ -139,6 +163,7 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
     const watch = session ? games.state().attached?.watch ?? [] : [];
     const labels = [...new Set(watch.map((w) => w.label))].slice(0, 60);
     const search = session?.searchLabel && session.scanner.count > 0 ? session.searchLabel : null;
+    if (want && want.session !== session) want = null;
     const hasChanges = Boolean(session?.changes.some((c) => !c.undone));
     const wantsGame = !session || /\b(play|playing|game|switch|attach|connect|pick|open)\b/i.test(text);
     const processes = supported && wantsGame ? await runningPrograms() : [];
@@ -148,10 +173,16 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
       intents.find_and_change =
         "The player says how much of something they have right now and wants Scruff to change it " +
         "(for example 'I have 5 soup cans, give me 99' or 'I've got 350 gold, max it out').";
+      intents.change_no_number =
+        "The player wants something in the game changed (more, full, max, infinite, or a set amount) but doesn't say " +
+        "how much they have right now (for example 'give me max health', 'make my food infinite', 'I want more ammo').";
       if (search) {
         intents.report_new_amount =
-          "The player tells Scruff the new amount of `search.what` they have now, after changing it in the game " +
-          "(for example 'ok now it's 4.75', 'I have 3 now' or just a number).";
+          "The player tells Scruff the amount of `search.what` the game shows now " +
+          "(for example 'ok now it's 4.75', 'it says 73', 'I have 3 now' or just a number).";
+        intents.report_direction =
+          "The player says `search.what` went down, went up, or stayed the same in the game, without giving a number " +
+          "(for example 'it went down', 'I took damage', 'it's the same', 'it filled back up').";
       }
       if (labels.length) {
         intents.set_known = "The player wants one of the `found_values` set to a specific amount or to the max.";
@@ -169,15 +200,15 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
       intents.pick_game = "The player names the game they are playing, or asks Scruff to connect to a game.";
     }
     if (!Object.keys(intents).length) return { handled: false };
-    intents.other =
-      "Anything else: questions, advice, changing something without saying how much they have now, how the " +
-      "overlay looks, or anything unclear.";
+    intents.other = "Anything else: questions, advice, how the overlay looks, or anything unclear.";
 
     const state = {
       player_message: text,
       game: session ? session.target.title || session.target.name : null,
       found_values: labels.length ? watch.map((w) => ({ name: w.label, now: w.value, locked: w.frozen })) : undefined,
-      search: search ? { what: search, last_number: session!.searchValue } : undefined,
+      search: search
+        ? { what: search, by: session!.searchKind === "unknown" ? "how it changes (no number)" : "its number", last_number: session!.searchValue ?? undefined }
+        : undefined,
     };
 
     const numberOptions = Object.fromEntries(numbers.map((n, i) => [`n${i}`, `${n.text} (in "…${n.context}…")`]));
@@ -190,7 +221,8 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
         instructions: "What amount does the player want it to become?",
         criteria: {
           ...numberOptions,
-          max: "As much as possible, with no number given (max, infinite, unlimited, tons, a lot).",
+          max: "As much as possible or full, with no number given (max, full, more, tons, a lot).",
+          infinite: "It should never run out or go down (infinite, unlimited, never dies, god mode).",
           none: "The player doesn't ask for a new amount.",
         },
       };
@@ -206,6 +238,18 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
           type: "choice",
           instructions: "Which phrase names the thing in the game the player is talking about (an item, money, a stat)?",
           criteria: { ...Object.fromEntries(phrases.map((p, i) => [`p${i}`, p])), none: "None of these names it." },
+        };
+      }
+      if (search) {
+        questions.direction = {
+          type: "choice",
+          instructions: "How does the player say `search.what` changed in the game?",
+          criteria: {
+            decreased: "It went down (dropped, lost some, took damage, used or spent some).",
+            increased: "It went up (gained some, healed, filled up, picked some up).",
+            unchanged: "It stayed the same (nothing happened to it).",
+            none: "The message doesn't say how it changed.",
+          },
         };
       }
       if (labels.length) {
@@ -238,12 +282,15 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
       answers = (await jev.ask(state, questions, budget)).answers as Record<string, ChoiceAnswer>;
     } catch (err) {
       if (signal.aborted) throw err;
-      if (err instanceof JevError && (err.status === 401 || err.status === 403)) {
-        disabled = err.message;
-        opts.onDisabled?.(err.message);
-      }
+      opts.report?.(err);
+      const message = err instanceof JevError ? err.message : `Jev didn't answer within ${JEV_BUDGET_MS / 1000} seconds.`;
+      // Say so once per kind of failure, so it's clear why the chat AI is answering.
+      if (message !== lastError) emit({ type: "notice", text: `${message} The chat AI is taking this one.` });
+      lastError = message;
       return { handled: false };
     }
+    opts.report?.(null);
+    lastError = null;
     const ms = Math.round(performance.now() - started);
     const intent = answers.intent;
     if (!intent || intent.choice === "other" || intent.confidence < ACT || !intents[intent.choice]) {
@@ -257,6 +304,7 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
     const numberAt = (key: string | null) => (key && key.startsWith("n") ? numbers[Number(key.slice(1))]?.value ?? null : null);
     const currentNumber = numberAt(pick("current_number"));
     const wantedKey = pick("wanted_number");
+    const wanted: Goal | null = wantedKey === "max" || wantedKey === "infinite" ? wantedKey : numberAt(wantedKey);
     const phrase = pick("thing", 0.5);
     const thing = phrase ? phrases[Number(phrase.slice(1))] : null;
     const valueKey = pick("which_value");
@@ -304,24 +352,39 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
       return { handled: true, log: `Player said "${text}"; no chat AI was set up to answer.` };
     }
 
-    /** Writes the goal to every remaining result, then says honestly whether it held. */
-    const writeGoal = async (what: string, goal: number, addresses: string[]) => {
-      const out = await run("write_value", { addresses, value: goal, label: what });
-      if (!out.ok) return notHandled(`Jev tried to set ${what} to ${fmt(goal)}, but the write failed: ${out.text}`);
+    /** A goal as a number: "max" depends on what it holds now, and on whether it's a bar. */
+    const resolve = (goal: Goal, current: number, bar: boolean) =>
+      typeof goal === "number" ? goal : bar ? barMax(current) : maxFor(current);
+
+    /**
+     * Sets the goal on the remaining results ("infinite" locks it there), then says honestly
+     * whether it held. For bars, decimals are the likely match, so they go first.
+     */
+    const writeGoal = async (what: string, goal: Goal, found: { address: string; value: number; type: string }[], bar: boolean) => {
+      const decimals = found.filter((f) => f.type === "float" || f.type === "double");
+      const targets = bar && decimals.length ? decimals : found;
+      const plausible = targets.map((t) => t.value).filter((v) => Math.abs(v) <= 100_000);
+      const value = resolve(goal, plausible.length ? Math.max(...plausible) : targets[0].value, bar);
+      const shown = `${fmt(value)}${typeof goal === "number" ? "" : bar ? " (my guess at full)" : ""}`;
+      if (goal === "infinite") {
+        for (const t of targets) {
+          const out = await run("freeze_value", { address: t.address, value, label: what });
+          if (!out.ok) return notHandled(`Jev tried to lock ${what}, but: ${out.text}`);
+        }
+        return say(`Locked ${what} at ${shown}, so it won't go down. Does the game show it? Say "unlock ${what}" to let it change again.`);
+      }
+      const out = await run("write_value", { addresses: targets.map((t) => t.address), value, label: what });
+      if (!out.ok) return notHandled(`Jev tried to set ${what} to ${fmt(value)}, but the write failed: ${out.text}`);
       const report = JSON.parse(out.text) as { results: { warning?: string; error?: string }[] };
       const held = report.results.filter((r) => !r.warning && !r.error).length;
       if (!held) {
-        return say(
-          `I set ${what} to ${fmt(goal)}, but the game put it straight back. Say "lock ${what}" and I'll hold it there.`,
-        );
+        return say(`I set ${what} to ${fmt(value)}, but the game put it straight back. Say "lock ${what}" and I'll hold it there.`);
       }
       return say(
-        `Set ${what} to ${fmt(goal)}${addresses.length > 1 ? ` (${addresses.length} places)` : ""}. ` +
-          `Does the game show ${fmt(goal)} now? Some games only redraw the number after you use or open something.`,
+        `Set ${what} to ${shown}${targets.length > 1 ? ` (${targets.length} places)` : ""}. ` +
+          `Does the game show it now? Some games only redraw after you use or open something. If not, say "undo".`,
       );
     };
-    const goalFrom = (current: number | null): number | null =>
-      wantedKey === "max" ? maxFor(current ?? 0) : numberAt(wantedKey);
 
     switch (intent.choice) {
       case "undo_last": {
@@ -355,14 +418,14 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
         return say(values.length ? `${label} is ${fmt(values[0])}${entries[0].frozen ? " (locked)" : ""}.` : `I can't read ${label} right now.`);
       }
       case "set_known": {
-        const goal = goalFrom(entries[0]?.value ?? null);
-        if (!entries.length || goal === null) return notHandled();
-        return writeGoal(label!, goal, entries.map((e) => e.address));
+        if (!entries.length || wanted === null) return notHandled();
+        const bar = Boolean(want && want.what === label && want.bar);
+        return writeGoal(label!, wanted, entries.map((e) => ({ address: e.address, value: e.value ?? 0, type: e.type })), bar);
       }
       case "freeze_known": {
-        if (!entries.length) return notHandled();
-        const goal = goalFrom(entries[0].value ?? null) ?? entries[0].value;
-        if (typeof goal !== "number") return notHandled();
+        if (!entries.length || typeof entries[0].value !== "number") return notHandled();
+        const current = entries[0].value;
+        const goal = wanted === null || wanted === "infinite" ? current : resolve(wanted, current, Boolean(want?.bar && want.what === label));
         for (const e of entries) {
           const out = await run("freeze_value", { address: e.address, value: goal, label: label! });
           if (!out.ok) return notHandled(`Jev tried to lock ${label}, but: ${out.text}`);
@@ -376,17 +439,47 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
         return say(`Unlocked ${label}.`);
       }
       case "find_and_change": {
-        const goal = goalFrom(currentNumber);
-        if (currentNumber === null || goal === null || !thing) return notHandled();
-        const out = await run("find_value", { what: thing, value: currentNumber, new_search: true, goal });
+        if (currentNumber === null || wanted === null || !thing) return notHandled();
+        const out = await run("find_value", {
+          what: thing,
+          value: currentNumber,
+          new_search: true,
+          ...(typeof wanted === "number" ? { goal: wanted } : {}),
+        });
         if (!out.ok) return notHandled(`Jev started a search for ${thing} = ${fmt(currentNumber)}, but it failed: ${out.text}`);
-        return afterSearch(thing, goal, JSON.parse(out.text), currentNumber);
+        want = { what: thing.toLowerCase(), goal: wanted, bar: false, session: session! };
+        return afterSearch(thing, JSON.parse(out.text), { value: currentNumber });
+      }
+      case "change_no_number": {
+        // No number yet: snapshot now, so both "it says 73" and "it went down" can narrow it next.
+        if (!thing) return notHandled();
+        const goal = wanted ?? "max";
+        const out = await run("find_value", {
+          what: thing,
+          new_search: true,
+          steady: false,
+          ...(typeof goal === "number" ? { goal } : {}),
+        });
+        if (!out.ok) return notHandled(`Jev tried to start a search for ${thing} without a number, but: ${out.text}`);
+        want = { what: thing.toLowerCase(), goal, bar: true, session: session! };
+        return say(
+          `On it. Tell me the number the game shows for ${thing}, or if it's a bar or has no number, make it go down or up ` +
+            `in the game (take a hit, eat, use one...) and tell me which way it went.`,
+        );
       }
       case "report_new_amount": {
         if (currentNumber === null || !search) return notHandled();
         const out = await run("find_value", { what: search, value: currentNumber });
         if (!out.ok) return notHandled(`Jev tried to narrow ${search} to ${fmt(currentNumber)}, but: ${out.text}`);
-        return afterSearch(search, session!.searchGoal, JSON.parse(out.text), currentNumber);
+        if (want?.what === search) want.bar = false; // it has a number after all
+        return afterSearch(search, JSON.parse(out.text), { value: currentNumber });
+      }
+      case "report_direction": {
+        const direction = pick("direction") as "decreased" | "increased" | "unchanged" | null;
+        if (!direction || !search) return notHandled();
+        const out = await run("find_value", { what: search, change: direction, steady: false });
+        if (!out.ok) return notHandled(`Jev tried to narrow ${search} (${direction}), but: ${out.text}`);
+        return afterSearch(search, JSON.parse(out.text), { direction });
       }
       default:
         return notHandled();
@@ -394,25 +487,36 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
 
     async function afterSearch(
       what: string,
-      goal: number | null,
-      result: { count: number; addresses: { address: string }[] },
-      value: number,
+      result: { count: number; addresses: { address: string; value: number; type: string }[] },
+      step: { value?: number; direction?: "decreased" | "increased" | "unchanged" },
     ): Promise<QuickOutcome> {
       if (result.count === 0) {
-        return notHandled(`Jev searched for ${what} = ${fmt(value)} and nothing matched.`);
+        return notHandled(
+          step.value !== undefined
+            ? `Jev searched for ${what} = ${fmt(step.value)} and nothing matched.`
+            : `Jev narrowed ${what} by "${step.direction}" and nothing was left: it may have moved the other way, or twice.`,
+        );
       }
+      const mine = want && want.what === what.toLowerCase() ? want : null;
       if (result.count <= FEW) {
-        const addresses = result.addresses.map((a) => a.address);
+        const goal: Goal | null = mine?.goal ?? session!.searchGoal;
         if (goal === null) {
+          const addresses = result.addresses.map((a) => a.address);
           return opts.chatReady()
             ? { handled: false, note: `Jev narrowed ${what} to ${result.count} place(s): ${addresses.join(", ")}. The player hasn't said what to set it to here.` }
             : say(`Found ${what} (${result.count} place${result.count > 1 ? "s" : ""}). What should I set it to?`);
         }
-        return writeGoal(what, goal, addresses);
+        return writeGoal(what, goal, result.addresses, Boolean(mine?.bar));
+      }
+      const n = result.count.toLocaleString("en-US");
+      if (step.value !== undefined) {
+        return say(`${n} places hold ${fmt(step.value)}. Change the ${what} in the game (use, spend or pick some up), then tell me the new number.`);
       }
       return say(
-        `${result.count.toLocaleString("en-US")} places hold ${fmt(value)}. Change the ${what} in the game ` +
-          `(use, spend or pick some up), then tell me the new number.`,
+        step.direction === "unchanged"
+          ? `${n} places could be it. Now make the ${what} go down or up again and tell me which way.`
+          : `${n} places could be it. Now leave it alone for a few seconds and say "same", or make it go ` +
+              `${step.direction === "decreased" ? "up" : "down"} and tell me.`,
       );
     }
   };

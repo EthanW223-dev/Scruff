@@ -144,8 +144,11 @@ function toolLabel(name, input = {}) {
     case "attach_to_game": return `Attaching to process ${input.pid}`;
     case "game_status": return "Checking the game";
     case "find_value": {
-      const target = input.value !== undefined ? fmt(input.value) : input.change ? input.change : `${fmt(input.min)}–${fmt(input.max)}`;
-      return `Looking for ${input.what ?? "the value"}: ${target}`;
+      const what = input.what ?? "the value";
+      if (input.value !== undefined) return `Looking for ${what}: ${fmt(input.value)}`;
+      if (input.change) return `Narrowing ${what}: ${{ decreased: "went down", increased: "went up", unchanged: "stayed the same", changed: "changed" }[input.change] ?? input.change}`;
+      if (input.min !== undefined) return `Looking for ${what}: ${fmt(input.min)}–${fmt(input.max)}`;
+      return `Snapshot of memory to find ${what} (no number)`;
     }
     case "show_scan_results": return "Listing results";
     case "read_values": return "Reading values";
@@ -439,10 +442,19 @@ function renderJev() {
   const jev = state?.jev;
   if (!jev) return;
   const tag = $("jev-status");
-  tag.textContent = jev.enabled ? `on · ${jev.model}` : jev.problem ? "off: key problem" : "off";
-  tag.classList.toggle("on", jev.enabled);
-  tag.title = jev.problem ?? "";
-  $("jev-key-row").hidden = jev.source === "env" || jev.source === "test";
+  tag.textContent = {
+    working: `on · ${jev.model}`,
+    checking: "checking the key…",
+    rejected: "key rejected",
+    unreachable: "can't reach TypeSafe",
+    off: "off",
+  }[jev.status] ?? jev.status;
+  tag.classList.toggle("on", jev.status === "working");
+  tag.classList.toggle("bad", jev.status === "rejected" || jev.status === "unreachable");
+  $("jev-problem").hidden = !jev.problem;
+  $("jev-problem").textContent = jev.problem ?? "";
+  $("jev-key-row").hidden = jev.source === "test";
+  $("jev-key").placeholder = jev.source ? "Paste a new key to replace it" : "Paste your TypeSafe key";
   $("jev-env").hidden = jev.source !== "env";
   $("jev-remove").hidden = jev.source !== "saved";
   if (aiInfo) renderAi();

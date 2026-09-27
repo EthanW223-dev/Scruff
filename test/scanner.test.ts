@@ -204,3 +204,65 @@ test("live watching drops values that change on their own and keeps the player's
   }
   assert.deepEqual(scanner.resultAddresses(10), [soup]);
 });
+
+test("no number: a snapshot narrows by 'went down' / 'stayed the same' through noise, then lists and writes", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const mem = new FakeBackend(layout);
+  const dir = fs.mkdtempSync(`${os.tmpdir()}/scruff-snap-`);
+  // Background noise: plausible floats and ints, a third of which change every step.
+  let seed = 7;
+  const rand = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31);
+  const noise: [number, ValueType][] = [];
+  for (let i = 0; i < 40_000; i++) noise.push([B + Math.floor(rand() * (9 * 1024 * 1024 - 8) / 8) * 8, rand() < 0.5 ? "float" : "int32"]);
+  const stir = () => {
+    for (const [addr, type] of noise) if (rand() < 0.33) mem.set(addr, type, type === "float" ? rand() * 500 : Math.floor(rand() * 500));
+  };
+  const health = B + 3 * 1024 * 1024 + 512; // a float bar: 87.5 of 100, no number on screen
+  let hp = 87.5;
+  mem.set(health, "float", hp);
+  const hit = () => mem.set(health, "float", (hp -= 7.25));
+
+  for (const [addr, type] of noise) mem.set(addr, type, type === "float" ? rand() * 500 : Math.floor(rand() * 500));
+
+  const scanner = new Scanner(mem);
+  await scanner.unknownScan(["int32", "float", "double"], undefined, dir);
+  assert.ok(scanner.isSnapshot);
+  assert.equal(fs.readdirSync(dir).length, 1, "the copy lives in a temp file");
+  const start = scanner.count;
+  assert.ok(start > 1_000_000, `every plausible slot is a candidate (${start})`);
+
+  const steps: string[] = [];
+  for (const step of ["decreased", "unchanged", "decreased", "unchanged", "decreased", "unchanged", "decreased", "unchanged", "decreased"] as const) {
+    stir();
+    if (step === "decreased") hit();
+    await scanner.refine({ mode: step });
+    steps.push(`${step}:${scanner.count}`);
+    if (process.env.SHOW_STEPS) console.log(steps.at(-1));
+    if (scanner.count <= 3) break;
+  }
+  assert.ok(!scanner.isSnapshot, `became a plain list (${steps.join(" ")})`);
+  assert.equal(fs.readdirSync(dir).length, 0, "the temp file is gone");
+  assert.ok(scanner.includes(health), `health is among ${scanner.count} left (${steps.join(" ")})`);
+  assert.equal(scanner.typeOf(health), "float");
+  assert.ok(scanner.count <= 8, `down to a few (${steps.join(" ")})`);
+  // From here it's an ordinary result list: refine by value, and so on.
+  await scanner.refine({ mode: "exact", value: hp });
+  assert.deepEqual(scanner.sample(5).map((h) => h.address), [health]);
+});
+
+test("a snapshot drops memory that gets freed, and a reset deletes its file", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const mem = new FakeBackend(layout);
+  const dir = fs.mkdtempSync(`${os.tmpdir()}/scruff-snap-`);
+  const scanner = new Scanner(mem);
+  await scanner.unknownScan(["int32"], undefined, dir);
+  const before = scanner.countsByType().int32!;
+  assert.equal(before, (64 * 1024 + 9 * 1024 * 1024) / 4, "zeroed memory: every int32 slot counts");
+  mem.free(B);
+  await scanner.refine({ mode: "unchanged" });
+  assert.equal(scanner.count, (64 * 1024) / 4, "only the region still there");
+  scanner.reset();
+  assert.equal(fs.readdirSync(dir).length, 0);
+});

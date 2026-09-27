@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scruff</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><img src="icon.svg" alt="" width="22" height="22"> Scruff</div>
+    <div class="chips">
+      <button class="chip" id="game-chip" title="Pick the game to mod"><span class="dot"></span><span id="game-label">No game</span></button>
+      <button class="chip" id="screen-chip" title="Let Scruff see your game"><span class="dot"></span><span id="screen-label">Share screen</span></button>
+      <span class="chip static" id="adapter-chip" hidden><span class="dot on"></span><span id="adapter-label"></span></span>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button role="tab" id="tab-chat" aria-selected="true">Chat</button>
+      <button role="tab" id="tab-mods" aria-selected="false">Mods <span id="mods-count" class="count" hidden></span></button>
+    </nav>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <main class="layout" data-view="chat">
+    <section class="chat" aria-label="Chat">
+      <div id="log" class="log" aria-live="polite">
+        <div class="empty" id="empty">
+          <h1>What are we modding?</h1>
+          <p>Start a game, then just say what you want.</p>
+          <div class="examples">
+            <button class="example">I'm playing Stardew, give me 50,000 gold</button>
+            <button class="example">Make my health infinite</button>
+            <button class="example">I have 12 arrows, make it 999</button>
+            <button class="example">Undo everything</button>
+          </div>
+        </div>
+      </div>
+
+      <form id="composer" class="composer">
+        <div id="voice-status" class="voice-status" hidden></div>
+        <div class="composer-row">
+          <textarea id="input" rows="1" placeholder="Tell Scruff what to change…" autocomplete="off"></textarea>
+          <button type="button" id="mic" class="icon-btn" title="Push to talk (Ctrl+Space)" aria-label="Push to talk">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
+          </button>
+          <button type="submit" id="send" class="primary">Send</button>
+          <button type="button" id="stop" class="danger" hidden>Stop</button>
+        </div>
+        <div class="composer-opts">
+          <label title="Keep listening; start a request by saying 'Scruff, …'"><input type="checkbox" id="handsfree"> Hands-free ("Scruff, …")</label>
+          <label><input type="checkbox" id="speak"> Read replies aloud</label>
+          <button type="button" id="new-chat" class="link">New chat</button>
+        </div>
+      </form>
+    </section>
+
+    <aside class="mods" aria-label="Mods">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Mods</h2>
+          <button id="revert-all" class="link" hidden>Undo all</button>
+        </div>
+        <div id="scan" class="scan" hidden>
+          <div class="scan-line"><span id="scan-text"></span></div>
+          <div class="progress" hidden id="scan-progress"><div></div></div>
+        </div>
+        <ul id="watch" class="watch"></ul>
+        <p id="watch-empty" class="muted small">Values Scruff finds and changes show up here. Toggle a lock to freeze one.</p>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>Changes</h2></div>
+        <ul id="changes" class="changes"></ul>
+        <p id="changes-empty" class="muted small">Nothing changed yet. Every change can be undone.</p>
+      </div>
+      <div class="panel" id="adapters-panel" hidden>
+        <div class="panel-head"><h2>Game adapters</h2></div>
+        <ul id="adapters" class="adapters"></ul>
+      </div>
+    </aside>
+  </main>
+
+  <dialog id="picker" class="picker">
+    <form method="dialog" class="picker-inner">
+      <div class="picker-head">
+        <h2>Which game?</h2>
+        <button value="close" class="icon-btn" aria-label="Close">✕</button>
+      </div>
+      <input id="picker-search" type="search" placeholder="Search running programs…" autocomplete="off">
+      <ul id="picker-list" class="picker-list"></ul>
+      <p class="muted small">Single-player games only. Scruff won't attach when it sees anti-cheat running.</p>
+      <div class="picker-foot">
+        <button type="button" id="detach" class="link" hidden>Detach from current game</button>
+        <button type="button" id="picker-refresh" class="link">Refresh</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toasts" class="toasts" aria-live="assertive"></div>
+  <video id="screen-video" muted playsinline hidden></video>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>

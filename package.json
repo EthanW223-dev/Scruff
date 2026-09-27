@@ -1,0 +1,29 @@
+{
+  "name": "scruff",
+  "version": "0.1.0",
+  "description": "Talk to an AI while you play and have it live-mod your game.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "demo-game": "node examples/demo-game/game.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test \"test/*.test.ts\""
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.128.0",
+    "koffi": "^3.3.2",
+    "ws": "^8.22.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

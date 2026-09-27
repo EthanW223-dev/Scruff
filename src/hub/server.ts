@@ -9,6 +9,8 @@ import type { GameManager } from "./game.ts";
 import type { McpEndpoint } from "./mcp.ts";
 import type { ModelRouter, ProviderId } from "./models.ts";
 import type { ScreenBridge } from "./screen.ts";
+import { transcribe } from "./speech.ts";
+import { ThemeInput, type ThemeStore } from "./themes.ts";
 import { parseAddress } from "../memory/types.ts";
 
 export interface ServerOptions {
@@ -18,6 +20,8 @@ export interface ServerOptions {
   token: string;
   root: string;
   dashboardDir: string;
+  dataDir: string;
+  themes: ThemeStore;
   router?: ModelRouter;
   agent: Agent;
   games: GameManager;
@@ -84,7 +88,7 @@ function connectInfo(root: string, port: number) {
 }
 
 export function startServer(opts: ServerOptions): Promise<http.Server> {
-  const { agent, games, adapters, screen, mcp, router } = opts;
+  const { agent, games, adapters, screen, mcp, router, themes } = opts;
   const aiInfo = () =>
     router?.describe() ?? { provider: "custom", model: agent.brain.model, providerLabel: "Custom", ready: true, problem: undefined };
   const dashboards = new Set<WebSocket>();
@@ -99,6 +103,7 @@ export function startServer(opts: ServerOptions): Promise<http.Server> {
     game: games.state(),
     adapters: adapters.state(),
     screen: { active: screen.active },
+    theme: themes.current(),
     busy: agent.busy,
   });
 
@@ -114,6 +119,7 @@ export function startServer(opts: ServerOptions): Promise<http.Server> {
   games.on("update", pushState);
   adapters.on("update", pushState);
   screen.on("update", pushState);
+  themes.on("change", pushState);
   adapters.on("event", (event) => broadcast({ type: "game_event", event }));
   setInterval(() => {
     if (dashboards.size && games.session?.watch.size) pushState();
@@ -214,6 +220,36 @@ export function startServer(opts: ServerOptions): Promise<http.Server> {
       case "screen":
         screen.setSharing(ws, Boolean(msg.sharing));
         break;
+      case "suggest_theme": {
+        const parsed = ThemeInput.safeParse(msg.theme);
+        if (parsed.success) themes.suggest(parsed.data);
+        break;
+      }
+      case "reset_theme":
+        themes.reset();
+        break;
+      case "voice": {
+        // Push-to-talk from the overlay: 16 kHz mono 16-bit PCM, base64.
+        const bytes = Buffer.from(String(msg.pcm ?? ""), "base64");
+        if (bytes.length < 3200) break; // under 0.1 s: a mis-press
+        // Copied so the samples are 2-byte aligned whatever Buffer.from handed back.
+        const pcm = new Int16Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + (bytes.length & ~1)));
+        const status = (text: string) => ws.send(JSON.stringify({ type: "voice_status", text }));
+        status("Transcribing…");
+        let text: string;
+        try {
+          text = await transcribe(pcm, opts.dataDir, status);
+        } finally {
+          status("");
+        }
+        if (!text) {
+          toast(ws, "Didn't catch that.", "info");
+          break;
+        }
+        broadcast({ type: "transcript", text });
+        agent.send(text);
+        break;
+      }
       case "frame":
         screen.frame(String(msg.id), msg.data, msg.error);
         break;

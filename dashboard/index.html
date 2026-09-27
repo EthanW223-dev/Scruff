@@ -8,6 +8,18 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <!-- In-game overlay only: status pill, reply toasts, active mods. -->
+  <div id="hud" class="hud" hidden>
+    <button id="hud-pill" class="hud-pill interactive" type="button" title="Open Scruff">
+      <img src="icon.svg" alt="" width="22" height="22">
+      <span id="hud-status" class="hud-status">Scruff</span>
+      <span id="hud-keys" class="hud-keys"></span>
+    </button>
+    <div id="hud-mods" class="hud-mods"></div>
+    <div id="hud-toasts" class="hud-toasts" aria-live="polite"></div>
+  </div>
+
+  <div id="app" class="app">
   <header class="topbar">
     <div class="brand"><img src="icon.svg" alt="" width="22" height="22"> Scruff</div>
     <div class="chips">
@@ -50,7 +62,7 @@
           <button type="button" id="stop" class="danger" hidden>Stop</button>
         </div>
         <div class="composer-opts">
-          <label title="Keep listening; start a request by saying 'Scruff, …'"><input type="checkbox" id="handsfree"> Hands-free ("Scruff, …")</label>
+          <label id="handsfree-label" title="Keep listening; start a request by saying 'Scruff, …'"><input type="checkbox" id="handsfree"> Hands-free ("Scruff, …")</label>
           <label><input type="checkbox" id="speak"> Read replies aloud</label>
           <button type="button" id="new-chat" class="link">New chat</button>
         </div>
@@ -81,6 +93,7 @@
       </div>
     </aside>
   </main>
+  </div>
 
   <dialog id="ai-dialog" class="picker ai-dialog">
     <form method="dialog" class="picker-inner">

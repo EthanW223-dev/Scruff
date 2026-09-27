@@ -6,6 +6,7 @@ import { McpEndpoint } from "./mcp.ts";
 import type { ModelRouter } from "./models.ts";
 import { ScreenBridge } from "./screen.ts";
 import { startServer } from "./server.ts";
+import { ThemeStore } from "./themes.ts";
 
 export interface HubOptions {
   root: string;
@@ -15,12 +16,16 @@ export interface HubOptions {
   /** Picks and switches models. Tests can pass a fixed brain instead. */
   router?: ModelRouter;
   brain?: Brain;
+  /** Where per-game themes and downloaded models live. Defaults to <root>/.scruff. */
+  dataDir?: string;
 }
 
 export async function createHub(opts: HubOptions) {
   const games = new GameManager();
   const adapters = new AdapterRegistry();
   const screen = new ScreenBridge();
+  const dataDir = opts.dataDir ?? path.join(opts.root, ".scruff");
+  const themes = new ThemeStore(path.join(dataDir, "themes.json"), games);
 
   const statusNote = (): string => {
     const game = games.state();
@@ -32,13 +37,21 @@ export async function createHub(opts: HubOptions) {
           ? "Not attached to a game."
           : game.supported.reason!,
       screen.active ? "The player is sharing their screen; look_at_screen works." : "Screen sharing is off.",
+      attached ? (themes.hasSaved() ? "The overlay is already styled for this game." : "The overlay isn't styled for this game yet.") : "",
       adapters.describe(),
-    ].join("\n");
+    ]
+      .filter(Boolean)
+      .join("\n");
   };
 
   const tools = [
-    ...memoryTools(games, () => ({ screen_shared: screen.active, adapters: adapters.describe() })),
+    ...memoryTools(games, () => ({
+      screen_shared: screen.active,
+      overlay_styled_for_this_game: themes.hasSaved(),
+      adapters: adapters.describe(),
+    })),
     ...screen.tools(),
+    themes.tool(),
     adapters.dispatchTool(),
   ];
 
@@ -60,6 +73,8 @@ export async function createHub(opts: HubOptions) {
     root: opts.root,
     dashboardDir: path.join(opts.root, "dashboard"),
     router: opts.router,
+    dataDir,
+    themes,
     agent,
     games,
     adapters,
@@ -69,6 +84,7 @@ export async function createHub(opts: HubOptions) {
 
   return {
     agent,
+    themes,
     games,
     adapters,
     screen,

@@ -30,8 +30,10 @@ export interface ScanRequest {
 }
 
 export interface ScanSummary {
-  type: ValueType;
+  types: ValueType[];
   count: number;
+  /** Results per type, e.g. { int32: 279146, float: 12 }. */
+  byType: Partial<Record<ValueType, number>>;
   /** True when the first scan hit the result cap and stopped early. */
   truncated: boolean;
   elapsedMs: number;
@@ -41,6 +43,7 @@ export interface ScanSummary {
 export interface ScanHit {
   address: number;
   value: number;
+  type: ValueType;
 }
 
 const CHUNK = 4 * 1024 * 1024;
@@ -50,16 +53,58 @@ const YIELD_EVERY_MS = 30;
 
 type Predicate = (value: number, previous: number) => boolean;
 
-/**
- * Cheat Engine–style value scanner: a first scan collects every address holding a value,
- * then refine scans narrow the list as the value changes in-game.
- */
-export class Scanner {
-  type: ValueType | null = null;
+/** Results for one value type: addresses (sorted) and the value each had at the last scan. */
+class TypedResults {
   count = 0;
   truncated = false;
-  private addresses = new Float64Array(0);
-  private values = new Float64Array(0);
+  addresses = new Float64Array(0);
+  values = new Float64Array(0);
+  private capacity: number;
+
+  constructor(
+    readonly type: ValueType,
+    private maxResults: number,
+  ) {
+    this.capacity = Math.min(1 << 16, maxResults);
+    this.addresses = new Float64Array(this.capacity);
+    this.values = new Float64Array(this.capacity);
+  }
+
+  push = (address: number, value: number): boolean => {
+    if (this.count === this.capacity) {
+      if (this.capacity >= this.maxResults) return false;
+      this.capacity = Math.min(this.capacity * 2, this.maxResults);
+      this.addresses = grow(this.addresses, this.capacity);
+      this.values = grow(this.values, this.capacity);
+    }
+    this.addresses[this.count] = address;
+    this.values[this.count] = value;
+    this.count++;
+    return true;
+  };
+
+  indexOf(address: number): number {
+    let lo = 0;
+    let hi = this.count - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const v = this.addresses[mid];
+      if (v === address) return mid;
+      if (v < address) lo = mid + 1;
+      else hi = mid - 1;
+    }
+    return -1;
+  }
+}
+
+/**
+ * Cheat Engine–style value scanner: a first scan collects every address holding a value,
+ * then refine scans narrow the list as the value changes in-game. One scan can look for
+ * several number types at once (whole numbers and decimals), since which one a game uses
+ * isn't visible on screen; each type is narrowed separately.
+ */
+export class Scanner {
+  private parts: TypedResults[] = [];
   private busy = false;
 
   constructor(
@@ -68,57 +113,63 @@ export class Scanner {
   ) {}
 
   get hasResults(): boolean {
-    return this.type !== null;
+    return this.parts.length > 0;
+  }
+
+  /** The types that still have results (all scanned types before anything is found). */
+  get types(): ValueType[] {
+    const live = this.parts.filter((p) => p.count > 0).map((p) => p.type);
+    return live.length ? live : this.parts.map((p) => p.type);
+  }
+
+  /** The single type in play, or null when none or several. */
+  get type(): ValueType | null {
+    const types = this.types;
+    return types.length === 1 ? types[0] : null;
+  }
+
+  get count(): number {
+    return this.parts.reduce((n, p) => n + p.count, 0);
+  }
+
+  get truncated(): boolean {
+    return this.parts.some((p) => p.truncated);
   }
 
   reset(): void {
-    this.type = null;
-    this.count = 0;
-    this.truncated = false;
-    this.addresses = new Float64Array(0);
-    this.values = new Float64Array(0);
+    this.parts = [];
+  }
+
+  countsByType(): Partial<Record<ValueType, number>> {
+    return Object.fromEntries(this.parts.map((p) => [p.type, p.count]));
   }
 
   async firstScan(
-    type: ValueType,
+    types: ValueType | ValueType[],
     request: ScanRequest,
     onProgress?: (fraction: number) => void,
   ): Promise<ScanSummary> {
     if (request.mode !== "exact" && request.mode !== "range") {
       throw new Error(`A new scan must use "exact" or "range", not "${request.mode}".`);
     }
+    const list = [...new Set(Array.isArray(types) ? types : [types])];
     return this.exclusive(async () => {
       const started = performance.now();
-      const [lo, hi] = firstScanBounds(type, request);
-      const size = TYPE_SIZE[type];
-      const align = TYPE_ALIGN[type];
-      const overlap = size - Math.min(size, align);
-      const regions = this.backend.regions();
+      const bounds = new Map(list.map((t) => [t, firstScanBounds(t, request)]));
+      // Integer types can't hold 5.25: skip them rather than scanning for nothing.
+      const scanTypes = list.filter((t) => {
+        const [lo, hi] = bounds.get(t)!;
+        return isFloatType(t) || Math.floor(hi) >= Math.ceil(lo);
+      });
+      const parts = scanTypes.map((t) => new TypedResults(t, Math.floor(this.maxResults / Math.max(1, scanTypes.length))));
+      const full = new Set<TypedResults>();
+      const overlap = Math.max(0, ...scanTypes.map((t) => TYPE_SIZE[t] - Math.min(TYPE_SIZE[t], TYPE_ALIGN[t])));
+      const regions = parts.length ? this.backend.regions() : [];
       const total = regions.reduce((sum, r) => sum + r.size, 0);
-
-      this.reset();
-      this.type = type;
-      let capacity = Math.min(1 << 16, this.maxResults);
-      let addresses = new Float64Array(capacity);
-      let values = new Float64Array(capacity);
-      let count = 0;
       let scanned = 0;
       let lastYield = performance.now();
       const chunk = Buffer.from(new ArrayBuffer(CHUNK + 8));
       const shifted = Buffer.from(new ArrayBuffer(CHUNK + 8));
-
-      const push = (address: number, value: number): boolean => {
-        if (count === capacity) {
-          if (capacity >= this.maxResults) return false;
-          capacity = Math.min(capacity * 2, this.maxResults);
-          addresses = grow(addresses, capacity);
-          values = grow(values, capacity);
-        }
-        addresses[count] = address;
-        values[count] = value;
-        count++;
-        return true;
-      };
 
       outer: for (const region of regions) {
         for (let offset = 0; offset < region.size; offset += CHUNK) {
@@ -127,12 +178,16 @@ export class Scanner {
           const view = chunk.subarray(0, readLen);
           const got = this.backend.read(region.base + offset, view);
           scanned += len;
-          if (got >= size) {
-            const base = region.base + offset;
+          const base = region.base + offset;
+          for (const part of parts) {
+            const size = TYPE_SIZE[part.type];
+            if (full.has(part) || got < size) continue;
+            const [lo, hi] = bounds.get(part.type)!;
             const limit = Math.min(len, got - size + 1);
-            if (!scanChunk({ buf: view, shifted, base, limit, type, lo, hi, push })) {
-              this.truncated = true;
-              break outer;
+            if (!scanChunk({ buf: view, shifted, base, limit, type: part.type, lo, hi, push: part.push })) {
+              part.truncated = true;
+              full.add(part);
+              if (full.size === parts.length) break outer;
             }
           }
           if (performance.now() - lastYield > YIELD_EVERY_MS) {
@@ -143,117 +198,134 @@ export class Scanner {
         }
       }
 
-      this.addresses = addresses;
-      this.values = values;
-      this.count = count;
+      this.parts = parts.length ? parts : list.map((t) => new TypedResults(t, 1));
       onProgress?.(1);
       return this.summary(started, scanned);
     });
   }
 
   async refine(request: ScanRequest, onProgress?: (fraction: number) => void): Promise<ScanSummary> {
-    const type = this.type;
-    if (!type) throw new Error("No scan results yet. Run a new scan first.");
+    if (!this.parts.length) throw new Error("No scan results yet. Run a new scan first.");
     return this.exclusive(async () => {
       const started = performance.now();
-      const match = buildPredicate(type, request);
-      const size = TYPE_SIZE[type];
       const regions = this.backend.regions();
-      const addresses = this.addresses;
-      const values = this.values;
-      const n = this.count;
-      let kept = 0;
-      let i = 0;
+      const total = this.count;
+      let done = 0;
       let scanned = 0;
-      let lastYield = performance.now();
-      const chunk = Buffer.from(new ArrayBuffer(CHUNK + 8));
-      const single = Buffer.alloc(8);
-
-      const consider = (address: number, current: number, index: number) => {
-        if (match(current, values[index])) {
-          addresses[kept] = address;
-          values[kept] = current;
-          kept++;
-        }
-      };
-
-      for (const region of regions) {
-        const end = region.base + region.size;
-        // Skip results that fell into memory that has since been freed.
-        while (i < n && addresses[i] < region.base) i++;
-        let j = i;
-        while (j < n && addresses[j] + size <= end) j++;
-        if (j === i) continue;
-
-        if (j - i < SPARSE_THRESHOLD) {
-          for (let k = i; k < j; k++) {
-            const view = single.subarray(0, size);
-            if (this.backend.read(addresses[k], view) === size) consider(addresses[k], decode(view, 0, type), k);
-          }
-        } else {
-          let k = i;
-          while (k < j) {
-            const spanStart = addresses[k];
-            const spanLen = Math.min(CHUNK, end - spanStart);
-            const view = chunk.subarray(0, spanLen);
-            const got = this.backend.read(spanStart, view);
-            scanned += spanLen;
-            const spanEnd = spanStart + got;
-            while (k < j && addresses[k] + size <= spanStart + spanLen) {
-              if (addresses[k] + size <= spanEnd) consider(addresses[k], decode(view, addresses[k] - spanStart, type), k);
-              k++;
-            }
-            if (performance.now() - lastYield > YIELD_EVERY_MS) {
-              onProgress?.(n ? k / n : 1);
-              await yieldToEventLoop();
-              lastYield = performance.now();
-            }
-          }
-        }
-        i = j;
+      for (const part of this.parts) {
+        if (!part.count) continue;
+        const before = part.count;
+        scanned += await this.refinePart(part, regions, request, (f) => onProgress?.(total ? (done + f * before) / total : 1));
+        done += before;
       }
-
-      this.count = kept;
       onProgress?.(1);
       return this.summary(started, scanned);
     });
   }
 
+  private async refinePart(
+    part: TypedResults,
+    regions: Region[],
+    request: ScanRequest,
+    onProgress: (fraction: number) => void,
+  ): Promise<number> {
+    const type = part.type;
+    const match = buildPredicate(type, request);
+    const size = TYPE_SIZE[type];
+    const addresses = part.addresses;
+    const values = part.values;
+    const n = part.count;
+    let kept = 0;
+    let i = 0;
+    let scanned = 0;
+    let lastYield = performance.now();
+    const chunk = Buffer.from(new ArrayBuffer(CHUNK + 8));
+    const single = Buffer.alloc(8);
+
+    const consider = (address: number, current: number, index: number) => {
+      if (match(current, values[index])) {
+        addresses[kept] = address;
+        values[kept] = current;
+        kept++;
+      }
+    };
+
+    for (const region of regions) {
+      const end = region.base + region.size;
+      // Skip results that fell into memory that has since been freed.
+      while (i < n && addresses[i] < region.base) i++;
+      let j = i;
+      while (j < n && addresses[j] + size <= end) j++;
+      if (j === i) continue;
+
+      if (j - i < SPARSE_THRESHOLD) {
+        for (let k = i; k < j; k++) {
+          const view = single.subarray(0, size);
+          if (this.backend.read(addresses[k], view) === size) consider(addresses[k], decode(view, 0, type), k);
+        }
+      } else {
+        let k = i;
+        while (k < j) {
+          const spanStart = addresses[k];
+          const spanLen = Math.min(CHUNK, end - spanStart);
+          const view = chunk.subarray(0, spanLen);
+          const got = this.backend.read(spanStart, view);
+          scanned += spanLen;
+          const spanEnd = spanStart + got;
+          while (k < j && addresses[k] + size <= spanStart + spanLen) {
+            if (addresses[k] + size <= spanEnd) consider(addresses[k], decode(view, addresses[k] - spanStart, type), k);
+            k++;
+          }
+          if (performance.now() - lastYield > YIELD_EVERY_MS) {
+            onProgress(n ? k / n : 1);
+            await yieldToEventLoop();
+            lastYield = performance.now();
+          }
+        }
+      }
+      i = j;
+    }
+    part.count = kept;
+    return scanned;
+  }
+
   /** Current results with live values, for showing the AI or the user. */
   sample(limit: number): ScanHit[] {
-    if (!this.type) return [];
-    const type = this.type;
-    const buf = Buffer.alloc(TYPE_SIZE[type]);
     const hits: ScanHit[] = [];
-    for (let i = 0; i < Math.min(limit, this.count); i++) {
-      const address = this.addresses[i];
-      if (this.backend.read(address, buf) === buf.length) hits.push({ address, value: decode(buf, 0, type) });
+    const buf = Buffer.alloc(8);
+    for (const part of this.parts) {
+      const view = buf.subarray(0, TYPE_SIZE[part.type]);
+      for (let i = 0; i < part.count && hits.length < limit; i++) {
+        const address = part.addresses[i];
+        if (this.backend.read(address, view) === view.length) hits.push({ address, value: decode(view, 0, part.type), type: part.type });
+      }
     }
     return hits;
   }
 
-  /** Whether an address is among the current results (they're kept sorted). */
+  /** The type an address was found as, or null if it isn't a current result. */
+  typeOf(address: number): ValueType | null {
+    for (const part of this.parts) if (part.indexOf(address) >= 0) return part.type;
+    return null;
+  }
+
   includes(address: number): boolean {
-    let lo = 0;
-    let hi = this.count - 1;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      const v = this.addresses[mid];
-      if (v === address) return true;
-      if (v < address) lo = mid + 1;
-      else hi = mid - 1;
-    }
-    return false;
+    return this.typeOf(address) !== null;
   }
 
   resultAddresses(limit: number): number[] {
-    return Array.from(this.addresses.subarray(0, Math.min(limit, this.count)));
+    const out: number[] = [];
+    for (const part of this.parts) {
+      for (let i = 0; i < part.count && out.length < limit; i++) out.push(part.addresses[i]);
+    }
+    return out;
   }
 
   private summary(started: number, bytesScanned: number): ScanSummary {
     return {
-      type: this.type!,
+      types: this.types,
       count: this.count,
+      byType: this.countsByType(),
       truncated: this.truncated,
       elapsedMs: Math.round(performance.now() - started),
       bytesScanned,

@@ -15,7 +15,7 @@ import { fakeModel, lastToolResult, lastUserText, text, toolUse, type Reply } fr
 const policy = (params: Parameters<typeof lastUserText>[0]): Reply => {
   const said = lastUserText(params);
   if (said !== null) {
-    if (/spent/i.test(said)) return { content: [toolUse("refine_scan", { mode: "exact", value: 325 })] };
+    if (/spent/i.test(said)) return { content: [toolUse("find_value", { what: "gold", value: 325 })] };
     if (/spawn/i.test(said)) return { content: [toolUse("use_game_adapter", { tool: "demo__spawn_gold", input: { amount: 1 } })] };
     if (/undo/i.test(said)) return { content: [toolUse("undo_change", {})] };
     return { content: [text("On it."), toolUse("list_running_games", { search: "dungeon" })] };
@@ -28,12 +28,12 @@ const policy = (params: Parameters<typeof lastUserText>[0]): Reply => {
       return { content: [toolUse("attach_to_game", { pid: game.pid })] };
     }
     case "attach_to_game":
-      return { content: [toolUse("new_scan", { type: "int32", value: 350 })] };
-    case "new_scan":
-      return { content: [text("Found some candidates. Spend a little gold and tell me the new amount.")] };
-    case "refine_scan": {
-      const { first_results } = JSON.parse(last.result);
-      return { content: [toolUse("write_value", { addresses: first_results.map((r: any) => r.address), type: "int32", value: 99999, label: "Gold" })] };
+      return { content: [toolUse("find_value", { what: "gold", value: 350 })] };
+    case "find_value": {
+      const found = JSON.parse(last.result);
+      if (found.search === "started") return { content: [text("Found some candidates. Spend a little gold and tell me the new amount.")] };
+      // No type given: Scruff knows how each result is stored.
+      return { content: [toolUse("write_value", { addresses: found.addresses.map((r: any) => r.address), value: 99999, label: "Gold" })] };
     }
     default:
       return { content: [text(`Done: ${last.name}.`)] };
@@ -110,7 +110,7 @@ test("serves the dashboard", async () => {
 test("chat → scan → refine → write changes the game's gold", async () => {
   const first = await chat("I'm playing the dungeon game, give me 99999 gold");
   const toolNames = first.filter((e) => e.type === "tool_call").map((e) => e.name);
-  assert.deepEqual(toolNames, ["list_running_games", "attach_to_game", "new_scan"]);
+  assert.deepEqual(toolNames, ["list_running_games", "attach_to_game", "find_value"]);
   assert.ok(first.some((e) => e.type === "text" && e.text === "On it."));
 
   await gameCommand("spend 25");

@@ -22,7 +22,7 @@ function decide(messages: Msg[]): { content?: string; call?: { name: string; arg
   const last = messages.at(-1)!;
   if (last.role === "user") {
     const said = typeof last.content === "string" ? last.content : "";
-    if (/325/.test(said)) return { call: { name: "refine_scan", args: { mode: "exact", value: 325 } } };
+    if (/325/.test(said)) return { call: { name: "find_value", args: { what: "gold", value: 325 } } };
     return { content: "<think>Find the game first.</think>On it.", call: { name: "list_running_games", args: { search: "dungeon" } } };
   }
   // A tool result: look at which call it answers.
@@ -33,13 +33,12 @@ function decide(messages: Msg[]): { content?: string; call?: { name: string; arg
     case "list_running_games":
       return { call: { name: "attach_to_game", args: { pid: JSON.parse(result)[0].pid } } };
     case "attach_to_game":
-      return { call: { name: "new_scan", args: { type: "int32", value: 350 } } };
-    case "new_scan":
-      return { content: "Spend some gold and tell me how much you have." };
-    case "refine_scan":
-      return {
-        call: { name: "write_value", args: { addresses: JSON.parse(result).first_results.map((r: any) => r.address), type: "int32", value: 7777, label: "Gold" } },
-      };
+      return { call: { name: "find_value", args: { what: "gold", value: 350 } } };
+    case "find_value": {
+      const found = JSON.parse(result);
+      if (found.search === "started") return { content: "Spend some gold and tell me how much you have." };
+      return { call: { name: "write_value", args: { addresses: found.addresses.map((r: any) => r.address), value: 7777, label: "Gold" } } };
+    }
     default:
       return { content: "Done! You have 7777 gold." };
   }
@@ -136,7 +135,7 @@ test("with no Claude key, Scruff picks the local Ollama model on its own", () =>
 
 test("a local model finds and changes the gold", async () => {
   const first = await chat("give me 7777 gold in the dungeon game");
-  assert.deepEqual(first.filter((e) => e.type === "tool_call").map((e) => e.name), ["list_running_games", "attach_to_game", "new_scan"]);
+  assert.deepEqual(first.filter((e) => e.type === "tool_call").map((e) => e.name), ["list_running_games", "attach_to_game", "find_value"]);
   assert.equal(first.filter((e) => e.type === "thinking").map((e) => e.text).join(""), "Find the game first.");
   assert.ok(first.filter((e) => e.type === "text").map((e) => e.text).join("").startsWith("On it."));
 
@@ -150,7 +149,7 @@ test("a local model finds and changes the gold", async () => {
   const lastRequest = requests.at(-1)!;
   assert.equal(lastRequest.model, "qwen3:8b");
   assert.equal(lastRequest.messages[0].role, "system");
-  assert.ok(lastRequest.tools.some((t) => t.function.name === "new_scan"));
+  assert.ok(lastRequest.tools.some((t) => t.function.name === "find_value"));
   assert.ok(lastRequest.messages.some((m) => m.role === "tool" && /Attached/.test(m.content)));
 });
 

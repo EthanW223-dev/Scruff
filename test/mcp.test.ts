@@ -65,7 +65,7 @@ test("lists Scruff's tools with instructions and read-only hints", async () => {
   assert.match(client.getInstructions() ?? "", /game_status first/);
   const { tools } = await client.listTools();
   const names = tools.map((t) => t.name);
-  for (const expected of ["new_scan", "refine_scan", "write_value", "freeze_value", "undo_change", "look_at_screen", "use_game_adapter"]) {
+  for (const expected of ["find_value", "write_value", "freeze_value", "undo_change", "look_at_screen", "use_game_adapter"]) {
     assert.ok(names.includes(expected), expected);
   }
   assert.equal(tools.find((t) => t.name === "game_status")?.annotations?.readOnlyHint, true);
@@ -84,18 +84,24 @@ test("a Claude app can find and change the demo game's gold over MCP, and the da
   const games = JSON.parse(textOf(await call("list_running_games", { search: "the scruff dungeon game" })));
   const pid = games.find((g: { pid: number }) => g.pid === game.pid).pid;
   assert.match(textOf(await call("attach_to_game", { pid })), /Attached/);
-  await call("new_scan", { type: "int32", value: 350 });
+  const started = JSON.parse(textOf(await call("find_value", { what: "gold", value: 350 })));
+  assert.equal(started.search, "started");
+  assert.match(started.next_step, /change the gold in-game/);
   game.stdin.write("spend 50\n");
   await gameLines.next();
-  const refined = JSON.parse(textOf(await call("refine_scan", { mode: "exact", value: 300 })));
-  const addresses = refined.first_results.map((r: { address: string }) => r.address);
+  // Same `what`: narrows instead of starting over, even though it's called the same way.
+  const refined = JSON.parse(textOf(await call("find_value", { what: "Gold", value: 300 })));
+  assert.equal(refined.search, "narrowed");
+  assert.match(refined.next_step, /Found it/);
+  const addresses = refined.addresses.map((r: { address: string }) => r.address);
 
   // A stale or made-up address is refused, and the error names the right ones.
-  const stale = await call("freeze_value", { address: "0x10", type: "int32", value: 1, label: "Gold" });
+  const stale = await call("freeze_value", { address: "0x10", value: 1, label: "Gold" });
   assert.equal(stale.isError, true);
   assert.match(textOf(stale), new RegExp(`Current results: ${addresses[0]}`));
 
-  await call("write_value", { addresses, type: "int32", value: 4242, label: "Gold" });
+  const written = JSON.parse(textOf(await call("write_value", { addresses, value: 4242, label: "Gold" })));
+  assert.equal(written.find((w: any) => w.type === "int32")?.now, 4242, "type inferred and the write stuck");
 
   game.stdin.write("print\n");
   assert.equal(JSON.parse((await gameLines.next()).value).gold, 4242);

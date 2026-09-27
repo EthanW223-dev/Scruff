@@ -66,7 +66,7 @@ test("finds an int32 and narrows it down as it changes", async () => {
   mem.set(decoys[0], "int32", 999);
   const second = await scanner.refine({ mode: "exact", value: 325 });
   assert.equal(second.count, 1);
-  assert.deepEqual(scanner.sample(5), [{ address: gold, value: 325 }]);
+  assert.deepEqual(scanner.sample(5), [{ address: gold, value: 325, type: "int32" }]);
   assert.equal(scanner.includes(gold), true);
   assert.equal(scanner.includes(decoys[1]), false);
 });
@@ -139,4 +139,30 @@ test("dense refine reads spans, not one address at a time", async () => {
   for (let i = 0; i < 5000; i += 2) mem.set(B + i * 64, "int32", 8);
   assert.equal((await scanner.refine({ mode: "increased" })).count, 2500);
   assert.equal((await scanner.refine({ mode: "exact", value: 8 })).count, 2500);
+});
+
+test("scanning several types at once finds a value stored as a decimal (60 Seconds' soup: 6 → 5.25)", async () => {
+  const mem = new FakeBackend(layout);
+  const soup = B + 2048;
+  mem.set(soup, "float", 6);
+  for (let i = 0; i < 300; i++) mem.set(A + i * 16, "int32", 6); // lots of unrelated whole-number 6s
+  const scanner = new Scanner(mem);
+  const first = await scanner.firstScan(["int32", "float", "double"], { mode: "exact", value: 6 });
+  assert.equal(first.byType.int32, 300);
+  assert.equal(first.byType.float, 1);
+
+  mem.set(soup, "float", 5.25); // the family ate a quarter can
+  const second = await scanner.refine({ mode: "exact", value: 5.25 });
+  assert.equal(second.count, 1, "only the float survives: whole numbers can't be 5.25");
+  assert.deepEqual(scanner.types, ["float"]);
+  assert.equal(scanner.typeOf(soup), "float");
+  assert.equal(scanner.typeOf(A), null);
+});
+
+test("a fractional first value skips whole-number types instead of scanning for nothing", async () => {
+  const mem = new FakeBackend(layout);
+  mem.set(A + 100, "float", 5.25);
+  const scanner = new Scanner(mem);
+  const summary = await scanner.firstScan(["int32", "float"], { mode: "exact", value: 5.25 });
+  assert.deepEqual(summary.byType, { float: 1 });
 });

@@ -33,6 +33,8 @@ const ALIVE_CHECK_MS = 2000;
  */
 export class GameSession extends EventEmitter {
   readonly scanner: Scanner;
+  /** What the current search is for ("soup cans"); find_value narrows while it stays the same. */
+  searchLabel: string | null = null;
   readonly watch = new Map<number, WatchEntry>();
   readonly changes: ChangeRecord[] = [];
   private nextChangeId = 1;
@@ -143,7 +145,8 @@ export class GameSession extends EventEmitter {
       name: this.target.name,
       title: this.target.title,
       scan: {
-        type: this.scanner.type,
+        what: this.searchLabel,
+        types: this.scanner.hasResults ? this.scanner.types : [],
         count: this.scanner.count,
         truncated: this.scanner.truncated,
       },

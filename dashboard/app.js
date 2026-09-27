@@ -128,11 +128,10 @@ function toolLabel(name, input = {}) {
     case "list_running_games": return "Looking for your game";
     case "attach_to_game": return `Attaching to process ${input.pid}`;
     case "game_status": return "Checking the game";
-    case "new_scan":
-      return input.mode === "range"
-        ? `Scanning for ${fmt(input.min)}–${fmt(input.max)} (${input.type ?? "int32"})`
-        : `Scanning memory for ${fmt(input.value)} (${input.type ?? "int32"})`;
-    case "refine_scan": return `Narrowing down (${String(input.mode).replace("_", " ")}${input.value !== undefined ? ` ${fmt(input.value)}` : ""})`;
+    case "find_value": {
+      const target = input.value !== undefined ? fmt(input.value) : input.change ? input.change : `${fmt(input.min)}–${fmt(input.max)}`;
+      return `Looking for ${input.what ?? "the value"}: ${target}`;
+    }
     case "show_scan_results": return "Listing results";
     case "read_values": return "Reading values";
     case "write_value": return `Setting ${input.label ?? "value"} to ${fmt(input.value)}`;
@@ -284,13 +283,13 @@ function renderState() {
   // Scan status
   const scan = attached?.scan;
   const scanning = game.scanProgress !== null;
-  $("scan").hidden = !scanning && !(scan && scan.type);
+  $("scan").hidden = !scanning && !scan?.types?.length;
   $("scan-progress").hidden = !scanning;
   $("scan-progress").firstElementChild.style.width = `${Math.round((game.scanProgress ?? 0) * 100)}%`;
   $("scan-text").textContent = scanning
-    ? "Scanning memory…"
-    : scan?.type
-      ? `Last scan: ${scan.count.toLocaleString()} ${scan.type} result${scan.count === 1 ? "" : "s"}${scan.truncated ? " (capped)" : ""}`
+    ? "Searching memory…"
+    : scan?.types?.length
+      ? `${scan.what ? `${scan.what}: ` : ""}${scan.count.toLocaleString()} place${scan.count === 1 ? "" : "s"} match${scan.count === 1 ? "es" : ""}${scan.truncated ? " (capped)" : ""}`
       : "";
 
   renderWatch(attached?.watch ?? []);

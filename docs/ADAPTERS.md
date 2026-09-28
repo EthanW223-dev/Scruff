@@ -112,7 +112,8 @@ Adapters have to be written per game or per engine. Good places to hook in:
 
 | Game or engine | How to get code running in it | Ideas for tools |
 | --- | --- | --- |
-| Unity games (Mono or IL2CPP) | A [BepInEx](https://github.com/BepInEx/BepInEx) plugin in C# with a WebSocket client | Find GameObjects, set component fields, `Time.timeScale`, spawn prefabs |
+| Unity games (Mono) | **Built in:** Scruff's Unity bridge ([bridge/](../bridge/README.md)), installed from the Game files panel | Find objects, read/set any field, call methods, recolor, resize, spawn, gravity, levels |
+| Unity games (IL2CPP) | A BepInEx 6 plugin (Il2CppInterop) with a WebSocket client | The same, once someone ports the bridge |
 | Unreal Engine 4/5 games | A [UE4SS](https://github.com/UE4SS-RE/RE-UE4SS) Lua mod | Read/write UObject properties, call UFunctions, summon actors |
 | Skyrim, Fallout (Creation Engine) | SKSE/F4SE plugin, or type into the built-in console | `player.additem`, `tgm`, `setav` |
 | Minecraft (Java) | A Fabric or Forge mod, or RCON on a local server | Give items, set time/weather, spawn mobs |

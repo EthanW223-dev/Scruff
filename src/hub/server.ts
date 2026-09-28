@@ -13,6 +13,7 @@ import type { ScreenBridge } from "./screen.ts";
 import { transcribe } from "./speech.ts";
 import { ThemeInput, type ThemeStore } from "./themes.ts";
 import { parseAddress } from "../memory/types.ts";
+import { installBridge, removeBridge } from "../games/bepinex.ts";
 
 export interface ServerOptions {
   port: number;
@@ -183,6 +184,24 @@ export function startServer(opts: ServerOptions): Promise<http.Server> {
         const key = typeof msg.key === "string" ? msg.key : null;
         await jev.setKey(key);
         toast(ws, key ? "Jev is on: quick commands now run instantly." : "Jev is off.", "info");
+        break;
+      }
+      case "install_bridge": {
+        if (!games.profile) throw new Error("Attach to the game first.");
+        const report = await installBridge(games.profile, {
+          bridgeDll: path.join(opts.root, "bridge", "ScruffBridge.dll"),
+          port: (server.address() as AddressInfo).port,
+          onProgress: (text) => toast(ws, text, "info"),
+        });
+        games.emit("update");
+        toast(ws, `Installed${report.installedBepInEx ? " BepInEx and" : ""} the Scruff bridge. Restart the game to load it.`, "info");
+        break;
+      }
+      case "remove_bridge": {
+        if (!games.profile) throw new Error("Attach to the game first.");
+        const report = removeBridge(games.profile);
+        games.emit("update");
+        toast(ws, `Removed the Scruff bridge${report.keptBepInEx ? "" : " and BepInEx"}. Restart the game to finish.`, "info");
         break;
       }
       case "list_games":

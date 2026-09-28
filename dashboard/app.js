@@ -330,6 +330,27 @@ function renderState() {
   renderGameFiles(attached ? game.profile : null);
 }
 
+// The Unity bridge: full live control of Unity (Mono) games, installed with one click.
+function bridgeRow(bridge) {
+  if (!bridge?.supported) return [];
+  const connected = (state?.adapters ?? []).some((a) => a.prefix.startsWith("unity"));
+  const dd = el("dd", "bridge");
+  const status = connected ? "connected" : bridge.installed ? "installed, restart the game" : "not installed";
+  dd.append(el("span", connected ? "ok" : "", status));
+  if (!connected || bridge.installed) {
+    const button = el("button", "link", bridge.installed ? "remove" : "install");
+    button.title = bridge.installed
+      ? "Take the bridge (and BepInEx, if Scruff added it) out of the game"
+      : "Add BepInEx and the Scruff bridge to the game folder, so the AI can change anything in it (needs a game restart)";
+    button.addEventListener("click", () => {
+      button.disabled = true;
+      send({ type: bridge.installed ? "remove_bridge" : "install_bridge" });
+    });
+    dd.append(" ", button);
+  }
+  return [el("dt", "", "Bridge"), dd];
+}
+
 // What Scruff read from the game's files when it attached.
 function renderGameFiles(profile) {
   $("game-panel").hidden = !profile;
@@ -347,6 +368,7 @@ function renderGameFiles(profile) {
       dd.style.whiteSpace = "pre-line";
       return [el("dt", "", k), dd];
     }),
+    ...bridgeRow(profile.bridge),
   );
 }
 

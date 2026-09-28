@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { bridgeState } from "../games/bepinex.ts";
 import { buildProfile, type GameProfile } from "../games/profile.ts";
 import { z } from "zod";
 import { listProcesses, memorySupported, openBackend } from "../memory/platform.ts";
@@ -100,6 +101,7 @@ export class GameManager extends EventEmitter {
         installDir: this.profile.installDir,
         saveDirs: this.profile.saveDirs,
         code: this.profile.codeKind,
+        bridge: bridgeState(this.profile),
       },
       scanProgress: this.scanProgress,
     };

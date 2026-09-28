@@ -11,6 +11,7 @@ import type { ModelRouter } from "./models.ts";
 import { ScreenBridge } from "./screen.ts";
 import { startServer } from "./server.ts";
 import { ThemeStore } from "./themes.ts";
+import { unityBridgeTools } from "./unitybridge.ts";
 
 export interface HubOptions {
   root: string;
@@ -58,6 +59,7 @@ export async function createHub(opts: HubOptions) {
       adapters: adapters.describe(),
     })),
     ...gameFileTools(games, path.join(dataDir, "backups")),
+    ...unityBridgeTools(games, adapters, { bridgeDll: path.join(opts.root, "bridge", "ScruffBridge.dll"), port: opts.port }),
     ...screen.tools(),
     themes.tool(),
     adapters.dispatchTool(),

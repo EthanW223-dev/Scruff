@@ -199,7 +199,12 @@ export function isInside(file: string, roots: string[]): boolean {
 
 export function describeProfile(p: GameProfile): string {
   const lines = [`Game files: ${p.name}, ${p.engine}, installed at ${p.installDir}.`];
-  if (p.codeKind === "dotnet") lines.push("Its code is readable: search_game_code shows variable names and types.");
+  if (p.codeKind === "dotnet") {
+    lines.push(
+      "Its code is readable: search_game_code shows variable names and types. It can also take Scruff's Unity bridge " +
+        "(unity_bridge_status): full live control of objects, fields, methods, colors, sizes, spawning, gravity and levels.",
+    );
+  }
   if (p.codeKind === "il2cpp") lines.push("Its code names are searchable with search_game_code (names only, no types).");
   lines.push(p.saveDirs.length ? `Saves/settings found in: ${p.saveDirs.join("; ")}.` : "No save folder found yet.");
   return lines.join(" ");

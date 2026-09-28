@@ -14,6 +14,7 @@
     "mcp": "tsx src/mcp-stdio.ts",
     "demo-game": "node examples/demo-game/game.mjs",
     "typecheck": "tsc --noEmit",
+    "build:bridge": "sh bridge/build.sh",
     "test": "tsx --test \"test/*.test.ts\""
   },
   "dependencies": {

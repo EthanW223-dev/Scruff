@@ -18,6 +18,11 @@ Pro/Max subscription through Claude Desktop or Claude Code, or any model running
   Scruff snapshots the game's memory, you play a little and tell it "it went down", "same" or
   "it went up", and a few answers later it's found and filled. While you play it quietly drops places that change on their own (timers,
   animations), and it checks the game actually shows a change before telling you it worked.
+- **Change anything in Unity games.** For Unity games (built with Mono, like many indie games)
+  Scruff can add its Unity bridge with one click: then the AI can change any object in the game,
+  not just numbers: colors, skins and looks, sizes, movement speed, gravity, spawn collectibles or
+  enemies, remove walls, load other levels, and call the game's own functions ("AddItem", "Heal").
+  See [bridge/README.md](bridge/README.md).
 - **It reads the game's files.** When you pick a game, Scruff works out its engine (Unity,
   Unreal, Godot, GameMaker, RPG Maker, Ren'Py, Source), finds its save and settings folders, and
   for Unity games reads the code's own variable names and types ("soup is a float"), so the AI
@@ -70,6 +75,24 @@ access to the game, run the terminal as administrator.
   keeps its own look.
 - Prefer a browser tab or a second screen? `npm run hub` starts Scruff without the overlay, and
   the same interface is at http://localhost:7777 (also from your phone with `npm run hub -- --lan`).
+
+## Change anything (Unity games)
+
+Memory editing only changes numbers. To change *anything* in a Unity game, attach to it, then
+click **install** next to *Bridge* in the Game files panel (or just ask, e.g. "make me huge", and
+the AI offers it). Scruff adds the [BepInEx](https://github.com/BepInEx/BepInEx) mod loader and its
+bridge plugin to the game folder, downloading BepInEx from GitHub. Restart the game once, and then
+ask for whatever you like:
+
+> "Make my character pink and twice as big."
+> "Give me the skin that enemy has."
+> "Low gravity, and slow motion."
+> "Spawn 20 coins next to me."
+> "Get rid of that wall." / "Take me to the next level."
+
+**remove** in the same place takes out exactly what Scruff added. It works for Unity games built
+with Mono (the Game files panel says *Unity (Mono)*); IL2CPP Unity games and other engines get
+memory editing and file editing.
 
 ## Pick your AI
 
@@ -161,7 +184,9 @@ in raw memory like a real game, and also connects to Scruff as a game adapter. A
 ```
 
 - `src/games/` reads a game's files: `profile.ts` (engine, install, save and settings folders),
-  `dotnet.ts` (variable names and types from a Unity game's `Assembly-CSharp.dll`).
+  `dotnet.ts` (variable names and types from a Unity game's `Assembly-CSharp.dll`), `bepinex.ts`
+  (installs and removes the Unity bridge).
+- `bridge/` is the Unity bridge: a BepInEx plugin in C# ([bridge/README.md](bridge/README.md)).
 - `src/memory/` scans and edits another process's memory: `windows.ts` (Win32 via koffi),
   `linux.ts` (`/proc/<pid>/mem`), `scanner.ts` (first scan + refine, ~1.3 GB/s), `session.ts`
   (watch list, freezing, undo log), `safety.ts` (anti-cheat check).
@@ -212,6 +237,9 @@ In `.env` (all optional):
   features; on Linux the overlay simply covers the main screen.
 - The Windows memory backend and the overlay's window tracking follow the Win32 API docs but have
   only been run on Linux so far; please report what happens on your games.
+- The Unity bridge's core (networking, JSON, reading and changing objects) is tested against Scruff,
+  but its Unity-specific tools haven't run inside a real Unity game yet. The bridge supports Mono
+  Unity games only (not IL2CPP), and its changes aren't in the undo list.
 
 ## Updating
 

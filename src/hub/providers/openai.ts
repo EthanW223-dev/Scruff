@@ -138,7 +138,10 @@ export function toChatMessages(system: string, messages: Params["messages"], vis
           ? [{ id: b.id, type: "function" as const, function: { name: b.name, arguments: JSON.stringify(b.input ?? {}) } }]
           : [],
       );
-      out.push({ role: "assistant", content: text || null, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) });
+      // Nothing said and nothing called (e.g. only thinking): nothing to send.
+      if (!text && !toolCalls.length) continue;
+      // Never null: Ollama rejects it ("invalid message content type: <nil>"); "" works everywhere.
+      out.push({ role: "assistant", content: text, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) });
       continue;
     }
     // A user turn: tool results must come first, straight after the assistant's tool calls.

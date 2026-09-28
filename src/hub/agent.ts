@@ -204,7 +204,13 @@ export class Agent extends EventEmitter {
 
       messages.push({ role: "assistant", content: message.content });
       if (message.stop_reason === "pause_turn") continue;
-      if (!toolUses.length) return;
+      if (!toolUses.length) {
+        // Thinking models sometimes think and stop without a word; say so rather than show nothing.
+        if (!message.content.some((b) => b.type === "text" && b.text.trim())) {
+          this.emitEvent({ type: "notice", text: "The AI stopped without replying. Try asking again, a bit more specifically." });
+        }
+        return;
+      }
 
       const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
       for (const use of toolUses) {

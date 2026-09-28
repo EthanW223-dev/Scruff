@@ -77,3 +77,22 @@ test("Claude requests get thinking, effort and fallbacks only on models that sup
   assert.equal(haiku.output_config, undefined);
   for (const p of seen) assert.deepEqual(p.cache_control, { type: "ephemeral" });
 });
+
+test("never sends null content: Ollama answers 400 'invalid message content type: <nil>' and the chat is stuck", () => {
+  const messages = toChatMessages("sys", [
+    { role: "user", content: "give me max of everything" },
+    // A thinking model that only thought, and stopped.
+    { role: "assistant", content: [{ type: "thinking", thinking: "hmm", signature: "" }] },
+    { role: "user", content: "hello?" },
+    // Called a tool without saying anything.
+    { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "game_status", input: {} }] },
+    { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] },
+  ] as never, false);
+  for (const m of messages) assert.notEqual((m as { content?: unknown }).content, null, JSON.stringify(m));
+  assert.deepEqual(
+    messages.map((m) => m.role),
+    ["system", "user", "user", "assistant", "tool"],
+    "the empty turn is left out",
+  );
+  assert.equal((messages[3] as { content: string }).content, "");
+});

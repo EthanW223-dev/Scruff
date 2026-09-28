@@ -56,6 +56,50 @@ function identifierStrings(buf: Buffer): string[] {
   return [...out];
 }
 
+const FILLER = new Set(["the", "and", "or", "my", "of", "a", "an", "to", "in", "for", "game", "code", "all", "everything"]);
+
+const shortName = (type: string) => type.slice(type.lastIndexOf(".") + 1);
+
+function groupByClass(fields: FieldInfo[]): Map<string, FieldInfo[]> {
+  const byClass = new Map<string, FieldInfo[]>();
+  for (const f of fields) {
+    const list = byClass.get(f.type) ?? [];
+    list.push(f);
+    byClass.set(f.type, list);
+  }
+  return byClass;
+}
+
+function rank<T>(items: T[], text: (item: T) => string, words: string[]): T[] {
+  return items
+    .map((item) => ({ item, score: words.filter((w) => text(item).toLowerCase().includes(w)).length }))
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map((x) => x.item);
+}
+
+/** The shape of a game's code: singletons, and the classes that usually run the game. */
+function overview(fields: FieldInfo[]) {
+  const byClass = groupByClass(fields.filter((f) => !f.isConst && !f.type.includes("<")));
+  const singletons = fields
+    .filter((f) => f.isStatic && f.valueType === shortName(f.type))
+    .map((f) => `${f.type}.${f.name}`)
+    .slice(0, 40);
+  const important = /(manager|controller|director|system|state|data|inventory|player|character|stats|save|game|survival|item|resource|event|shop|level)$/i;
+  const main = [...byClass]
+    .filter(([cls]) => important.test(shortName(cls)))
+    .sort((a, b) => b[1].length - a[1].length)
+    .slice(0, 40)
+    .map(([cls, fs]) => `${cls} (${fs.length} variables)`);
+  return {
+    classes: byClass.size,
+    variables: fields.length,
+    singletons,
+    main_classes: main,
+    next: "search_game_code with words from these (e.g. a class name) to see their variables; with the Unity bridge, unity__types and unity__get read them live.",
+  };
+}
+
 export function gameFileTools(games: GameManager, backupDir: string): HubTool[] {
   let codeFor: string | null = null;
   let fields: FieldInfo[] = [];
@@ -121,30 +165,49 @@ export function gameFileTools(games: GameManager, backupDir: string): HubTool[] 
       name: "search_game_code",
       readOnly: true,
       description:
-        "Search the game's own variable names (Unity games) for a word, e.g. 'soup' or 'ammo'. Results show the " +
-        "class, the variable and how it's stored (float, int...), which tells find_value what type to search and " +
-        "hints at how the game works (e.g. soup stored as a float count of cans).",
-      input: z.object({ query: z.string().min(2).describe("One or more words, e.g. 'soup' or 'max health'") }),
+        "Read the game's own code (Unity games). Leave query empty for an overview: its main classes (managers, " +
+        "controllers, player, inventory...) and singletons (like GameManager.Instance), the best place to start. Or give " +
+        "words (any of them match, e.g. 'soup food water ration') to find classes and variables: each shows its class, " +
+        "name and how it's stored (float, int...), which tells find_value what to search and the Unity bridge what to set.",
+      input: z.object({
+        query: z.string().default("").describe("Words to look for, e.g. 'soup food water'; empty for an overview"),
+      }),
       run({ query }) {
         const p = profile();
         if (!p.codeKind) return `${p.engine} games don't expose readable code; use find_value on memory instead.`;
         loadCode(p);
-        const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-        if (p.codeKind === "dotnet") {
-          const hits = fields
-            .filter((f) => !f.isConst)
-            .filter((f) => words.every((w) => `${f.type}.${f.name}`.toLowerCase().includes(w)))
-            .slice(0, 40)
-            .map((f) => ({
-              field: `${f.type}.${f.name}`,
-              type: f.valueType,
-              scan_as: scanTypeFor(f.valueType) ?? undefined,
-              static: f.isStatic || undefined,
-            }));
-          return hits.length ? json({ matches: hits, total_fields: fields.length }) : `No variables mention "${query}" (${fields.length} searched). Try a synonym (food, ration, supplies...).`;
+        const words = [...new Set(query.toLowerCase().split(/[^a-z0-9_]+/).filter((w) => w.length >= 2 && !FILLER.has(w)))];
+        if (p.codeKind !== "dotnet") {
+          const hits = rank(names, (n) => n, words).slice(0, 60);
+          return hits.length ? json({ names: hits }) : `No names mention ${words.join(" or ") || "that"}. Try other words.`;
         }
-        const hits = names.filter((n) => words.every((w) => n.toLowerCase().includes(w))).slice(0, 60);
-        return hits.length ? json({ names: hits }) : `No names mention "${query}". Try a synonym.`;
+        if (!words.length) return json(overview(fields));
+
+        // Variables: a word in the variable's own name counts double one in its class's name.
+        const scored = fields
+          .filter((f) => !f.isConst && !f.name.includes("<"))
+          .map((f) => {
+            const name = f.name.toLowerCase();
+            const cls = shortName(f.type).toLowerCase();
+            const score = words.reduce((n, w) => n + (name.includes(w) ? 2 : cls.includes(w) ? 1 : 0), 0);
+            return { f, score };
+          })
+          .filter((x) => x.score > 0)
+          .sort((a, b) => b.score - a.score);
+        const classes = [...groupByClass(fields.filter((f) => !f.isConst && words.some((w) => shortName(f.type).toLowerCase().includes(w))))]
+          .sort((a, b) => b[1].length - a[1].length)
+          .slice(0, 10)
+          .map(([cls, fs]) => ({ class: cls, fields: fs.length, sample: fs.slice(0, 12).map((f) => `${f.name}: ${f.valueType}${f.isStatic ? " (static)" : ""}`) }));
+        const matches = scored.slice(0, 40).map(({ f }) => ({
+          field: `${f.type}.${f.name}`,
+          type: f.valueType,
+          scan_as: scanTypeFor(f.valueType) ?? undefined,
+          static: f.isStatic || undefined,
+        }));
+        if (!matches.length && !classes.length) {
+          return `Nothing in the game's code mentions ${words.join(" or ")} (${fields.length} variables searched). Try other words, or an empty query for an overview.`;
+        }
+        return json({ classes, matches, total_fields: fields.length });
       },
     }),
 

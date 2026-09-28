@@ -63,6 +63,16 @@ namespace FakeGame
         public float JumpHeight() { return jumpHeight; }
     }
 
+    public class Singleton<T> where T : class, new()
+    {
+        public static T Instance = new T();
+    }
+
+    public class AudioDirector : Singleton<AudioDirector>
+    {
+        public float volume = 1;
+    }
+
     public class GameManager
     {
         public static GameManager Instance = new GameManager();
@@ -83,7 +93,7 @@ namespace FakeGame
             ws.Send(Json.Write(new Dictionary<string, object>
             {
                 { "type", "hello" }, { "name", "Fake Unity game" }, { "game", "unity" },
-                { "tools", new List<object> { Tool("get"), Tool("set"), Tool("call"), Tool("echo") } },
+                { "tools", new List<object> { Tool("get"), Tool("set"), Tool("call"), Tool("echo"), Tool("types") } },
             }));
             while (true)
             {
@@ -100,6 +110,24 @@ namespace FakeGame
                     if (tool == "echo")
                     {
                         result = a.Raw("text");
+                    }
+                    else if (tool == "types")
+                    {
+                        string query = a.Str("query", "");
+                        var names = new List<object>();
+                        if (query.Length == 0) foreach (string s in Reflect.Singletons(20)) names.Add(s);
+                        else
+                        {
+                            var ranked = new List<KeyValuePair<int, string>>();
+                            foreach (Type t in Reflect.AllTypes(true))
+                            {
+                                int score = Reflect.Score(t.Name, query);
+                                if (score > 0) ranked.Add(new KeyValuePair<int, string>(score, t.FullName));
+                            }
+                            ranked.Sort((x, y) => y.Key != x.Key ? y.Key - x.Key : string.CompareOrdinal(x.Value, y.Value));
+                            foreach (var kv in ranked) names.Add(kv.Value);
+                        }
+                        result = names;
                     }
                     else
                     {

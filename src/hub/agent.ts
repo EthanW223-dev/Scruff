@@ -225,12 +225,19 @@ export class Agent extends EventEmitter {
     signal: AbortSignal,
   ): Promise<Anthropic.Beta.BetaToolResultBlockParam> {
     this.emitEvent({ type: "tool_call", id: use.id, name: use.name, input: use.input });
-    const tool = this.toolsByName.get(use.name);
+    let tool = this.toolsByName.get(use.name);
+    let input = use.input;
+    // Models (smaller ones especially) often call an adapter tool like unity__find directly,
+    // instead of through use_game_adapter; route it there rather than failing.
+    if (!tool && use.name.includes("__") && this.toolsByName.has("use_game_adapter")) {
+      tool = this.toolsByName.get("use_game_adapter");
+      input = { tool: use.name, input: use.input ?? {} };
+    }
     let content: ToolResultContent;
     let isError = false;
     try {
       if (!tool) throw new Error(`Unknown tool ${use.name}.`);
-      content = await tool.run(use.input, {
+      content = await tool.run(input, {
         signal,
         progress: (text) => this.emitEvent({ type: "tool_progress", id: use.id, text }),
       });

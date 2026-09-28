@@ -128,11 +128,13 @@ export class AdapterRegistry extends EventEmitter {
       description:
         "Call a tool provided by a connected game adapter (a plugin running inside the game). The available " +
         "adapter tools and their input schemas are listed in the latest [Scruff status] note.",
-      input: z.object({
+      input: z.looseObject({
         tool: z.string().describe("Full adapter tool name as listed in the status note, e.g. demo__spawn_coins"),
         input: z.record(z.string(), z.unknown()).default({}).describe("Arguments matching that tool's input schema"),
       }),
-      run: ({ tool, input }, ctx) => {
+      run: ({ tool, input: given, ...rest }, ctx) => {
+        // Arguments put next to "tool" instead of inside "input" are taken as the input.
+        const input = Object.keys(given).length ? given : rest;
         const sep = tool.indexOf("__");
         const adapter = [...this.adapters.values()].find((a) => a.prefix === tool.slice(0, sep));
         const spec = adapter?.tools.find((t) => t.name === tool.slice(sep + 2));
@@ -158,7 +160,8 @@ export class AdapterRegistry extends EventEmitter {
           .join("\n");
         return `Adapter "${a.name}"${a.description ? ` (${a.description})` : ""} offers:\n${tools || "  (no tools)"}`;
       })
-      .join("\n");
+      .join("\n")
+      .concat(`\nCall these through use_game_adapter, e.g. {"tool": "${this.toolNames()[0] ?? "game__tool"}", "input": {...}}.`);
   }
 
   private toolNames(): string[] {

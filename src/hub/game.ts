@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { bridgeState } from "../games/bepinex.ts";
+import { bridgeState, installBridge } from "../games/bepinex.ts";
 import { buildProfile, type GameProfile } from "../games/profile.ts";
 import { z } from "zod";
 import { listProcesses, memorySupported, openBackend } from "../memory/platform.ts";
@@ -31,6 +31,8 @@ export class GameManager extends EventEmitter {
   session: GameSession | null = null;
   /** What Scruff learned from the attached game's files. */
   profile: GameProfile | null = null;
+  /** The Unity bridge Scruff ships, to spot an older one installed in the game. */
+  bridgeDll: string | null = null;
   scanProgress: number | null = null;
 
   async listGames(search?: string): Promise<ProcessInfo[]> {
@@ -68,13 +70,35 @@ export class GameManager extends EventEmitter {
       this.profile = null; // unreadable install folder: memory editing still works
     }
     session.on("change", () => this.emit("update"));
-    session.on("detached", () => {
+    session.on("detached", (reason: string) => {
       if (this.session === session) this.session = null;
       this.emit("update");
+      if (reason === "exited") void this.updateBridge();
     });
     this.session = session;
     this.emit("update");
     return session;
+  }
+
+  /**
+   * The game just quit, so its bridge file is free: if the installed Unity bridge is older than the
+   * one Scruff ships, put the new one in now, ready for the next start. Emits "notice" with the outcome.
+   */
+  async updateBridge(tries = 4): Promise<boolean> {
+    const profile = this.profile;
+    if (!profile || !this.bridgeDll || !bridgeState(profile, this.bridgeDll).outdated) return false;
+    for (let attempt = 1; attempt <= tries; attempt++) {
+      // Windows can take a moment to let go of a closed game's files.
+      await new Promise((r) => setTimeout(r, 1500));
+      try {
+        await installBridge(profile, { bridgeDll: this.bridgeDll });
+        this.emit("notice", "Updated the Scruff bridge in the game; it loads the next time you start it.");
+        return true;
+      } catch (err) {
+        if (attempt === tries) this.emit("notice", `Couldn't update the Scruff bridge: ${(err as Error).message}`);
+      }
+    }
+    return false;
   }
 
   detach(): void {
@@ -101,7 +125,7 @@ export class GameManager extends EventEmitter {
         installDir: this.profile.installDir,
         saveDirs: this.profile.saveDirs,
         code: this.profile.codeKind,
-        bridge: bridgeState(this.profile),
+        bridge: bridgeState(this.profile, this.bridgeDll ?? undefined),
       },
       scanProgress: this.scanProgress,
     };

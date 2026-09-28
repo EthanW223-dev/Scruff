@@ -84,9 +84,10 @@ namespace ScruffBridge
                   "method:string:Method name", "args:array?:Arguments in order"),
                 Call);
             Define("types",
-                "Search the game's own code for classes by name (e.g. 'player', 'inventory', 'manager', 'save'): their " +
-                "static values (singletons like Instance), methods, and how many exist in the level right now with ids.",
-                S("query:string:Part of a class name", "limit:integer?:Default 12"),
+                "Search the game's own code for classes by name (any of the words, e.g. 'player inventory manager save'): " +
+                "their static values (singletons like Instance), methods, and how many exist in the level right now with " +
+                "ids. Leave query empty to list the game's singletons (e.g. GameManager.Instance), the usual way in.",
+                S("query:string?:Words from class names; empty for the singletons", "limit:integer?:Default 12"),
                 Types);
             Define("transform",
                 "Move, rotate or resize an object: position/rotation (degrees)/scale as [x,y,z]; scale can be one number. " +
@@ -338,15 +339,16 @@ namespace ScruffBridge
                 bool inScene = go.scene.IsValid();
                 if (!inScene && !assets) continue;
                 if (inScene && !inactive && !go.activeInHierarchy) continue;
-                if (name != null && go.name.IndexOf(name, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                if (name != null && Reflect.Score(go.name, name) == 0) continue;
                 if (tag != null && !string.Equals(SafeTag(go), tag, StringComparison.OrdinalIgnoreCase)) continue;
                 if (component != null && !go.GetComponents<Component>().Any(c =>
                         c != null && c.GetType().Name.IndexOf(component, StringComparison.OrdinalIgnoreCase) >= 0)) continue;
                 hits.Add(go);
             }
-            // Exact names and top-level objects first: they're usually what the player means.
+            // Exact names, then the best matches and top-level objects first: usually what the player means.
             var ordered = hits
                 .OrderBy(g => name != null && string.Equals(g.name, name, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                .ThenByDescending(g => name != null ? Reflect.Score(g.name, name) : 0)
                 .ThenBy(g => g.scene.IsValid() ? 0 : 1)
                 .ThenBy(g => Depth(g.transform))
                 .Take(limit)
@@ -505,17 +507,26 @@ namespace ScruffBridge
 
         static object Types(Args a, MonoBehaviour host)
         {
-            string query = a.Need("query");
+            string query = a.Str("query", "");
             int limit = Math.Max(1, Math.Min(a.Int("limit", 12), 40));
+            if (query.Trim().Length == 0)
+            {
+                return new Dictionary<string, object>
+                {
+                    { "singletons", Reflect.Singletons(60) },
+                    { "note", "Read one with get (type + path, e.g. 'GameManager' + 'Instance'), or search classes by name with query." },
+                };
+            }
             var hits = Reflect.AllTypes(true)
-                .Where(t => !t.IsNested || t.IsPublic || t.IsNestedPublic)
-                .Where(t => !t.Name.StartsWith("<") && t.Name.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0)
-                .OrderBy(t => string.Equals(t.Name, query, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
-                .ThenBy(t => t.Name.Length)
+                .Where(t => !t.Name.StartsWith("<") && !t.IsGenericTypeDefinition)
+                .Select(t => new { t, score = Reflect.Score(t.Name, query) })
+                .Where(x => x.score > 0)
+                .OrderByDescending(x => x.score)
+                .ThenBy(x => x.t.Name.Length)
                 .Take(limit)
-                .Select(t => StaticSummary(t, 12))
+                .Select(x => StaticSummary(x.t, 12))
                 .ToList();
-            return new Dictionary<string, object> { { "types", hits }, { "note", hits.Count == 0 ? "No class names contain \"" + query + "\". Try a shorter or different word." : null } };
+            return new Dictionary<string, object> { { "types", hits }, { "note", hits.Count == 0 ? "No class names match \"" + query + "\". Try other words, or an empty query for the singletons." : null } };
         }
 
         static object StaticSummary(Type t, int maxMembers)

@@ -48,7 +48,7 @@ const PHRASE_STOP = new Set(
     "and but so then give make set to can could please now it its it's i im i'm i've ive me my we our you your the a an " +
     "of for in on at with is are was be left more less max maximum full infinite unlimited lots tons lot bunch " +
     "lock locked freeze frozen unlock keep want need get got have has had some all never runs run out go goes went " +
-    "down up same still value amount number how much many what whats what's"
+    "down up same still value amount number how much many what whats what's everything anything stuff thing things"
   ).split(" "),
 );
 const WORD_NUMBERS: Record<string, number> = {

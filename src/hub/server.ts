@@ -121,6 +121,7 @@ export function startServer(opts: ServerOptions): Promise<http.Server> {
     }, 50);
   };
   games.on("update", pushState);
+  games.on("notice", (text: string) => broadcast({ type: "toast", text, level: "info" }));
   adapters.on("update", pushState);
   screen.on("update", pushState);
   themes.on("change", pushState);
@@ -188,13 +189,20 @@ export function startServer(opts: ServerOptions): Promise<http.Server> {
       }
       case "install_bridge": {
         if (!games.profile) throw new Error("Attach to the game first.");
+        const updating = fs.existsSync(path.join(games.profile.installDir, "BepInEx", "plugins", "ScruffBridge", "ScruffBridge.dll"));
         const report = await installBridge(games.profile, {
           bridgeDll: path.join(opts.root, "bridge", "ScruffBridge.dll"),
           port: (server.address() as AddressInfo).port,
           onProgress: (text) => toast(ws, text, "info"),
         });
         games.emit("update");
-        toast(ws, `Installed${report.installedBepInEx ? " BepInEx and" : ""} the Scruff bridge. Restart the game to load it.`, "info");
+        toast(
+          ws,
+          updating
+            ? "Updated the Scruff bridge. Start the game again to load it."
+            : `Installed${report.installedBepInEx ? " BepInEx and" : ""} the Scruff bridge. Restart the game to load it.`,
+          "info",
+        );
         break;
       }
       case "remove_bridge": {

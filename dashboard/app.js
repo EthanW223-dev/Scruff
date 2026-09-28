@@ -335,18 +335,24 @@ function bridgeRow(bridge) {
   if (!bridge?.supported) return [];
   const connected = (state?.adapters ?? []).some((a) => a.prefix.startsWith("unity"));
   const dd = el("dd", "bridge");
-  const status = connected ? "connected" : bridge.installed ? "installed, restart the game" : "not installed";
+  const status = connected
+    ? bridge.outdated ? "connected · update ready" : "connected"
+    : bridge.outdated ? "update ready" : bridge.installed ? "installed, restart the game" : "not installed";
   dd.append(el("span", connected ? "ok" : "", status));
-  if (!connected || bridge.installed) {
-    const button = el("button", "link", bridge.installed ? "remove" : "install");
-    button.title = bridge.installed
-      ? "Take the bridge (and BepInEx, if Scruff added it) out of the game"
-      : "Add BepInEx and the Scruff bridge to the game folder, so the AI can change anything in it (needs a game restart)";
+  const action = (label, type, title) => {
+    const button = el("button", "link", label);
+    button.title = title;
     button.addEventListener("click", () => {
       button.disabled = true;
-      send({ type: bridge.installed ? "remove_bridge" : "install_bridge" });
+      send({ type });
     });
     dd.append(" ", button);
+  };
+  if (!bridge.installed) {
+    action("install", "install_bridge", "Add BepInEx and the Scruff bridge to the game folder, so the AI can change anything in it (needs a game restart)");
+  } else {
+    if (bridge.outdated) action("update", "install_bridge", "Quit the game first (it keeps the bridge file open), then update and start it again");
+    if (!connected) action("remove", "remove_bridge", "Take the bridge (and BepInEx, if Scruff added it) out of the game");
   }
   return [el("dt", "", "Bridge"), dd];
 }

@@ -30,6 +30,7 @@ Scruff shows up as an overlay on top of the game. When you attach to a game the 
 
 ## Beyond numbers: the Unity bridge
 Memory editing changes numbers. For anything else (colors, skins and looks, sizes and shapes, movement speed and jump height, gravity and time, spawning items or enemies, removing walls, loading other levels, how things interact, calling the game's own functions), Unity games built with Mono can take Scruff's Unity bridge. unity_bridge_status says whether the attached game can. If it's not installed, offer it in one line (it adds the BepInEx mod loader to the game folder and needs a game restart); on a yes, install_unity_bridge and ask them to restart the game.
+To learn a game ("read the code"): search_game_code with an empty query gives an overview of its classes and singletons; search_game_code with a few words ("soup water food") finds the variables; with the bridge, unity__types with an empty query lists the live singletons and unity__get (type + path "Instance") shows a manager's current state. Then act on what you found.
 Once it's connected (unity__ tools in the adapter list), work through use_game_adapter:
 - unity__types finds the game's own classes (e.g. "player", "inventory", "manager", "shop") with their static values (singletons like Instance), methods, and live instance ids.
 - unity__find finds objects by name, component or tag; unity__inspect shows every field and property on one, private ones too.

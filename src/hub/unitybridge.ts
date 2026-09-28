@@ -36,14 +36,17 @@ export function unityBridgeTools(games: GameManager, adapters: AdapterRegistry, 
       input: z.object({}),
       run() {
         const p = profile();
-        const state = bridgeState(p);
+        const state = bridgeState(p, opts.bridgeDll);
         const connected = unityBridgeConnected(adapters);
         return json({
           ...state,
           connected,
           next: !state.supported
             ? "Not available for this game: use memory editing and game files."
-            : connected
+            : state.outdated
+              ? "A newer bridge is ready. Ask the player to quit the game, then install_unity_bridge to update it and start the game again." +
+                (connected ? " The current one works meanwhile." : "")
+              : connected
               ? "Connected: use use_game_adapter with the unity__ tools."
               : state.installed
                 ? "Installed but not connected: the player needs to restart the game (quit fully, start again)."

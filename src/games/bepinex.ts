@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { GameProfile } from "./profile.ts";
@@ -19,6 +20,8 @@ export interface BridgeState {
   supported: boolean;
   reason?: string;
   installed: boolean;
+  /** The installed bridge differs from the one Scruff ships: an update is ready. */
+  outdated?: boolean;
   /** BepInEx was already there before Scruff (the player mods this game). */
   existingBepInEx?: boolean;
 }
@@ -32,11 +35,16 @@ interface Manifest {
   backups: { file: string; backup: string }[];
 }
 
-export function bridgeState(profile: GameProfile): BridgeState {
+/** `bundledDll`: the bridge Scruff ships, to tell whether the installed one is older. */
+export function bridgeState(profile: GameProfile, bundledDll?: string): BridgeState {
   const dir = profile.installDir;
-  const installed = fs.existsSync(path.join(dir, PLUGIN_DIR, "ScruffBridge.dll"));
+  const plugin = path.join(dir, PLUGIN_DIR, "ScruffBridge.dll");
+  const installed = fs.existsSync(plugin);
   const existing = fs.existsSync(path.join(dir, "BepInEx", "core", "BepInEx.dll"));
-  if (profile.engine === "Unity (Mono)") return { supported: true, installed, existingBepInEx: existing && !manifest(dir)?.bepinexByScruff };
+  if (profile.engine === "Unity (Mono)") {
+    const outdated = installed && bundledDll !== undefined && fileHash(plugin) !== fileHash(bundledDll);
+    return { supported: true, installed, ...(outdated ? { outdated } : {}), existingBepInEx: existing && !manifest(dir)?.bepinexByScruff };
+  }
   if (profile.engine === "Unity (IL2CPP)") {
     return { supported: false, installed, reason: "This Unity game is built with IL2CPP, which needs BepInEx 6; the bridge supports Mono Unity games so far." };
   }
@@ -91,7 +99,15 @@ export async function installBridge(profile: GameProfile, opts: InstallOptions):
       fs.renameSync(full, safeJoin(dir, backup));
       record.backups.push({ file: rel, backup });
     }
-    fs.writeFileSync(full, data);
+    try {
+      fs.writeFileSync(full, data);
+    } catch (err) {
+      // Windows keeps a loaded plugin's file locked while the game runs.
+      if (["EBUSY", "EPERM", "EACCES"].includes((err as NodeJS.ErrnoException).code ?? "")) {
+        throw new Error(`The game has ${path.basename(rel)} open. Quit the game fully, then try again.`);
+      }
+      throw err;
+    }
     if (!record.files.includes(rel)) record.files.push(rel);
   };
 
@@ -209,6 +225,23 @@ export function removeBridge(profile: GameProfile): RemoveReport {
   if (!keepBepInEx) fs.rmSync(path.join(dir, "BepInEx"), { recursive: true, force: true });
   fs.rmSync(path.join(dir, MANIFEST), { force: true });
   return { removed, restored, keptBepInEx: keepBepInEx };
+}
+
+const hashes = new Map<string, { key: string; hash: string }>();
+
+/** Content hash, cached by size and time so the dashboard's frequent state updates stay cheap. */
+function fileHash(file: string): string | null {
+  try {
+    const st = fs.statSync(file);
+    const key = `${st.size}:${st.mtimeMs}`;
+    const cached = hashes.get(file);
+    if (cached?.key === key) return cached.hash;
+    const hash = crypto.createHash("sha1").update(fs.readFileSync(file)).digest("hex");
+    hashes.set(file, { key, hash });
+    return hash;
+  } catch {
+    return null;
+  }
 }
 
 function manifest(dir: string): Manifest | null {

@@ -172,3 +172,30 @@ test("refuses IL2CPP games, non-BepInEx downloads and zips that reach outside th
   assert.ok(!fs.existsSync(path.join(install, "..", "..", "outside.dll")));
   assert.ok(!fs.existsSync(path.join(install, "winhttp.dll")), "nothing written from a bad zip");
 });
+
+test("an older installed bridge is spotted and updated once the game has quit", async () => {
+  const { GameManager } = await import("../src/hub/game.ts");
+  const { install, profile } = fakeGame();
+  const old = path.join(install, "..", "OldBridge.dll");
+  fs.writeFileSync(old, "bridge 1.0");
+  const zipFile = path.join(install, "..", "bepinex.zip");
+  fs.writeFileSync(zipFile, bepinexZip());
+  await installBridge(profile, { bridgeDll: old, bepinexZip: zipFile });
+  assert.equal(bridgeState(profile, BRIDGE).outdated, true, "differs from the bridge Scruff ships");
+  assert.equal(bridgeState(profile, old).outdated, undefined);
+
+  const games = new GameManager();
+  games.profile = profile;
+  games.bridgeDll = BRIDGE;
+  const notices: string[] = [];
+  games.on("notice", (t: string) => notices.push(t));
+  assert.equal(await games.updateBridge(1), true);
+  assert.match(notices[0], /Updated the Scruff bridge/);
+  assert.equal(bridgeState(profile, BRIDGE).outdated, undefined);
+  assert.ok(fs.readFileSync(path.join(install, "BepInEx/plugins/ScruffBridge/ScruffBridge.dll")).equals(fs.readFileSync(BRIDGE)));
+  assert.equal(await games.updateBridge(1), false, "nothing to do when current");
+  // Removal still takes everything out: the update didn't lose the record.
+  removeBridge(profile);
+  assert.ok(!fs.existsSync(path.join(install, "BepInEx")));
+  assert.ok(!fs.existsSync(path.join(install, "winhttp.dll")));
+});

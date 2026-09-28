@@ -175,3 +175,27 @@ test("New chat during a running tool leaves the fresh conversation clean", async
   assert.equal(msgs.length, 1);
   assert.equal(msgs[0].role, "user");
 });
+
+test("an adapter tool called directly (unity__find) is routed through use_game_adapter", async () => {
+  const seen: unknown[] = [];
+  const useGameAdapter = defineTool({
+    name: "use_game_adapter",
+    description: "Call an adapter tool",
+    input: z.looseObject({ tool: z.string(), input: z.record(z.string(), z.unknown()).default({}) }),
+    run: (input) => {
+      seen.push(input);
+      return "found Ted";
+    },
+  });
+  const { agent, model, turn } = makeAgent(
+    (p): Reply => (lastToolResult(p) ? { content: [text("done")] } : { content: [toolUse("unity__find", { name: "Ted" })] }),
+    [echo, useGameAdapter],
+  );
+  const done = turn();
+  agent.send("find ted");
+  await done;
+  assert.deepEqual(seen, [{ tool: "unity__find", input: { name: "Ted" } }]);
+  const result = lastToolResult(model.calls.at(-1)!)!;
+  assert.equal(result.isError, false);
+  assert.equal(result.result, "found Ted");
+});

@@ -70,7 +70,18 @@ test("picking a game reads its files: engine, real name, save folder", () => {
 test("search_game_code shows the game's variables and how to scan them", async () => {
   const out = JSON.parse(await call("search_game_code", { query: "length" }));
   assert.deepEqual(out.matches[0], { field: "System.HashCode._length", type: "uint", scan_as: "int32" });
-  assert.match(await call("search_game_code", { query: "soup" }), /No variables mention "soup"/);
+  assert.match(await call("search_game_code", { query: "soup" }), /Nothing in the game's code mentions soup/);
+  // Any of the words counts; the best matches come first.
+  const any = JSON.parse(await call("search_game_code", { query: "soup ammo length" }));
+  assert.equal(any.matches[0].field, "System.HashCode._length");
+  assert.equal(any.classes.length, 0);
+  const byClass = JSON.parse(await call("search_game_code", { query: "hashcode" }));
+  assert.equal(byClass.classes[0].class, "System.HashCode");
+  assert.ok(byClass.classes[0].sample.some((f: string) => f.startsWith("_length: uint")));
+  // No words: an overview of the code.
+  const overview = JSON.parse(await call("search_game_code", { query: "" }));
+  assert.ok(overview.classes > 0 && overview.variables > 0);
+  assert.ok(Array.isArray(overview.singletons) && Array.isArray(overview.main_classes));
 });
 
 test("saves can be listed, read, edited with a backup, and the edit undone", async () => {

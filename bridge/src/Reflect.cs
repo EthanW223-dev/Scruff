@@ -631,6 +631,46 @@ namespace ScruffBridge
             return true;
         }
 
+        /// <summary>
+        /// How well a name matches what the AI asked for: 100 for the whole phrase ("game manager" finds
+        /// GameManager), otherwise one point per word found, 0 for none.
+        /// </summary>
+        public static int Score(string name, string query)
+        {
+            if (string.IsNullOrEmpty(query)) return 0;
+            string n = name.ToLowerInvariant();
+            string q = query.Trim().ToLowerInvariant();
+            if (q.Length > 0 && n.Contains(q.Replace(" ", "").Replace("_", ""))) return 100;
+            int score = 0;
+            foreach (string w in q.Split(new[] { ' ', ',', '.', '/' }, StringSplitOptions.RemoveEmptyEntries))
+                if (w.Length >= 2 && n.Contains(w)) score++;
+            return score;
+        }
+
+        /// <summary>
+        /// The game's singletons ("GameManager.Instance"): a static field or property holding the class
+        /// itself, declared on it or on a generic base like Singleton&lt;GameManager&gt;. The usual way
+        /// into a Unity game's state.
+        /// </summary>
+        public static List<string> Singletons(int limit)
+        {
+            var found = new List<string>();
+            foreach (Type t in AllTypes(true))
+            {
+                if (t.IsGenericTypeDefinition || t.Name.StartsWith("<")) continue;
+                for (Type owner = t; owner != null && owner != typeof(object); owner = owner.BaseType)
+                {
+                    if (owner != t && !owner.IsGenericType) continue; // only the class itself or a generic base
+                    foreach (FieldInfo f in owner.GetFields(Static | BindingFlags.DeclaredOnly))
+                        if (f.FieldType == t) found.Add(t.FullName + "." + CleanName(f.Name));
+                    foreach (PropertyInfo p in owner.GetProperties(Static | BindingFlags.DeclaredOnly))
+                        if (p.PropertyType == t && p.GetIndexParameters().Length == 0) found.Add(t.FullName + "." + p.Name);
+                }
+                if (found.Count >= limit) break;
+            }
+            return found.Distinct().Take(limit).ToList();
+        }
+
         public static Type FindType(string name)
         {
             Type exact = null, loose = null;

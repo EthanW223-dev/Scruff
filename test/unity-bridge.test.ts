@@ -70,7 +70,7 @@ after(async () => {
 test("the bridge connects to Scruff as the 'unity' adapter", { skip: !hasMono && "needs Mono" }, () => {
   assert.deepEqual(
     hub.adapters.state().find((a) => a.prefix === "unity")?.tools,
-    ["get", "set", "call", "echo"],
+    ["get", "set", "call", "echo", "types"],
   );
 });
 
@@ -133,6 +133,24 @@ test("mistakes come back as helpful errors", { skip: !hasMono && "needs Mono" },
   assert.match(r.out, /read-only/);
   r = await bridge("get", { type: "NoSuchClass", path: "x" });
   assert.match(r.out, /No type named "NoSuchClass"/);
+});
+
+test("finds the game's classes by any of several words, and its singletons (inherited ones too)", { skip: !hasMono && "needs Mono" }, async () => {
+  let r = await bridge("types", { query: "player manager inventory" });
+  assert.deepEqual(r.json().slice(0, 2).sort(), ["FakeGame.GameManager", "FakeGame.Player"]);
+  r = await bridge("types", { query: "game manager" });
+  assert.equal(r.json()[0], "FakeGame.GameManager", "the whole phrase ranks first");
+  r = await bridge("types", { query: "" });
+  assert.ok(r.json().includes("FakeGame.GameManager.Instance"));
+  assert.ok(r.json().includes("FakeGame.AudioDirector.Instance"), "through a generic Singleton<T> base");
+  r = await bridge("set", { type: "AudioDirector", path: "Instance.volume", value: 0.25 });
+  assert.deepEqual(r.json(), { before: 1, after: 0.25 });
+});
+
+test("a model that calls unity__get directly, or puts arguments beside \"input\", still gets through", { skip: !hasMono && "needs Mono" }, async () => {
+  const result = await client.callTool({ name: "use_game_adapter", arguments: { tool: "unity__get", type: "GameManager", path: "Instance.money" } });
+  assert.ok(!result.isError, JSON.stringify(result.content));
+  assert.match((result.content as { text: string }[])[0].text, /"value":\s*\d+/);
 });
 
 test("big messages cross in both directions (64-bit WebSocket frame lengths)", { skip: !hasMono && "needs Mono" }, async () => {

@@ -29,6 +29,7 @@ export interface HubOptions {
 
 export async function createHub(opts: HubOptions) {
   const games = new GameManager();
+  games.bridgeDll = path.join(opts.root, "bridge", "ScruffBridge.dll");
   const adapters = new AdapterRegistry();
   const screen = new ScreenBridge();
   const dataDir = opts.dataDir ?? path.join(opts.root, ".scruff");

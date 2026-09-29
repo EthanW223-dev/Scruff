@@ -1,7 +1,8 @@
 import { EventEmitter } from "node:events";
 import type { WebSocket } from "ws";
 import { z } from "zod";
-import { defineTool, type HubTool } from "./tools.ts";
+import { defineTool, json, type HubTool } from "./tools.ts";
+import { confirmQuestion, parseConfirm, type VisionClient } from "./vision.ts";
 
 interface PendingFrame {
   resolve(jpegBase64: string): void;
@@ -57,7 +58,7 @@ export class ScreenBridge extends EventEmitter {
     });
   }
 
-  tools(): HubTool[] {
+  tools(vision?: () => VisionClient | null): HubTool[] {
     return [
       defineTool({
         name: "look_at_screen",
@@ -72,6 +73,37 @@ export class ScreenBridge extends EventEmitter {
           return [{ type: "image", source: { type: "base64", media_type: "image/jpeg", data } }];
         },
       }),
+      defineTool({
+        name: "verify_on_screen",
+        readOnly: true,
+        description:
+          "Check whether the game's HUD actually shows a value you just wrote with write_value. A write can " +
+          "stick in memory at an address that is only a copy of the real value, so the game never shows it: " +
+          "always verify on screen before telling the player it worked. Returns yes (the HUD shows it), no " +
+          "(visible but different: undo and try the next candidate address one at a time), or unknown (the " +
+          "counter isn't on screen right now: don't treat that as a failure).",
+        input: z.object({
+          what: z.string().describe("What was changed, e.g. 'soup cans'"),
+          expected: z.number().describe("The number the HUD should show now"),
+        }),
+        run: async ({ what, expected }, ctx) => {
+          const vc = vision?.();
+          if (!vc) {
+            throw new Error(
+              "No vision model is set up: pick Claude or a local vision model (e.g. ollama pull qwen3-vl) in the AI menu.",
+            );
+          }
+          ctx.progress("Checking the game screen…");
+          const data = await this.capture();
+          const reply = await vc.ask(data, confirmQuestion(what, fmtNum(expected)), ctx.signal);
+          return json({ verdict: parseConfirm(reply, expected), model_said: reply });
+        },
+      }),
     ];
   }
+}
+
+/** Short number formatting shared with the fast path. */
+export function fmtNum(n: number): string {
+  return Number.isInteger(n) ? n.toLocaleString("en-US") : String(Math.round(n * 1000) / 1000);
 }

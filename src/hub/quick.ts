@@ -3,6 +3,7 @@ import type { GameSession } from "../memory/session.ts";
 import type { GameManager } from "./game.ts";
 import { JEV_MAX_OPTIONS, JevError, type ChoiceAnswer, type Jev, type JevQuestion } from "./jev.ts";
 import type { HubTool } from "./tools.ts";
+import { confirmQuestion, hudQuestion, parseConfirm, parseNumber, VisionError, type VisionClient } from "./vision.ts";
 
 /**
  * Scruff's fast path: every message goes to Jev first (one call, a fraction of a second). When
@@ -31,6 +32,16 @@ export interface QuickPathOptions {
   chatReady: () => boolean;
   /** How each Jev call went (null when fine), so the AI menu shows the real status. */
   report?: (err: unknown) => void;
+  /**
+   * Screenshot the game window. In the overlay this is automatic (no clicks); in a plain
+   * browser tab it needs the player's screen share. Enables hands-free scanning: the
+   * player just plays while Scruff watches the HUD for the number to change.
+   */
+  capture?: () => Promise<string>;
+  /** A chat model that can read screenshots (Claude, or a local vision model). */
+  vision?: () => VisionClient | null;
+  /** Hands-free tuning: how often to look at the screen while the player plays, and when to give up. */
+  watch?: { pollMs?: number; timeoutMs?: number };
 }
 
 /** Act on an intent only when Jev is at least this confident. */
@@ -43,6 +54,10 @@ const PROCESS_CACHE_MS = 10_000;
 const JEV_BUDGET_MS = 3000;
 /** Extra narrowing steps asked for when the last few candidates disagree. */
 const MAX_EXTRA_STEPS = 2;
+/** Hands-free narrowing: how often to look at the HUD while the player plays. */
+const WATCH_POLL_MS = 20_000;
+/** Hands-free narrowing gives up after this long and asks the player instead. */
+const WATCH_TIMEOUT_MS = 5 * 60_000;
 const PHRASE_STOP = new Set(
   (
     "and but so then give make set to can could please now it its it's i im i'm i've ive me my we our you your the a an " +
@@ -354,6 +369,156 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
       return { handled: true, log: `Player said "${text}"; no chat AI was set up to answer.` };
     }
 
+    /** Hands-free mode needs a screenshot and something that can read it. */
+    let visionDead = false;
+    const canWatch = () => Boolean(opts.capture && opts.vision?.() && !visionDead);
+
+    const sleep = (ms: number) =>
+      new Promise<void>((resolve) => {
+        if (signal.aborted) return resolve();
+        const t = setTimeout(() => {
+          signal.removeEventListener("abort", onAbort);
+          resolve();
+        }, ms);
+        const onAbort = () => {
+          clearTimeout(t);
+          resolve();
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+      });
+
+    /**
+     * Read the HUD number for `what` off a screenshot. Null when it's not visible or the
+     * read failed. Throws when the vision model turns out to be blind (text-only): the
+     * caller falls back to asking the player, and hands-free stays off afterwards.
+     */
+    const readHud = async (what: string, gameName: string | null): Promise<number | null> => {
+      const vc = opts.vision?.();
+      if (visionDead || !vc || !opts.capture) return null;
+      try {
+        const jpeg = await opts.capture();
+        if (signal.aborted) return null;
+        return parseNumber(await vc.ask(jpeg, hudQuestion(what, gameName), signal));
+      } catch (err) {
+        if (err instanceof VisionError && err.code === "no-vision") {
+          visionDead = true;
+          throw err;
+        }
+        return null; // a failed read is a missed poll, not a failure
+      }
+    };
+
+    /** Ask the screen whether the HUD shows the value just written. Never throws. */
+    const confirmOnScreen = async (what: string, value: number): Promise<"yes" | "no" | "unknown"> => {
+      const vc = opts.vision?.();
+      if (visionDead || !vc || !opts.capture) return "unknown";
+      try {
+        const jpeg = await opts.capture();
+        if (signal.aborted) return "unknown";
+        return parseConfirm(await vc.ask(jpeg, confirmQuestion(what, fmt(value)), signal), value);
+      } catch (err) {
+        if (err instanceof VisionError && err.code === "no-vision") visionDead = true;
+        return "unknown";
+      }
+    };
+
+    /**
+     * Hands-free narrowing: the player just plays. Poll the HUD until the number for `what`
+     * moves from `last` (establishing a baseline from the screen when null), then refine the
+     * search to it. A change is only trusted after two consecutive reads agree, so a single
+     * misread can't kill the search. Returns null when watching isn't possible or it timed
+     * out: the caller falls back to asking the player.
+     */
+    const autoNarrow = async (
+      what: string,
+      first: { count: number; addresses: { address: string; value: number; type: string }[] },
+      last: number | null,
+      bar: boolean,
+    ): Promise<QuickOutcome | null> => {
+      const watchId = `jev_${++callId}`;
+      const gameName = session!.target.title || session!.target.name;
+      const done = (ok: boolean, text: string) => emit({ type: "tool_result", id: watchId, ok, text });
+      // Probe: one screenshot now. If capture is off, fall back silently to asking the
+      // player — a missing screen isn't an error, the old path just takes over.
+      try {
+        await opts.capture!();
+      } catch {
+        return null;
+      }
+      emit({ type: "tool_call", id: watchId, name: "watch_screen", input: { what } });
+      emit({ type: "tool_progress", id: watchId, text: `Just play — I'll watch the ${what} number and narrow it down.` });
+      const started = Date.now();
+      const pollMs = opts.watch?.pollMs ?? WATCH_POLL_MS;
+      const timeoutMs = opts.watch?.timeoutMs ?? WATCH_TIMEOUT_MS;
+      let result = first;
+      for (;;) {
+        if (signal.aborted) {
+          done(false, "stopped");
+          return null;
+        }
+        if (Date.now() - started > timeoutMs) {
+          done(false, "timed out");
+          return null;
+        }
+        emit({
+          type: "tool_progress",
+          id: watchId,
+          text: `Watching for the ${what} number to change… (${Math.round((Date.now() - started) / 1000)}s)`,
+        });
+        await sleep(pollMs);
+        if (signal.aborted) {
+          done(false, "stopped");
+          return null;
+        }
+        let seen: number | null;
+        try {
+          seen = await readHud(what, gameName);
+        } catch {
+          done(false, "the chat model can't see images");
+          return null;
+        }
+        if (seen === null || seen === last) continue;
+        if (last === null) {
+          last = seen; // baseline established; need a second reading to judge a change
+          continue;
+        }
+        // A change is only trusted when two back-to-back reads agree.
+        let again: number | null = null;
+        try {
+          again = await readHud(what, gameName);
+        } catch {
+          done(false, "the chat model can't see images");
+          return null;
+        }
+        if (again !== seen) {
+          last = again ?? last;
+          continue;
+        }
+        const out = await run("find_value", { what, value: seen });
+        if (!out.ok) {
+          done(false, out.text);
+          return notHandled(`I saw the ${what} change to ${fmt(seen)}, but narrowing failed: ${out.text}`);
+        }
+        result = JSON.parse(out.text);
+        last = seen;
+        if (want?.what === what.toLowerCase()) want.bar = false; // it has a readable number
+        if (result.count === 0 || result.count > FEW) {
+          emit({
+            type: "tool_progress",
+            id: watchId,
+            text:
+              result.count === 0
+                ? `That reading (${fmt(seen)}) matched nothing — probably a misread. Still watching…`
+                : `${result.count.toLocaleString("en-US")} places left. Keep playing…`,
+          });
+          if (result.count === 0) last = null; // the search died with the misread; re-baseline
+          continue;
+        }
+        done(true, `narrowed to ${result.count} place${result.count === 1 ? "" : "s"}`);
+        return afterSearch(what, result, { value: seen });
+      }
+    };
+
     /** A goal as a number: "max" depends on what it holds now, and on whether it's a bar. */
     const resolve = (goal: Goal, current: number, bar: boolean) =>
       typeof goal === "number" ? goal : bar ? barMax(current) : maxFor(current);
@@ -375,6 +540,7 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
         }
         return say(`Locked ${what} at ${shown}, so it won't go down. Does the game show it? Say "unlock ${what}" to let it change again.`);
       }
+      if (canWatch()) return writeVerified(what, value, shown, targets);
       const out = await run("write_value", { addresses: targets.map((t) => t.address), value, label: what });
       if (!out.ok) return notHandled(`Jev tried to set ${what} to ${fmt(value)}, but the write failed: ${out.text}`);
       const report = JSON.parse(out.text) as { results: { warning?: string; error?: string }[] };
@@ -385,6 +551,55 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
       return say(
         `Set ${what} to ${shown}${targets.length > 1 ? ` (${targets.length} places)` : ""}. ` +
           `Does the game show it now? Some games only redraw after you use or open something. If not, say "undo".`,
+      );
+    };
+
+    /**
+     * One candidate at a time, each verified on the game's screen: a write can stick in
+     * memory at an address that is only a copy of the real value, so the game never shows
+     * it. The first candidate the HUD confirms wins; the rest are undone. Never claims
+     * success the screen didn't confirm.
+     */
+    const writeVerified = async (
+      what: string,
+      value: number,
+      shown: string,
+      targets: { address: string; value: number; type: string }[],
+    ) => {
+      const verifyId = `jev_${++callId}`;
+      emit({ type: "tool_call", id: verifyId, name: "verify_on_screen", input: { what, expected: value } });
+      let unverified = false;
+      for (const t of targets) {
+        if (signal.aborted) break;
+        emit({ type: "tool_progress", id: verifyId, text: `Trying ${t.address}…` });
+        const out = await run("write_value", { addresses: [t.address], value, label: what, type: t.type });
+        if (!out.ok) continue;
+        const res = (JSON.parse(out.text) as { results: { change_id?: number; warning?: string; error?: string }[] })
+          .results[0];
+        if (!res || res.error || res.warning || res.change_id === undefined) continue; // didn't stick
+        const verdict = await confirmOnScreen(what, value);
+        if (verdict === "yes") {
+          emit({ type: "tool_result", id: verifyId, ok: true, text: `the game shows ${what} at ${shown}` });
+          return say(`Done — the game shows ${what} at ${shown}.`);
+        }
+        if (verdict === "unknown") {
+          // The counter isn't on screen: leave this one (it held in memory) and say so honestly.
+          unverified = true;
+          break;
+        }
+        await run("undo_change", { change_id: res.change_id }); // a copy, not the real value
+      }
+      if (unverified) {
+        emit({ type: "tool_result", id: verifyId, ok: true, text: "the counter wasn't on screen" });
+        return say(
+          `Set ${what} to ${shown} and it held in memory, but I couldn't see the ${what} counter on your screen ` +
+            `to confirm. Check the game — if it's wrong, say "undo".`,
+        );
+      }
+      emit({ type: "tool_result", id: verifyId, ok: false, text: "no candidate showed on screen" });
+      return say(
+        `I tried every candidate for ${what} and none of them showed up in the game. Say "lock ${what}" and I'll ` +
+          `hold the most likely one there instead.`,
       );
     };
 
@@ -441,21 +656,71 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
         return say(`Unlocked ${label}.`);
       }
       case "find_and_change": {
-        if (currentNumber === null || wanted === null || !thing) return notHandled();
+        if (wanted === null || !thing) return notHandled();
+        let current = currentNumber;
+        let fromScreen = false;
+        const gameName = session!.target.title || session!.target.name;
+        if (current === null && canWatch()) {
+          // The player didn't say how much they have: read it off the HUD instead of asking.
+          const lookId = `jev_${++callId}`;
+          emit({ type: "tool_call", id: lookId, name: "look_at_screen", input: { what: thing } });
+          try {
+            current = await readHud(thing, gameName);
+            emit({ type: "tool_result", id: lookId, ok: true, text: current === null ? "not visible" : `reads ${current}` });
+          } catch {
+            emit({ type: "tool_result", id: lookId, ok: false, text: "the chat model can't see images" });
+            current = null;
+          }
+          fromScreen = current !== null;
+        }
+        if (current === null) return notHandled();
         const out = await run("find_value", {
           what: thing,
-          value: currentNumber,
+          value: current,
           new_search: true,
           ...(typeof wanted === "number" ? { goal: wanted } : {}),
         });
-        if (!out.ok) return notHandled(`Jev started a search for ${thing} = ${fmt(currentNumber)}, but it failed: ${out.text}`);
+        if (!out.ok) return notHandled(`Jev started a search for ${thing} = ${fmt(current)}, but it failed: ${out.text}`);
+        const parsed = JSON.parse(out.text) as { count: number; addresses: { address: string; value: number; type: string }[] };
+        if (parsed.count === 0 && fromScreen) {
+          return say(
+            `I read ${fmt(current)} for ${thing} off your screen, but nothing in memory holds that number. ` +
+              `What's the exact number the game shows?`,
+          );
+        }
         want = { what: thing.toLowerCase(), goal: wanted, bar: false, session: session!, extra: 0 };
-        return afterSearch(thing, JSON.parse(out.text), { value: currentNumber });
+        return afterSearch(thing, parsed, { value: current });
       }
       case "change_no_number": {
         // No number yet: snapshot now, so both "it says 73" and "it went down" can narrow it next.
         if (!thing) return notHandled();
         const goal = wanted ?? "max";
+        const gameName = session!.target.title || session!.target.name;
+        if (canWatch()) {
+          // A number on the HUD turns this into the fast numbered search.
+          let seen: number | null = null;
+          try {
+            seen = await readHud(thing, gameName);
+          } catch {
+            seen = null;
+          }
+          if (seen !== null) {
+            const out = await run("find_value", {
+              what: thing,
+              value: seen,
+              new_search: true,
+              ...(typeof goal === "number" ? { goal } : {}),
+            });
+            if (out.ok) {
+              const parsed = JSON.parse(out.text);
+              if (parsed.count > 0) {
+                want = { what: thing.toLowerCase(), goal, bar: false, session: session!, extra: 0 };
+                return afterSearch(thing, parsed, { value: seen });
+              }
+            }
+            // Misread (or nothing holds it): fall through to the snapshot path.
+          }
+        }
         const out = await run("find_value", {
           what: thing,
           new_search: true,
@@ -464,10 +729,7 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
         });
         if (!out.ok) return notHandled(`Jev tried to start a search for ${thing} without a number, but: ${out.text}`);
         want = { what: thing.toLowerCase(), goal, bar: true, session: session!, extra: 0 };
-        return say(
-          `On it. Tell me the number the game shows for ${thing}, or if it's a bar or has no number, make it go down or up ` +
-            `in the game (take a hit, eat, use one...) and tell me which way it went.`,
-        );
+        return afterSearch(thing, JSON.parse(out.text), {});
       }
       case "report_new_amount": {
         if (currentNumber === null || !search) return notHandled();
@@ -524,6 +786,15 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
         return writeGoal(what, goal, result.addresses, Boolean(mine?.bar));
       }
       const n = result.count.toLocaleString("en-US");
+      // Too many to write: narrow further. Hands-free when the player said what to set it to
+      // and the screen can be read: the player just plays, Scruff watches the HUD for the
+      // number to change and narrows on its own.
+      const goal: Goal | null = mine?.goal ?? session!.searchGoal ?? null;
+      if (goal !== null && canWatch()) {
+        const watched = await autoNarrow(what, result, step.value ?? session!.searchValue ?? null, Boolean(mine?.bar));
+        if (watched) return watched;
+        // Watching wasn't possible or timed out: fall through and ask the player.
+      }
       if (step.value !== undefined) {
         return say(`${n} places hold ${fmt(step.value)}. Change the ${what} in the game (use, spend or pick some up), then tell me the new number.`);
       }

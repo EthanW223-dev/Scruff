@@ -18,6 +18,12 @@ Pro/Max subscription through Claude Desktop or Claude Code, or any model running
   Scruff snapshots the game's memory, you play a little and tell it "it went down", "same" or
   "it went up", and a few answers later it's found and filled. While you play it quietly drops places that change on their own (timers,
   animations), and it checks the game actually shows a change before telling you it worked.
+  When the overlay can see your game window, it's hands-free: Scruff reads the number off the
+  HUD itself (you don't even have to say how much you have), watches the counter change while
+  you play to narrow the search, then tries the remaining candidates one at a time and only
+  claims success when the game visibly shows the new value — a write that sticks in a copy of
+  the real value gets undone, not announced. Needs a chat model that can read screenshots
+  (Claude, or a vision model on your PC); a text-only model falls back to asking you.
 - **Change anything in Unity games.** For Unity games (built with Mono, like many indie games)
   Scruff can add its Unity bridge with one click: then the AI can change any object in the game,
   not just numbers: colors, skins and looks, sizes, movement speed, gravity, spawn collectibles or

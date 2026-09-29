@@ -14,9 +14,11 @@ const FALLBACKS = /^claude-(opus-5|fable-5)/;
 export function claudeStreamFactory(client: Anthropic, effort: Effort): StreamFactory {
   return (params, signal) => {
     const modern = MODERN.test(params.model);
+    // strictVision is a Scruff-internal flag for the OpenAI-compatible provider; never send it.
+    const { strictVision: _strictVision, ...rest } = params as typeof params & { strictVision?: boolean };
     return client.beta.messages.stream(
       {
-        ...params,
+        ...rest,
         // Caches the whole prefix up to the latest message, so each step only pays for what's new.
         cache_control: { type: "ephemeral" },
         ...(modern ? { thinking: { type: "adaptive", display: "summarized" }, output_config: { effort } } : {}),

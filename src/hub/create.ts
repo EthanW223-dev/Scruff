@@ -12,6 +12,7 @@ import { ScreenBridge } from "./screen.ts";
 import { startServer } from "./server.ts";
 import { ThemeStore } from "./themes.ts";
 import { unityBridgeTools } from "./unitybridge.ts";
+import { visionFromBrain, type VisionClient } from "./vision.ts";
 
 export interface HubOptions {
   root: string;
@@ -34,6 +35,20 @@ export async function createHub(opts: HubOptions) {
   const screen = new ScreenBridge();
   const dataDir = opts.dataDir ?? path.join(opts.root, ".scruff");
   const themes = new ThemeStore(path.join(dataDir, "themes.json"), games);
+
+  const brain = opts.brain ?? opts.router?.brain();
+  if (!brain) throw new Error("createHub needs a router or a brain.");
+  /**
+   * A fresh vision client per call, built from a fresh Brain: if the chat model is a
+   * text-only local one, its blindness must not poison the agent's own provider state.
+   */
+  const vision = (): VisionClient | null => {
+    try {
+      return visionFromBrain(() => opts.router?.brain() ?? brain);
+    } catch {
+      return null;
+    }
+  };
 
   const statusNote = (): string => {
     const game = games.state();
@@ -61,13 +76,11 @@ export async function createHub(opts: HubOptions) {
     })),
     ...gameFileTools(games, path.join(dataDir, "backups")),
     ...unityBridgeTools(games, adapters, { bridgeDll: path.join(opts.root, "bridge", "ScruffBridge.dll"), port: opts.port }),
-    ...screen.tools(),
+    ...screen.tools(vision),
     themes.tool(),
     adapters.dispatchTool(),
   ];
 
-  const brain = opts.brain ?? opts.router?.brain();
-  if (!brain) throw new Error("createHub needs a router or a brain.");
   const jev = new JevService(new JevSettings(path.join(dataDir, "typesafe.json")), opts.jev);
   const agent = new Agent({
     brain,
@@ -79,6 +92,8 @@ export async function createHub(opts: HubOptions) {
       tools,
       chatReady: () => opts.router?.describe().ready ?? true,
       report: (err) => jev.report(err),
+      capture: () => screen.capture(),
+      vision,
     }),
   });
 

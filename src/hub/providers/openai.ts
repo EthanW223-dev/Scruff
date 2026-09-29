@@ -38,6 +38,9 @@ export function openAICompatibleStreamFactory(config: OpenAICompatibleConfig): S
         stream = await client.chat.completions.create(toRequest(params, vision), { signal });
       } catch (err) {
         if (vision && isImageRejection(err)) {
+          // Vision calls from Scruff (screenshots) would rather fail than have a blind
+          // model answer without the image.
+          if (strictVision(params)) throw new ImageNotSupportedError(`${config.label} can't see images with ${params.model}.`);
           vision = false;
           stream = await client.chat.completions.create(toRequest(params, false), { signal });
         } else {
@@ -235,6 +238,14 @@ export class ThinkSplitter {
 function isImageRejection(err: unknown): boolean {
   return err instanceof OpenAI.APIError && err.status === 400 && /image|vision|multimodal/i.test(err.message);
 }
+
+/** Set on params by callers that need images to fail loudly instead of answering blind. */
+export function strictVision(params: Params): boolean {
+  return (params as { strictVision?: boolean }).strictVision === true;
+}
+
+/** Thrown instead of silently dropping the image when strictVision is set. */
+export class ImageNotSupportedError extends Error {}
 
 function friendlyError(err: unknown, config: OpenAICompatibleConfig, model: string): Error {
   if (err instanceof OpenAI.APIUserAbortError) return err;

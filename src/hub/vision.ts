@@ -90,6 +90,27 @@ export function confirmQuestion(what: string, expected: string): string {
   );
 }
 
+/** "Did the visual change happen?" — answered from a screenshot after a mod. */
+export function visualQuestion(change: string): string {
+  return (
+    `This is a screenshot of a game. The player just asked for this change: "${change}". ` +
+    `Did it visibly happen? Reply with just "yes" if you can see the change, "no" if the scene ` +
+    `is visible but the change clearly didn't happen, or "not visible" if you can't tell from this shot.`
+  );
+}
+
+/**
+ * Did the screen confirm the mod? "yes" it's visible, "no" the scene is visible but unchanged,
+ * "unknown" when the shot can't tell (never treat that as a failure).
+ */
+export function parseVisual(reply: string): "yes" | "no" | "unknown" {
+  const r = reply.toLowerCase();
+  if (/not visible|can't see|cannot see|unable to|don't see|can't tell/i.test(r)) return "unknown";
+  if (/\byes\b/.test(r)) return "yes";
+  if (/\bno\b/.test(r)) return "no";
+  return "unknown";
+}
+
 /** First number in a reply ("12", "about 4.75 cans", "not visible" → null). */
 export function parseNumber(reply: string): number | null {
   if (/not visible|can't see|cannot see|unable to|don't see/i.test(reply)) return null;

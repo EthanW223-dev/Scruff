@@ -187,3 +187,86 @@ test("hands-free falls back to asking when the screen can't be read", async () =
   assert.match(reply, /tell me the new number/);
   games.session?.close();
 });
+
+test("a misread that empties the search restarts fresh instead of watching nothing", async () => {
+  const backend = new FakeBackend(plants);
+  for (const a of plants) backend.set(a, "int32", 12);
+
+  const games = new GameManager();
+  const session = new GameSession(
+    { pid: process.pid, name: "TestGame", title: "TestGame" },
+    backend,
+  );
+  games.session = session;
+  const tools = memoryTools(games, () => ({}));
+
+  const eaten1 = plants.slice(0, 12);
+  const eaten2 = plants.slice(0, 2);
+  let visionCalls = 0;
+  let confirms = 0;
+  const vision: VisionClient = {
+    model: "fake-vision",
+    ask: async (_jpeg, _question, _signal) => {
+      switch (visionCalls++) {
+        case 0:
+          return "12"; // initial read off the HUD
+        case 1:
+          return "12"; // poll: nothing changed yet
+        case 2:
+          return "7"; // misread: two agreeing reads...
+        case 3:
+          return "7"; // ...so the refine runs and matches nothing
+        case 4:
+          return "12"; // poll after the fresh restart: back at the trusted number
+        case 5:
+          for (const a of eaten1) backend.set(a, "int32", 11);
+          return "11"; // the player really ate
+        case 6:
+          return "11"; // confirmed
+        case 7:
+          return "11"; // poll
+        case 8:
+          for (const a of eaten2) backend.set(a, "int32", 10);
+          return "10"; // ate again
+        case 9:
+          return "10"; // confirmed
+        default: {
+          confirms++;
+          return confirms === 1 ? "The soup count shows 11." : "The soup count shows 99.";
+        }
+      }
+    },
+  };
+
+  const jev = fakeJev((id, keys, criteria) => {
+    if (id === "intent") return "find_and_change";
+    if (id === "wanted_number") return keys.find((k) => String(criteria[k]).startsWith("99")) ?? "none";
+    if (id === "current_number") return "none";
+    if (id === "thing") return keys.find((k) => /food/i.test(String(criteria[k]))) ?? "none";
+    return keys.includes("none") ? "none" : keys[0];
+  });
+
+  const events: AgentEvent[] = [];
+  const handler = quickPath({
+    jev: () => jev,
+    games,
+    tools,
+    chatReady: () => false,
+    capture: async () => "fake-jpeg",
+    vision: () => vision,
+    watch: { pollMs: 5, timeoutMs: 10_000 },
+  });
+  const outcome = await handler("give me 99 food", (e) => events.push(e), new AbortController().signal);
+
+  assert.equal(outcome.handled, true);
+  // The misread emptied the search; Scruff restarted it fresh instead of watching on nothing.
+  const progress = events
+    .filter((e) => e.type === "tool_progress")
+    .map((e) => (e as { text: string }).text)
+    .join("\n");
+  assert.match(progress, /restarting the search from 12/);
+  // ...and still finished the job hands-free afterwards.
+  const reply = events.filter((e) => e.type === "text").map((e) => (e as { text: string }).text).join("");
+  assert.match(reply, /Done — the game shows food at 99/);
+  session.close();
+});

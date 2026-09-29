@@ -82,19 +82,32 @@ access to the game, run the terminal as administrator.
 - Prefer a browser tab or a second screen? `npm run hub` starts Scruff without the overlay, and
   the same interface is at http://localhost:7777 (also from your phone with `npm run hub -- --lan`).
 
-## Change anything (Unity games)
+## Change anything (full mod layer)
 
-Memory editing only changes numbers. To change *anything* in a Unity game, attach to it, then
-click **install** next to *Bridge* in the Game files panel (or just ask, e.g. "make me huge", and
-the AI offers it). Scruff adds the [BepInEx](https://github.com/BepInEx/BepInEx) mod loader and its
-bridge plugin to the game folder, downloading BepInEx from GitHub. Restart the game once, and then
-ask for whatever you like:
+Memory editing only changes numbers. To change *anything else*, just ask — recolor, resize,
+hide or remove things, spawn copies, slow motion, gravity, the game's own functions:
 
 > "Make my character pink and twice as big."
 > "Give me the skin that enemy has."
 > "Low gravity, and slow motion."
 > "Spawn 20 coins next to me."
 > "Get rid of that wall." / "Take me to the next level."
+
+Every visual mod is checked on screen before Scruff claims it worked: if the game doesn't
+show the change, Scruff undoes it and tries the next candidate instead of pretending.
+
+What works depends on the engine (the status note in chat always says which tier you're on):
+
+- **Unity — full.** Attach, click **install** next to *Bridge* in the Game files panel (or just
+  ask for a mod and the AI offers it). Scruff adds the [BepInEx](https://github.com/BepInEx/BepInEx)
+  mod loader and its bridge plugin to the game folder. Restart the game once, then everything
+  above works through the live bridge.
+- **Unreal Engine — numbers now, bridge scaffolded.** Number changes work via memory editing.
+  Structural mods need the Unreal bridge in `bridge-unreal/`, which is an honest scaffold:
+  it compiles but is untested against real games (per-version pattern verification required —
+  see its README). Scruff says so instead of pretending.
+- **Everything else (Godot, GameMaker, Source, ...) — numbers only.** Colors, models, spawning
+  and removing things need per-game reverse engineering, which Scruff doesn't do.
 
 **remove** in the same place takes out exactly what Scruff added. It works for Unity games built
 with Mono (the Game files panel says *Unity (Mono)*); IL2CPP Unity games and other engines get

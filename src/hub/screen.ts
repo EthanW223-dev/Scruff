@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import type { WebSocket } from "ws";
 import { z } from "zod";
 import { defineTool, json, type HubTool } from "./tools.ts";
-import { confirmQuestion, parseConfirm, type VisionClient } from "./vision.ts";
+import { confirmQuestion, parseConfirm, parseVisual, visualQuestion, type VisionClient } from "./vision.ts";
 
 interface PendingFrame {
   resolve(jpegBase64: string): void;
@@ -97,6 +97,31 @@ export class ScreenBridge extends EventEmitter {
           const data = await this.capture();
           const reply = await vc.ask(data, confirmQuestion(what, fmtNum(expected)), ctx.signal);
           return json({ verdict: parseConfirm(reply, expected), model_said: reply });
+        },
+      }),
+      defineTool({
+        name: "verify_visual_change",
+        readOnly: true,
+        description:
+          "Check whether a visual mod actually showed up in the game (recolor, hide/remove, spawn, " +
+          "move/resize, slow motion). Call it after every bridge mod, the way verify_on_screen follows a " +
+          "memory write: if the screen says no, undo the change and try the next candidate object. " +
+          "Returns yes (visible), no (scene visible but unchanged: undo and retry), or unknown " +
+          "(can't tell from this shot: don't treat that as a failure).",
+        input: z.object({
+          change: z.string().describe("What was supposed to visibly change, e.g. 'the trees are purple'"),
+        }),
+        run: async ({ change }, ctx) => {
+          const vc = vision?.();
+          if (!vc) {
+            throw new Error(
+              "No vision model is set up: pick Claude or a local vision model (e.g. ollama pull qwen3-vl) in the AI menu.",
+            );
+          }
+          ctx.progress("Checking the game screen…");
+          const data = await this.capture();
+          const reply = await vc.ask(data, visualQuestion(change), ctx.signal);
+          return json({ verdict: parseVisual(reply), model_said: reply });
         },
       }),
     ];

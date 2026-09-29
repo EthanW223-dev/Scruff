@@ -451,6 +451,7 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
       const pollMs = opts.watch?.pollMs ?? WATCH_POLL_MS;
       const timeoutMs = opts.watch?.timeoutMs ?? WATCH_TIMEOUT_MS;
       let result = first;
+      let deadRestarts = 0; // fresh restarts after misread-emptied searches; capped so it can't loop
       for (;;) {
         if (signal.aborted) {
           done(false, "stopped");
@@ -494,13 +495,40 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
           last = again ?? last;
           continue;
         }
+        const prevTrusted = last; // what the current search was built on; a misread must not kill it
         const out = await run("find_value", { what, value: seen });
         if (!out.ok) {
           done(false, out.text);
           return notHandled(`I saw the ${what} change to ${fmt(seen)}, but narrowing failed: ${out.text}`);
         }
         result = JSON.parse(out.text);
-        last = seen;
+        if (result.count === 0) {
+          // The reading was a misread (or the display changed encoding): the refine emptied the
+          // search, so watching on would narrow nothing. Restart fresh from the last trusted
+          // reading instead. Give up after a couple of dead restarts and ask the player.
+          if (++deadRestarts > 2) {
+            done(false, "search kept coming up empty");
+            return notHandled(
+              `I kept seeing the ${what} change but every search came up empty — the game may store it ` +
+                `somewhere I can't reach. Tell me the number it shows and I'll try a direct search.`,
+            );
+          }
+          emit({
+            type: "tool_progress",
+            id: watchId,
+            text: `That reading (${fmt(seen)}) matched nothing — restarting the search from ${fmt(prevTrusted)}. Keep playing…`,
+          });
+          const fresh = await run("find_value", { what, value: prevTrusted, new_search: true });
+          if (!fresh.ok) {
+            done(false, fresh.text);
+            return notHandled(`Restarting the ${what} search failed: ${fresh.text}`);
+          }
+          result = JSON.parse(fresh.text);
+          last = prevTrusted;
+        } else {
+          last = seen;
+          deadRestarts = 0;
+        }
         if (want?.what === what.toLowerCase()) want.bar = false; // it has a readable number
         if (result.count === 0 || result.count > FEW) {
           emit({
@@ -508,10 +536,9 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
             id: watchId,
             text:
               result.count === 0
-                ? `That reading (${fmt(seen)}) matched nothing — probably a misread. Still watching…`
+                ? `Nothing holds ${fmt(last)} either. Keep playing…`
                 : `${result.count.toLocaleString("en-US")} places left. Keep playing…`,
           });
-          if (result.count === 0) last = null; // the search died with the misread; re-baseline
           continue;
         }
         done(true, `narrowed to ${result.count} place${result.count === 1 ? "" : "s"}`);

@@ -6,12 +6,13 @@ import { gameFileTools } from "./gamefiles.ts";
 import { describeProfile } from "../games/profile.ts";
 import { JevService, JevSettings, type Jev } from "./jev.ts";
 import { McpEndpoint } from "./mcp.ts";
+import { engineModSupport } from "./mods.ts";
 import { quickPath } from "./quick.ts";
 import type { ModelRouter } from "./models.ts";
 import { ScreenBridge } from "./screen.ts";
 import { startServer } from "./server.ts";
 import { ThemeStore } from "./themes.ts";
-import { unityBridgeTools } from "./unitybridge.ts";
+import { unityBridgeConnected, unityBridgeTools } from "./unitybridge.ts";
 import { visionFromBrain, type VisionClient } from "./vision.ts";
 
 export interface HubOptions {
@@ -63,6 +64,9 @@ export async function createHub(opts: HubOptions) {
       attached && games.profile ? describeProfile(games.profile) : "",
       attached ? (themes.hasSaved() ? "The overlay is already styled for this game." : "The overlay isn't styled for this game yet.") : "",
       adapters.describe(),
+      attached && games.profile
+        ? `Mod support: ${engineModSupport(games.profile.engine, unityBridgeConnected(adapters)).note}`
+        : "",
     ]
       .filter(Boolean)
       .join("\n");

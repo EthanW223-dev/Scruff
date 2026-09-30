@@ -504,10 +504,17 @@ function renderAi() {
 // ---------- AI menu: provider cards + guided connect ----------
 
 const PROVIDER_META = {
-  claude: { logo: "logos/anthropic.svg", keyUrl: "https://console.anthropic.com/settings/keys", keyKind: "Anthropic" },
+  claude: { logo: "logos/anthropic.svg" },
+  openai: { logo: "logos/openai.svg" },
+  openrouter: { logo: "logos/openrouter.svg" },
+  groq: { logo: "logos/groq.svg" },
+  deepseek: { logo: "logos/deepseek.svg" },
+  mistral: { logo: "logos/mistral.svg" },
+  gemini: { logo: "logos/gemini.svg" },
+  xai: { logo: "logos/xai.svg" },
   ollama: { logo: "logos/ollama.svg" },
   lmstudio: { logo: "logos/lmstudio.svg" },
-  openai: { logo: "logos/openai.svg", keyUrl: "https://platform.openai.com/api-keys", keyKind: "OpenAI" },
+  custom: { logo: "logos/custom.svg" },
 };
 const JEV_LOGO = "logos/typesafe.svg";
 
@@ -814,7 +821,9 @@ function providerCards() {
         ? ["ready", "on"]
         : p.id === "ollama" || p.id === "lmstudio"
           ? ["not running", "warn"]
-          : ["needs key", "warn"],
+          : p.id === "custom"
+            ? ["not set", "warn"]
+            : ["needs key", "warn"],
       detail: p.ready ? `${p.detail} · ${p.models.length} model${p.models.length === 1 ? "" : "s"}` : p.detail,
       // The Claude subscription (Pro/Max, no key) lives under the Claude card, not at the bottom.
       caption: p.id === "claude" ? "Use your Claude subscription — no key needed" : undefined,
@@ -1040,14 +1049,23 @@ function buildProviderPanel(panel, p) {
     return;
   }
 
+  // Custom server: any OpenAI-compatible endpoint, URL + optional key.
+  if (p.id === "custom") {
+    buildCustomPanel(panel, p);
+    return;
+  }
+
   // Cloud provider without a key: guided connect instead of a bare key field.
+  // Key links come from the hub so the dashboard never hardcodes providers.
+  const keyUrl = p.keyUrl ?? meta.keyUrl;
+  const keyKind = p.keyKind ?? meta.keyKind ?? p.label;
   const steps = el("ol", "connect-steps");
   const s1 = el("li");
   const a = el("a");
-  a.href = meta.keyUrl;
+  a.href = keyUrl;
   a.target = "_blank";
   a.rel = "noreferrer";
-  a.textContent = `Get an API key from ${meta.keyKind}`;
+  a.textContent = `Get an API key from ${keyKind}`;
   s1.append(a);
   const s2 = el("li");
   const [keyRow, input] = keyInputRow("Paste the key here");
@@ -1080,6 +1098,85 @@ function buildProviderPanel(panel, p) {
     }
   });
   actions.append(connectBtn, el("span", "connect-note", "Checked instantly · saved on this PC only."));
+  panel.append(steps, errLine, actions);
+}
+
+/**
+ * The "custom" provider: any OpenAI-compatible server. URL + optional key, and
+ * the model picker on top when it's already connected.
+ */
+function buildCustomPanel(panel, p) {
+  if (p.ready && p.models.length) {
+    const row = el("div", "model-row");
+    row.append(el("label", null, "Model"));
+    const sel = el("select");
+    for (const m of p.models) {
+      const o = el("option", null, m);
+      o.value = m;
+      sel.append(o);
+    }
+    const current = p.id === modelsMsg.current.provider ? modelsMsg.current.model : p.models[0];
+    sel.value = [...sel.options].some((o) => o.value === current) ? current : (p.models[0] ?? "");
+    row.append(sel);
+    const actions = el("div", "connect-actions");
+    const use = el("button", "primary", "Use this model");
+    use.type = "button";
+    use.addEventListener("click", () => {
+      if (!sel.value) return toast("Pick a model first.", "error");
+      send({ type: "set_model", provider: p.id, model: sel.value });
+      $("ai-dialog").close();
+    });
+    actions.append(use, el("span", "connect-note", "Switching starts a new chat."));
+    panel.append(row, actions);
+  }
+
+  const steps = el("ol", "connect-steps");
+  const s1 = el("li");
+  s1.append(el("span", null, "Server address — anything OpenAI-compatible (vLLM, llama.cpp, a proxy): "));
+  const urlInput = el("input");
+  urlInput.type = "url";
+  urlInput.placeholder = "https://my-server:8000/v1";
+  urlInput.autocomplete = "off";
+  urlInput.spellcheck = false;
+  urlInput.value = p.baseURL ?? "";
+  s1.append(urlInput);
+  const s2 = el("li");
+  const [keyRow, keyInput] = keyInputRow("API key (leave empty if your server needs none)");
+  s2.append(keyRow);
+  steps.append(s1, s2);
+  const errLine = el("p", "connect-error");
+  errLine.hidden = true;
+  const actions = el("div", "connect-actions");
+  const saveBtn = el("button", "primary", p.ready ? "Save changes" : "Connect");
+  saveBtn.type = "button";
+  saveBtn.dataset.connect = "1";
+  const go = () => {
+    const url = urlInput.value.trim();
+    const key = keyInput.value.trim();
+    if (!url && !key && !p.baseURL) {
+      urlInput.focus();
+      return;
+    }
+    connectBusy = p.id;
+    errLine.hidden = true;
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = `<span class="spin"></span> Checking…`;
+    send({ type: "set_provider_key", provider: "custom", key: key || null, baseURL: url });
+  };
+  saveBtn.addEventListener("click", go);
+  urlInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      go();
+    }
+  });
+  actions.append(saveBtn, el("span", "connect-note", "Checked instantly · saved on this PC only."));
+  if (p.keySource === "saved") {
+    const forget = el("button", "link", "Forget the saved key");
+    forget.type = "button";
+    forget.addEventListener("click", () => send({ type: "set_provider_key", provider: "custom", key: null }));
+    actions.append(forget);
+  }
   panel.append(steps, errLine, actions);
 }
 

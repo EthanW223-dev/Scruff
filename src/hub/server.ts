@@ -210,7 +210,8 @@ export async function startServer(opts: ServerOptions): Promise<http.Server> {
         if (!router) throw new Error("This Telos can't switch models.");
         const id = String(msg.provider ?? "");
         const key = typeof msg.key === "string" ? msg.key : null;
-        await router.setProviderKey(id, key);
+        const baseURL = typeof msg.baseURL === "string" ? msg.baseURL : undefined;
+        await router.setProviderKey(id, key, baseURL);
         toast(ws, key ? "Connected. Key saved on this PC." : "Key forgotten.", "info");
         ws.send(
           JSON.stringify({
@@ -290,7 +291,9 @@ export async function startServer(opts: ServerOptions): Promise<http.Server> {
         break;
       case "attach": {
         const s = await games.attach(Number(msg.pid));
-        toast(ws, `Attached to ${s.target.name}`, "info");
+        const engine = games.profile?.engine;
+        const tier = engine ? (engine.startsWith("Unity") ? "full mods" : engine === "Unreal Engine" ? "numbers + Unreal bridge" : "number mods") : "";
+        toast(ws, `Attached to ${s.target.name}${engine ? ` · ${engine}` : ""}${tier ? ` — ${tier}` : ""}`, "info");
         break;
       }
       case "detach":

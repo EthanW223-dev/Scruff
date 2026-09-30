@@ -19,7 +19,7 @@ export async function startTelos(options: { lan?: boolean; quiet?: boolean } = {
   };
   const router = new ModelRouter(process.env, path.join(root, ".scruff", "settings.json"), (process.env.SCRUFF_EFFORT ?? "medium") as Effort);
   await router.init(process.env);
-  const token = crypto.randomBytes(12).toString("base64url");
+  const token = process.env.SCRUFF_TOKEN || crypto.randomBytes(12).toString("base64url");
 
   const hub = await createHub({ root, port, lan: Boolean(options.lan), token, router });
 

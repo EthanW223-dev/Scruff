@@ -1,6 +1,13 @@
-// The in-game HUD: one button (Telos's icon — a thinking-orbs canvas, see orb.js), Telos's replies
-// as little windows, and the values it's holding. Everything is click-through except the button;
-// the full panel opens with a hotkey or a click on it. The button is draggable (see below).
+// The HUD: Telos's icon (a thinking-orbs canvas, see orb.js) combined with its
+// reply text into ONE component (#hud-unit). The unit is just the orb at rest;
+// when a reply streams in it expands to orb + text, then collapses back. The
+// orb itself never leaves, so mic state (listening…) is always readable.
+//
+// Two windows run this page:
+//   - the standalone HUD window (?hud=1): the whole UI is the unit. Dragging
+//     it moves the window itself; the window never follows the game.
+//   - the main overlay window: only the panel wiring + click-through live
+//     here; the orb, replies, toasts and voice playback are the HUD's job.
 
 import { SpeechStreamer } from "./audio.js";
 import { AgentOrb } from "./orb.js";
@@ -8,10 +15,43 @@ import { AgentOrb } from "./orb.js";
 const $ = (id) => document.getElementById(id);
 const MAX_TOASTS = 4;
 
-export function startHud({ toolLabel }) {
+export function startHud({ toolLabel, hudOnly = false, speak = false }) {
   const bridge = window.scruffOverlay;
+  if (hudOnly) startHudWindow({ bridge, toolLabel, speak });
+  else startPanelWindow({ bridge });
+}
+
+/** The main overlay window: panel open/close and click-through. No orb here. */
+function startPanelWindow({ bridge }) {
+  // Click-through everywhere except interactive elements (the panel, which the
+  // main process handles).
+  let interactive = false;
+  document.addEventListener("mousemove", (e) => {
+    const over = Boolean(e.target.closest?.(".interactive"));
+    if (over !== interactive) {
+      interactive = over;
+      bridge.setInteractive(over, false);
+    }
+  });
+
+  // Closing the panel hands focus back to the game.
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && document.body.classList.contains("panel-open") && !document.querySelector("dialog[open]")) {
+      bridge.setPanel(false);
+    }
+  });
+  document.addEventListener("mousedown", (e) => {
+    if (!document.body.classList.contains("panel-open")) return;
+    if (!e.target.closest(".app, dialog")) bridge.setPanel(false);
+  });
+}
+
+/** The standalone HUD window: the orb unit, its reply text, toasts, voice. */
+function startHudWindow({ bridge, toolLabel, speak }) {
   const hud = $("hud");
+  const unit = $("hud-unit");
   const button = $("hud-button");
+  const replyEl = $("hud-reply");
   hud.hidden = false;
   // Telos's icon: a thinking-orbs canvas. Black & white ink by default; the
   // "state" handler below tints it with the active game's accent color.
@@ -21,8 +61,6 @@ export function startHud({ toolLabel }) {
   // putting a shiny glow around it.
   button.addEventListener("mouseenter", () => orb.setHover(true));
   button.addEventListener("mouseleave", () => orb.setHover(false));
-  // Only true when this page runs inside the Electron overlay (not a browser tab).
-  const overlayMode = document.body.classList.contains("overlay");
 
   let game = null;
   let busy = false;
@@ -31,11 +69,9 @@ export function startHud({ toolLabel }) {
   // kept while background work runs so game state ticks don't stomp it
   let listening = false;
   let voice = "";
-  let reply = null;
+  let replyOpen = false;
   let replyText = "";
-  let miniOrb = null; // small live orb riding on the reply card: the orb becomes
-  // the text but stays visible, so mic state is always readable
-  let orbTint = null; // current ink tint, mirrored onto the mini orb
+  let collapseTimer = 0;
   let keys = "";
   let shapeTimer = 0; // reverts the shaping flash after a mod lands
   // Spoken replies: which neural engine + voice, and whether they're on (from the hello/models message).
@@ -49,18 +85,12 @@ export function startHud({ toolLabel }) {
     idle();
   });
 
-  // The button has no text: its state shows as a frame around it, the details in its tooltip.
-  // Each mode also melts the orb into its matching thinking-orbs animation.
-  // setOrb drives the HUD orb and the reply card's mini orb together, so the
-  // mini one always mirrors the live state (notably: listening while he talks).
+  // Each mode melts the orb into its matching thinking-orbs animation; busy
+  // also lights the activity ring around the orb (see style.css).
   const ORB_FOR_MODE = { idle: "breathing", listening: "listening", busy: "composing" };
-  function setOrb(state) {
-    orb.setState(state);
-    miniOrb?.setState(state);
-  }
   function status(text, mode = "idle", orbState = null) {
     hud.dataset.mode = mode;
-    setOrb(orbState ?? ORB_FOR_MODE[mode] ?? "breathing");
+    orb.setState(orbState ?? ORB_FOR_MODE[mode] ?? "breathing");
     button.title = [text, keys].filter(Boolean).join("\n");
     button.setAttribute("aria-label", text);
   }
@@ -70,7 +100,7 @@ export function startHud({ toolLabel }) {
     // Busy with background work: keep the tool's own animation (searching /
     // solving / working) instead of falling back to composing, and keep the
     // weaving melt while reply text is streaming in.
-    if (busy) return status(working || "Thinking…", "busy", reply ? "weaving" : toolOrb);
+    if (busy) return status(working || "Thinking…", "busy", replyOpen ? "weaving" : toolOrb);
     status(game ? `Telos · ${game}` : "Telos");
   }
 
@@ -92,23 +122,21 @@ export function startHud({ toolLabel }) {
     if (ms) fadeOut(t, ms);
     return t;
   }
-  function fadeOut(t, ms, onRemove) {
+  function fadeOut(t, ms) {
     setTimeout(() => {
       t.classList.add("fade");
-      setTimeout(() => {
-        t.remove();
-        onRemove?.();
-      }, 700);
+      setTimeout(() => t.remove(), 700);
     }, ms);
   }
 
-  /** Shows "Speaking…" on the HUD button while the voice reply plays. */
+  /** Shows "Speaking…" on the orb while the voice reply plays. */
   function setSpeaking(on) {
     window.dispatchEvent(new CustomEvent("scruff", { detail: { type: "voice_status", text: on ? "Speaking…" : "" } }));
   }
 
   // Sentence-by-sentence speech: the voice starts while the reply is still
   // streaming in, keeping pace with the text instead of lagging a full reply.
+  // Only the HUD window ever plays audio — never the panel window or a tab.
   const streamer = new SpeechStreamer({
     makeUrl: (sentence) =>
       `/voice/say?engine=${encodeURIComponent(voiceEngine)}&voice=${encodeURIComponent(voiceName)}&text=${encodeURIComponent(sentence.slice(0, 600))}`,
@@ -140,12 +168,27 @@ export function startHud({ toolLabel }) {
     button.classList.add("pop");
   }
 
+  /** The orb becomes the text: the unit expands to orb + reply as one piece. */
+  function openReply() {
+    replyOpen = true;
+    clearTimeout(collapseTimer);
+    unit.classList.add("expanded");
+    replyEl.hidden = false;
+  }
+  function closeReply() {
+    replyOpen = false;
+    clearTimeout(collapseTimer);
+    unit.classList.remove("expanded");
+    replyEl.hidden = true;
+    replyEl.textContent = "";
+    replyText = "";
+  }
+
   function onAgent(e) {
     switch (e.type) {
       case "user":
         toast(e.text, "you", 6000);
-        reply = null;
-        replyText = "";
+        closeReply();
         streamer.stop();
         break;
       case "turn_start":
@@ -165,38 +208,19 @@ export function startHud({ toolLabel }) {
         if (replyText && !/\s$/.test(replyText)) replyText += " ";
         break;
       case "text":
-        if (!reply) {
-          reply = toast("", "", 0);
-          // The orb transforms into the text: the card blooms out of the
-          // button's spot, the button orb pours itself into it — but the orb
-          // stays right there, live, so it's always clear when he's speaking.
-          reply.classList.add("from-orb");
-          try {
-            const r = button.getBoundingClientRect();
-            reply.style.transformOrigin = `${r.left + r.width / 2 < window.innerWidth / 2 ? "left" : "right"} center`;
-          } catch {}
-          button.classList.remove("morph");
-          void button.offsetWidth; // restart the animation
-          button.classList.add("morph");
-          button.addEventListener("animationend", () => button.classList.remove("morph"), { once: true });
-          // A small live orb rides on the reply card, mirroring the HUD orb.
-          const mini = document.createElement("canvas");
-          mini.className = "mini-orb";
-          mini.setAttribute("aria-hidden", "true");
-          reply.prepend(mini);
-          miniOrb = new AgentOrb(mini, { size: 32, dark: true });
-          miniOrb.setColor(orbTint);
+        if (!replyOpen) {
+          openReply();
           // The reply is being woven together: melt into the weaving orb.
-          setOrb("weaving");
-          // Speak the reply as it streams: only the overlay plays here, never a browser tab.
+          orb.setState("weaving");
+          // Speak the reply as it streams.
           const speakChecked = document.getElementById("speak")?.checked !== false;
-          if (overlayMode && voiceEnabled && speakChecked) {
+          if (speak && voiceEnabled && speakChecked) {
             warnEngineIfMissing();
             streamer.start();
           }
         }
         replyText += e.text;
-        reply.querySelector(".body").textContent = replyText.replace(/\*\*|`/g, "");
+        replyEl.textContent = replyText.replace(/\*\*|`/g, "");
         streamer.push(e.text);
         pop();
         break;
@@ -210,21 +234,15 @@ export function startHud({ toolLabel }) {
         busy = false;
         working = "";
         toolOrb = null;
-        {
-          const card = reply;
-          const cardOrb = miniOrb;
-          if (card)
-            fadeOut(card, 8000 + Math.min(12000, replyText.length * 40), () => {
-              cardOrb?.destroy();
-              if (miniOrb === cardOrb) miniOrb = null;
-            });
-          reply = null;
-          replyText = "";
-          idle();
-          // The streamer has been speaking the reply sentence-by-sentence as
-          // it arrived; flush the tail. Errors and notices never reach here.
-          streamer.finish();
+        if (replyOpen) {
+          // Let him read it, then collapse the unit back to just the orb.
+          clearTimeout(collapseTimer);
+          collapseTimer = setTimeout(closeReply, 8000 + Math.min(12000, replyText.length * 40));
         }
+        idle();
+        // The streamer has been speaking the reply sentence-by-sentence as
+        // it arrived; flush the tail. Errors and notices never reach here.
+        streamer.finish();
         break;
     }
   }
@@ -243,6 +261,13 @@ export function startHud({ toolLabel }) {
     );
   }
 
+  function setListening(on) {
+    listening = on;
+    // Don't let a spoken reply bleed into the new recording.
+    if (listening) streamer.stop();
+    idle();
+  }
+
   window.addEventListener("scruff", (e) => {
     const msg = e.detail;
     if (msg.type === "agent") onAgent(msg.event);
@@ -254,6 +279,10 @@ export function startHud({ toolLabel }) {
         voiceEngine = ai.voiceEngine === "kokoro" ? "kokoro" : "edge";
         voiceName = ai.voice || voiceName;
         voiceReady = ai.voiceReady !== false;
+        // The composer "read aloud" checkbox lives in the panel (main window);
+        // here it is hidden, so mirror the hub's setting — the hub is the truth.
+        const speakBox = document.getElementById("speak");
+        if (speakBox) speakBox.checked = voiceEnabled;
       }
     } else if (msg.type === "state") {
       const attached = msg.game.attached;
@@ -262,11 +291,7 @@ export function startHud({ toolLabel }) {
       // The orb's ink: black & white on the default theme, the game's accent
       // color once the game has a theme of its own. (The page's --accent is
       // already handled by applyTheme in app.js; this is the canvas ink.)
-      if (msg.theme) {
-        orbTint = msg.theme.source === "default" ? null : msg.theme.accent;
-        orb.setColor(orbTint);
-        miniOrb?.setColor(orbTint);
-      }
+      if (msg.theme) orb.setColor(msg.theme.source === "default" ? null : msg.theme.accent);
       idle();
     } else if (msg.type === "voice_status") {
       voice = msg.text;
@@ -274,150 +299,80 @@ export function startHud({ toolLabel }) {
     } else if (msg.type === "game_event") {
       toast(msg.event.text, "step", 5000);
       // A mod just landed on the game: flash the shaping orb, then settle back.
-      setOrb("shaping");
+      orb.setState("shaping");
       clearTimeout(shapeTimer);
       shapeTimer = setTimeout(() => idle(), 2500);
     }
   });
-  window.addEventListener("scruff:voice", (e) => {
-    listening = e.detail === "listening";
-    // Don't let a spoken reply bleed into the new recording.
-    if (listening) streamer.stop();
-    idle();
-  });
+  window.addEventListener("scruff:voice", (e) => setListening(e.detail === "listening"));
+  // Recording can start from the panel window too (its mic button / the shared
+  // talk hotkey path); the main process relays it here so the orb still shows it.
+  try {
+    bridge.onListening?.((on) => setListening(Boolean(on)));
+  } catch {}
   window.addEventListener("scruff:toast", (e) => toast(e.detail.text, e.detail.level === "error" ? "error" : "step", 5000));
 
-  // Click-through everywhere except the button (and the panel, which the main process handles).
+  // Click-through everywhere except the unit. Dragging the unit moves the
+  // whole window — the HUD is its own thing, it never follows the game.
   let interactive = false;
   document.addEventListener("mousemove", (e) => {
     const over = Boolean(e.target.closest?.(".interactive"));
     if (over !== interactive) {
       interactive = over;
-      bridge.setInteractive(over);
+      bridge.setInteractive(over, true);
     }
   });
-  // Draggable button: a pointerdown starts a potential drag, and once the pointer moves
-  // more than 6px it becomes a drag — the button follows at position:fixed and the spot is
-  // remembered in localStorage. A clean pointerup keeps the normal click (toggles the panel);
-  // the click after a drag is swallowed. The click-through overlay keeps working because the
-  // button itself still has pointer-events:auto.
-  //
-  // The spot is 100% the user's: it is stored in screen coordinates and the button is only
-  // ever positioned from that saved spot — or from the theme corner, before the first drag.
-  // The overlay window follows the game window around (see followGame in overlay/main.mjs),
-  // so the page translates screen coords into viewport coords using the window's current
-  // screen offset. The game moving, resizing, or switching never moves the button on screen.
-  // localStorage is written only by drags; automatic re-seats never rewrite it.
-  const HUD_POS_KEY = "telos-hud-pos-v2"; // v1 stored viewport coords; v2 stores screen coords
-  let winOffset = { x: 0, y: 0 }; // screen coords of the viewport's top-left corner
-  let savedSpot = null; // {x, y} in screen coords, null until the first drag
   let drag = null;
   let suppressClick = false;
-  try {
-    const s = JSON.parse(localStorage.getItem(HUD_POS_KEY) ?? "null");
-    if (s && Number.isFinite(s.x) && Number.isFinite(s.y)) savedSpot = { x: s.x, y: s.y };
-  } catch {}
-  function placeButton(x, y) {
-    button.style.position = "fixed";
-    button.style.left = `${Math.round(x)}px`;
-    button.style.top = `${Math.round(y)}px`;
-    button.style.zIndex = "9999";
-  }
-  /** Seat the button at a screen-coordinate spot, clamped minimally into the window. */
-  function placeAtScreen(sx, sy) {
-    const vx = Math.round(sx - winOffset.x);
-    const vy = Math.round(sy - winOffset.y);
-    // The window may have shrunk around the saved spot: keep the button as close as
-    // possible to where the user put it, never jump it back to a default. The saved
-    // spot itself is untouched, so it returns exactly when the window grows back.
-    const w = button.offsetWidth || 48;
-    const h = button.offsetHeight || 48;
-    placeButton(
-      Math.min(Math.max(vx, 0), Math.max(0, window.innerWidth - w)),
-      Math.min(Math.max(vy, 0), Math.max(0, window.innerHeight - h)),
-    );
-  }
-  const applySavedSpot = () => {
-    if (savedSpot && !drag?.moved) placeAtScreen(savedSpot.x, savedSpot.y);
-  };
-  // Learn the window's screen offset, then seat the button. Falls back gracefully when
-  // the wrapper predates this protocol (offset stays 0,0).
-  let offsetSettled = false;
-  const settleOffset = (b) => {
-    if (offsetSettled) return;
-    offsetSettled = true;
-    if (b && Number.isFinite(b.x) && Number.isFinite(b.y)) winOffset = { x: b.x, y: b.y };
-    applySavedSpot();
-  };
-  try {
-    const p = bridge.getWindowBounds?.();
-    if (p && typeof p.then === "function") p.then(settleOffset, () => settleOffset(null));
-    else settleOffset(null);
-  } catch {
-    settleOffset(null);
-  }
-  setTimeout(() => settleOffset(null), 800);
-  // The game window moved under us: re-seat at the saved screen spot (clamped, not rewritten).
-  try {
-    bridge.onWindowBounds?.((b) => {
-      if (!b || !Number.isFinite(b.x) || !Number.isFinite(b.y)) return;
-      winOffset = { x: b.x, y: b.y };
-      applySavedSpot();
-    });
-  } catch {}
-  // Safety net: a viewport resize the main process didn't report still re-seats minimally.
-  window.addEventListener("resize", applySavedSpot);
-  button.addEventListener("pointerdown", (e) => {
-    drag = { x0: e.clientX, y0: e.clientY, moved: false, offX: 0, offY: 0 };
+  const HUD_POS_KEY = "telos-hud-pos-v2"; // pre-separate-window spot; migrated once, then retired
+  unit.addEventListener("pointerdown", async (e) => {
+    drag = { x0: e.clientX, y0: e.clientY, moved: false };
     try {
-      button.setPointerCapture(e.pointerId);
+      const b = await bridge.getHudBounds?.();
+      if (b && Number.isFinite(b.x) && Number.isFinite(b.y)) {
+        drag.winX = b.x;
+        drag.winY = b.y;
+        drag.sx = e.screenX;
+        drag.sy = e.screenY;
+      }
+      unit.setPointerCapture(e.pointerId);
     } catch {}
   });
-  button.addEventListener("pointermove", (e) => {
-    if (!drag) return;
+  unit.addEventListener("pointermove", (e) => {
+    if (!drag || drag.winX === undefined) return;
     if (!drag.moved) {
       if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) <= 6) return;
       drag.moved = true;
-      const rect = button.getBoundingClientRect();
-      drag.offX = drag.x0 - rect.left;
-      drag.offY = drag.y0 - rect.top;
     }
-    placeButton(e.clientX - drag.offX, e.clientY - drag.offY);
+    try {
+      bridge.moveHud?.(Math.round(drag.winX + (e.screenX - drag.sx)), Math.round(drag.winY + (e.screenY - drag.sy)));
+    } catch {}
   });
   const endDrag = () => {
     if (!drag) return;
-    if (drag.moved) {
-      const rect = button.getBoundingClientRect();
-      // The only writer: the user's drag, stored in screen coordinates.
-      savedSpot = { x: Math.round(rect.left + winOffset.x), y: Math.round(rect.top + winOffset.y) };
-      try {
-        localStorage.setItem(HUD_POS_KEY, JSON.stringify(savedSpot));
-        localStorage.removeItem("telos-hud-pos"); // v1 viewport-coord key, now meaningless
-      } catch {}
-      suppressClick = true;
-    }
+    if (drag.moved) suppressClick = true; // swallow the click that ends a drag
     drag = null;
   };
-  button.addEventListener("pointerup", endDrag);
-  button.addEventListener("pointercancel", endDrag);
-  button.addEventListener("click", () => {
+  unit.addEventListener("pointerup", endDrag);
+  unit.addEventListener("pointercancel", endDrag);
+  unit.addEventListener("click", () => {
     if (suppressClick) {
       suppressClick = false;
       return;
     }
-    bridge.setPanel(!document.body.classList.contains("panel-open"));
+    // The panel lives in the main overlay window; a clean click opens it.
+    bridge.setPanel(true);
   });
-
-  // Closing the panel hands focus back to the game.
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && document.body.classList.contains("panel-open") && !document.querySelector("dialog[open]")) {
-      bridge.setPanel(false);
+  // First run in the separate window: honor the spot he dragged the orb to
+  // back when it lived inside the game overlay, then retire that key.
+  try {
+    const s = JSON.parse(localStorage.getItem(HUD_POS_KEY) ?? "null");
+    if (s && Number.isFinite(s.x) && Number.isFinite(s.y)) {
+      bridge.moveHud?.(Math.round(s.x), Math.round(s.y));
     }
-  });
-  document.addEventListener("mousedown", (e) => {
-    if (!document.body.classList.contains("panel-open")) return;
-    if (!e.target.closest(".app, dialog, .hud-button")) bridge.setPanel(false);
-  });
+    localStorage.removeItem(HUD_POS_KEY);
+    localStorage.removeItem("telos-hud-pos");
+  } catch {}
 
   idle();
 }

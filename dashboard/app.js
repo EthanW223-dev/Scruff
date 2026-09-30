@@ -33,6 +33,10 @@ let state = null;
 let aiInfo = null;
 const overlay = window.scruffOverlay ?? null;
 if (overlay) document.body.classList.add("overlay");
+// The standalone HUD window (?hud=1): only the orb unit renders; the main
+// overlay window keeps the panel. One window speaks, one window shows chat.
+const hudOnly = new URLSearchParams(location.search).has("hud");
+if (hudOnly) document.body.classList.add("hud-only");
 
 // ---------- connection ----------
 
@@ -606,6 +610,29 @@ function renderVoice(voice, enabled) {
   const row = $("voice-row");
   row.replaceChildren();
 
+  // A compact 21st.dev-style accordion: a slim header (current voice + on/off
+  // pill) that expands into the full picker, instead of the always-open list.
+  const wrap = el("div", "voice-acc");
+  const head = el("button", "voice-acc-head");
+  head.type = "button";
+  head.setAttribute("aria-expanded", "false");
+  const cur = VOICES.find((v) => v.id === voice) ?? VOICES[0];
+  head.append(
+    el("span", "voice-acc-label", "Voice"),
+    el("span", "voice-acc-current", cur.name),
+    el("span", `voice-acc-pill${enabled ? " on" : ""}`, enabled ? "on" : "off"),
+    el("span", "voice-acc-chev", "▾"),
+  );
+  head.addEventListener("click", () => {
+    const open = wrap.classList.toggle("open");
+    head.setAttribute("aria-expanded", String(open));
+  });
+  const body = el("div", "voice-acc-body");
+  const inner = el("div", "voice-acc-body-inner");
+  inner.append(inner);
+  wrap.append(head, body);
+  row.append(wrap);
+
   // One ranked list, best voice first — no "local vs cloud" choice. The engine
   // is an implementation detail: each row carries a small tag, and picking a
   // voice sends its engine along. Ranked most-human-first in VOICES above.
@@ -615,7 +642,7 @@ function renderVoice(voice, enabled) {
   // engine is missing — picking a voice still works, samples and replies just
   // can't play until it's installed.
   if (!engineReady(selEngine)) {
-    row.append(
+    inner.append(
       el(
         "p",
         "voice-warn",
@@ -631,7 +658,7 @@ function renderVoice(voice, enabled) {
   cb.type = "checkbox";
   cb.checked = enabled;
   label.append(cb, el("span", null, "Speak replies with a human voice"));
-  row.append(label);
+  inner.append(label);
 
   // One row per voice: pick it by clicking, hear it with the play button.
   // Sampling never changes the selection.
@@ -700,7 +727,7 @@ function renderVoice(voice, enabled) {
     });
     list.append(b);
   });
-  row.append(list);
+  inner.append(list);
   cb.addEventListener("change", () => send({ type: "set_voice", engine: engineForVoice(voice), voice, enabled: cb.checked }));
 
   // Local audio devices: which mic push-to-talk uses, which speaker replies play on.
@@ -721,7 +748,7 @@ function renderVoice(voice, enabled) {
     spkSel.addEventListener("change", () => setSpeakerId(spkSel.value));
     audioRow.append(spkLabel);
   }
-  row.append(audioRow);
+  inner.append(audioRow);
   refreshAudioDevices();
 }
 
@@ -1412,6 +1439,11 @@ async function toggleLocalVoice() {
 function setListening(on) {
   $("mic").classList.toggle("listening", on);
   window.dispatchEvent(new CustomEvent("scruff:voice", { detail: on ? "listening" : "idle" }));
+  // The orb lives in the standalone HUD window now; the main process relays
+  // this there so it still shows listening when recording starts here.
+  try {
+    overlay?.setListening?.(on);
+  } catch {}
 }
 
 const localVoice = Boolean(overlay) || !Recognition;
@@ -1542,7 +1574,9 @@ function setBanner(html, isHtml = false) {
 }
 
 function toast(text, level = "info") {
-  if (overlay) {
+  // Panel-window toasts render next to the panel; the HUD window's own toasts
+  // go through its orb unit. (The HUD window is the only speaker.)
+  if (hudOnly) {
     window.dispatchEvent(new CustomEvent("scruff:toast", { detail: { text, level } }));
     return;
   }
@@ -1563,7 +1597,7 @@ if (overlay) {
     if (open) setTimeout(() => $("input").focus(), 30);
   });
   $("app-close").addEventListener("click", () => overlay.setPanel(false));
-  import("./overlay.js").then((m) => m.startHud({ toolLabel }));
+  import("./overlay.js").then((m) => m.startHud({ toolLabel, hudOnly, speak: hudOnly }));
 }
 
 connect();

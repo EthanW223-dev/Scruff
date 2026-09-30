@@ -412,6 +412,28 @@ textarea:focus { box-shadow: 3px 3px 0 var(--accent); }
 .ai-section h3 { margin: 0 0 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
 .voice-row { position: relative; display: flex; flex-direction: column; align-items: stretch; gap: 12px; padding: 12px; border: 1px solid var(--line); background: var(--surface); overflow: hidden; }
 .voice-row::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 2px; background: linear-gradient(90deg, var(--accent), var(--accent-2, var(--accent)), transparent); opacity: 0.85; }
+/* Compact 21st.dev-style accordion: the picker stays collapsed to one slim row
+   (current voice + on/off pill) until he clicks it. */
+.voice-acc-head {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 6px 4px; background: none; border: 0; color: var(--text); cursor: pointer;
+}
+.voice-acc-label { font-weight: 600; font-size: 14px; }
+.voice-acc-current { color: var(--muted); font-size: 13.5px; flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.voice-acc-pill {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+  padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted);
+}
+.voice-acc-pill.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.voice-acc-chev { color: var(--muted); transition: transform 0.25s ease; }
+.voice-acc.open .voice-acc-chev { transform: rotate(180deg); }
+.voice-acc-body {
+  display: grid; grid-template-rows: 0fr; transition: grid-template-rows 0.28s ease;
+}
+.voice-acc-body > * { overflow: hidden; }
+.voice-acc.open .voice-acc-body { grid-template-rows: 1fr; }
+/* The body's content lives in an inner wrapper so the grid animation clips cleanly. */
+.voice-acc-body-inner { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
 .voice-warn { margin: 0; padding: 8px 10px; font-size: 13px; color: var(--danger); border: 1px dashed var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
 .voice-toggle { display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
 .voice-toggle input { width: 16px; height: 16px; accent-color: var(--accent); }
@@ -471,8 +493,9 @@ textarea:focus { box-shadow: 3px 3px 0 var(--accent); }
   .cursor, .spin { animation: none; }
   .provider-card, .connect-panel { animation: none; transition: none; }
   .hud-button, .orb, .orb-canvas { animation: none !important; }
-  .hud-toast.from-orb { animation: none !important; }
-  .hud-button.morph .orb-canvas { animation: none !important; }
+  #hud[data-mode="busy"] .hud-unit .orb::after { animation: none !important; display: none; }
+  .hud-unit, .hud-reply { transition: none !important; animation: none !important; }
+  .voice-acc-body { transition: none !important; }
   .msg.fresh, .msg.fresh .bubble, .turn.active .text, .thinking summary,
   .primary, .primary.launch, textarea:focus, .turn.active::after { animation: none !important; transition: none !important; }
 }
@@ -581,6 +604,46 @@ body.overlay #screen-chip, body.overlay #handsfree-label, body.overlay .toasts {
 body.overlay #app-close { display: grid !important; }
 
 .hud { position: fixed; display: flex; flex-direction: column; gap: 10px; max-width: min(400px, calc(100vw - 32px)); pointer-events: none; }
+/* Standalone HUD window: the unit sits top-left; the window itself is what moves. */
+body.hud-only { padding: 0; overflow: hidden; }
+body.hud-only .app { display: none !important; }
+body.hud-only .hud { position: static; max-width: none; }
+body.hud-only .hud-mods { max-width: 480px; }
+
+/* The orb and its reply are ONE component: just the orb at rest, orb + text
+   when expanded. Dragging the unit moves the whole HUD window. */
+.hud-unit {
+  pointer-events: auto;
+  display: flex; align-items: center; gap: 0;
+  width: max-content; max-width: min(480px, calc(100vw - 32px));
+  padding: 8px; border-radius: 999px;
+  background: var(--bg); border: 1px solid var(--line); box-shadow: 4px 4px 0 var(--shadow);
+  cursor: grab;
+  transition: border-radius 0.25s ease, gap 0.25s ease;
+}
+.hud-unit:active { cursor: grabbing; }
+.hud-unit.expanded { border-radius: 18px; gap: 10px; }
+.hud-reply {
+  flex: 1; min-width: 0; max-width: 380px; max-height: 220px; overflow: hidden auto;
+  color: var(--text); font-size: 14.5px; line-height: 1.45; padding-right: 6px;
+  animation: hud-reply-in 0.3s ease;
+}
+.hud-reply[hidden] { display: none; }
+@keyframes hud-reply-in {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: none; }
+}
+/* Busy (tools / thinking): an activity ring orbits the orb. Unmistakable even
+   at a glance, in the game's accent color. */
+#hud[data-mode="busy"] .hud-unit .orb::after {
+  content: ""; position: absolute; inset: -8px; border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0turn, var(--accent) 0.1turn, transparent 0.22turn);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 3px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 3px));
+  animation: hud-busy-ring 1.1s linear infinite;
+  pointer-events: none;
+}
+@keyframes hud-busy-ring { to { transform: rotate(1turn); } }
 body[data-corner$="right"] .hud { right: 16px; align-items: flex-end; }
 body[data-corner$="left"] .hud { left: 16px; align-items: flex-start; }
 body[data-corner^="top"] .hud { top: 16px; }
@@ -614,14 +677,6 @@ body[data-corner^="bottom"] .hud { bottom: 16px; flex-direction: column-reverse;
   35% { transform: scale(1.2); }
   100% { transform: scale(1); }
 }
-/* The orb pours itself into the reply text: a quick dip as the card blooms. */
-.hud-button.morph .orb-canvas { animation: orb-pour 0.6s ease; }
-@keyframes orb-pour {
-  0% { transform: scale(1); }
-  35% { transform: scale(0.55); }
-  70% { transform: scale(1.06); }
-  100% { transform: scale(1); }
-}
 .hud-mods { display: flex; flex-wrap: wrap; gap: 6px; }
 body[data-corner$="right"] .hud-mods { justify-content: flex-end; }
 .hud-mod { padding: 3px 8px; background: var(--bar); color: var(--bar-ink); font: 12px var(--mono); box-shadow: 2px 2px 0 var(--shadow); }
@@ -629,19 +684,6 @@ body[data-corner$="right"] .hud-mods { justify-content: flex-end; }
 .hud-toasts { display: flex; flex-direction: column; gap: 8px; }
 body[data-corner^="bottom"] .hud-toasts { flex-direction: column-reverse; }
 .hud-toast { position: relative; width: min(380px, calc(100vw - 32px)); background: var(--bg); color: var(--text); border: 1px solid var(--line); box-shadow: 4px 4px 0 var(--shadow); transition: opacity 0.5s steps(4); }
-/* The reply card blooms out of the orb (JS sets transform-origin toward it). */
-.hud-toast.from-orb { animation: toast-emerge 0.45s cubic-bezier(.2,.9,.25,1.15); }
-@keyframes toast-emerge {
-  0% { transform: scale(0.6) translateY(10px); opacity: 0; }
-  100% { transform: scale(1) translateY(0); opacity: 1; }
-}
-/* The orb becomes the text but stays: a small live orb rides the reply card's
-   corner, mirroring the HUD orb so mic state is always readable. */
-.hud-toast .mini-orb {
-  position: absolute; top: -15px; left: -15px; z-index: 2;
-  width: 30px; height: 30px; border-radius: 50%;
-  background: var(--bg); border: 1px solid var(--line);
-}
 .hud-toast .win-bar { height: 20px; font-size: 17px; padding: 0 8px; }
 .hud-toast .body { padding: 7px 10px; font-size: 14.5px; line-height: 1.45; }
 .hud-toast.you .win-bar { background: var(--surface-2); color: var(--muted); }

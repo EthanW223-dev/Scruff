@@ -8,21 +8,27 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- In-game overlay only: one button — Telos's icon is a thinking-orbs canvas
-       (dashboard/orb.js wraps the vendored thinking-orbs engine). Nine
-       hand-tuned animations melt into each other as the agent's state changes:
-       breathing idle, listening mic, composing thinking, weaving reply,
-       working/searching/solving tools, shaping mods, connecting boot.
-       The ink is black & white by default and takes the active game's accent
-       color when one is attached. Hovering the button wakes the orb itself
-       (it brightens and quickens) — there is no shiny halo or cursor glow
-       around it. -->
+  <!-- In-game HUD: Telos's icon is a thinking-orbs canvas (dashboard/orb.js wraps
+       the vendored thinking-orbs engine). Nine hand-tuned animations melt into
+       each other as the agent's state changes: breathing idle, listening mic,
+       composing thinking, weaving reply, working/searching/solving tools,
+       shaping mods, connecting boot. The ink is black & white by default and
+       takes the active game's accent color when one is attached. Hovering the
+       button wakes the orb itself (it brightens and quickens) — there is no
+       shiny halo or cursor glow around it.
+       The orb and its reply are ONE component (#hud-unit): the unit expands
+       to show reply text beside the live orb, then collapses back. In the
+       standalone HUD window (?hud=1) this is the whole UI; the main overlay
+       window keeps the panel. -->
   <div id="hud" class="hud" hidden>
-    <button id="hud-button" class="hud-button interactive" type="button" aria-label="Telos voice control" title="Telos">
-      <span class="orb" aria-hidden="true">
-        <canvas id="hud-orb" class="orb-canvas" width="64" height="64"></canvas>
-      </span>
-    </button>
+    <div id="hud-unit" class="hud-unit interactive">
+      <button id="hud-button" class="hud-button" type="button" aria-label="Telos voice control" title="Telos">
+        <span class="orb" aria-hidden="true">
+          <canvas id="hud-orb" class="orb-canvas" width="64" height="64"></canvas>
+        </span>
+      </button>
+      <div id="hud-reply" class="hud-reply" hidden></div>
+    </div>
     <div id="hud-mods" class="hud-mods"></div>
     <div id="hud-toasts" class="hud-toasts" aria-live="polite"></div>
   </div>

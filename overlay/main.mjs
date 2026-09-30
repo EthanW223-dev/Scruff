@@ -25,6 +25,7 @@ const isWindows = process.platform === "win32";
 const win32 = isWindows ? await import("./win32.mjs") : null;
 
 let win = null;
+let hudWin = null;
 let tray = null;
 let hub = null;
 let gamePid = null;
@@ -147,6 +148,76 @@ function createWindow() {
   win.once("ready-to-show", () => win.showInactive());
 }
 
+/** Where the standalone HUD window sits; the page never writes this directly. */
+function hudPosFile() {
+  return path.join(root, ".scruff", "hud-pos.json");
+}
+function loadHudPos() {
+  try {
+    const p = JSON.parse(fs.readFileSync(hudPosFile(), "utf8"));
+    if (Number.isFinite(p?.x) && Number.isFinite(p?.y)) return { x: Math.round(p.x), y: Math.round(p.y) };
+  } catch {}
+  return null;
+}
+function saveHudPos(p) {
+  try {
+    fs.mkdirSync(path.join(root, ".scruff"), { recursive: true });
+    fs.writeFileSync(hudPosFile(), JSON.stringify({ x: Math.round(p.x), y: Math.round(p.y) }));
+  } catch {}
+}
+
+/**
+ * The HUD as its own separate thing: a small transparent always-on-top window
+ * holding just the orb unit. It never follows the game window and never docks
+ * to a game corner — it stays exactly where he drags it.
+ */
+function createHudWindow() {
+  const { bounds } = screen.getPrimaryDisplay();
+  const saved = loadHudPos();
+  const w = 520;
+  const h = 300;
+  hudWin = new BrowserWindow({
+    width: w,
+    height: h,
+    x: saved?.x ?? Math.round(bounds.x + bounds.width - w - 40),
+    y: saved?.y ?? Math.round(bounds.y + 110),
+    transparent: true,
+    backgroundColor: "#00000000",
+    frame: false,
+    resizable: false,
+    movable: false, // the page moves it via hud-move while dragging the unit
+    minimizable: false,
+    maximizable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    focusable: false,
+    alwaysOnTop: true,
+    show: false,
+    title: "Telos HUD",
+    webPreferences: {
+      preload: path.join(path.dirname(fileURLToPath(import.meta.url)), "preload.cjs"),
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      backgroundThrottling: false,
+      autoplayPolicy: "no-user-gesture-required",
+    },
+  });
+  hudWin.setAlwaysOnTop(true, "screen-saver");
+  hudWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  hudWin.setIgnoreMouseEvents(true, { forward: true });
+  hudWin.webContents.on("will-navigate", (e, url) => {
+    if (!url.startsWith(base)) e.preventDefault();
+  });
+  hudWin.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:/.test(url)) shell.openExternal(url);
+    return { action: "deny" };
+  });
+  hudWin.webContents.on("did-fail-load", () => setTimeout(() => hudWin?.loadURL(`${base}/?overlay=1&hud=1`), 1500));
+  hudWin.loadURL(`${base}/?overlay=1&hud=1`);
+  hudWin.once("ready-to-show", () => hudWin.showInactive());
+}
+
 function setPanel(open) {
   if (!win) return;
   panelOpen = open;
@@ -223,10 +294,30 @@ function createTray() {
   tray.on("click", () => setPanel(!panelOpen));
 }
 
-ipcMain.on("interactive", (_e, on) => {
-  if (!panelOpen) win?.setIgnoreMouseEvents(!on, { forward: true });
+ipcMain.on("interactive", (_e, msg) => {
+  const on = Boolean(msg?.on ?? msg);
+  if (msg?.hud) {
+    // The HUD window: only its orb unit is ever clickable.
+    hudWin?.setIgnoreMouseEvents(!on, { forward: true });
+  } else if (!panelOpen) {
+    win?.setIgnoreMouseEvents(!on, { forward: true });
+  }
 });
 ipcMain.on("panel", (_e, open) => setPanel(Boolean(open)));
+// Recording started/stopped in one window: the HUD window always shows it.
+ipcMain.on("listening", (_e, on) => {
+  if (hudWin && !hudWin.isDestroyed()) hudWin.webContents.send("listening", Boolean(on));
+});
+// Dragging the orb unit moves the standalone HUD window; the spot is saved.
+ipcMain.on("hud-move", (_e, p) => {
+  if (hudWin && !hudWin.isDestroyed() && Number.isFinite(p?.x) && Number.isFinite(p?.y)) {
+    const x = Math.round(p.x);
+    const y = Math.round(p.y);
+    hudWin.setPosition(x, y);
+    saveHudPos({ x, y });
+  }
+});
+ipcMain.handle("hud-bounds", () => (hudWin && !hudWin.isDestroyed() ? hudWin.getBounds() : null));
 ipcMain.on("track", (_e, pid) => {
   gamePid = Number.isInteger(pid) ? pid : null;
   gameHwnd = null;
@@ -250,6 +341,7 @@ app.whenReady().then(async () => {
     return;
   }
   createWindow();
+  createHudWindow();
   try {
     createTray();
   } catch (err) {
@@ -257,7 +349,9 @@ app.whenReady().then(async () => {
   }
   for (const [name, accelerator] of Object.entries(HOTKEYS)) {
     const ok = globalShortcut.register(accelerator, () =>
-      name === "panel" ? setPanel(!panelOpen) : win?.webContents.send("talk"),
+      // The panel lives in the main overlay window; push-to-talk records in
+      // the HUD window, where the orb (and its listening state) lives.
+      name === "panel" ? setPanel(!panelOpen) : hudWin?.webContents.send("talk"),
     );
     if (!ok) console.error(`Couldn't register ${accelerator}; another app is using it. Set SCRUFF_HOTKEY_${name.toUpperCase()} in .env.`);
   }

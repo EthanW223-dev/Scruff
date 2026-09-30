@@ -5,7 +5,7 @@ import OpenAI from "openai";
 import type { Brain } from "./agent.ts";
 import { CLAUDE_MODELS, claudeStreamFactory, listClaudeModels, type Effort } from "./providers/anthropic.ts";
 import { openAICompatibleStreamFactory } from "./providers/openai.ts";
-import { DEFAULT_VOICE, VOICE_ALLOWLIST, type VoiceId } from "./voice.ts";
+import { DEFAULT_VOICE, VOICE_ALLOWLIST, voiceEngineReady, type VoiceId } from "./voice.ts";
 
 export const PROVIDER_IDS = ["claude", "ollama", "lmstudio", "openai"] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];
@@ -184,6 +184,7 @@ export class ModelRouter {
       problem: def.missing,
       voice: this.voice,
       voiceEnabled: this.voiceEnabled,
+      voiceReady: voiceEngineReady(),
     };
   }
 

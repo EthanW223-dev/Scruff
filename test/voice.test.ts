@@ -6,10 +6,12 @@ import { test } from "node:test";
 import { ModelRouter } from "../src/hub/models.ts";
 import {
   DEFAULT_VOICE,
+  probeVoiceEngineNow,
   sanitizeVoiceText,
   synthesizeVoice,
   VOICE_ALLOWLIST,
   voiceCacheKey,
+  voiceEngineReady,
 } from "../src/hub/voice.ts";
 
 function tmpSettings(): string {
@@ -73,4 +75,20 @@ test("the router defaults to Aria with voice off, and setVoice validates and per
 test("every allowlisted voice is a plausible neural voice id", () => {
   assert.ok(VOICE_ALLOWLIST.length >= 4);
   for (const v of VOICE_ALLOWLIST) assert.match(v, /^[a-z]{2}-[A-Z]{2}-.+Neural$/);
+});
+
+test("describe() reports the voice engine status so the dashboard can warn when edge-tts is missing", async () => {
+  const settings = tmpSettings();
+  const router = new ModelRouter({}, settings, "medium");
+  await router.init({});
+  assert.equal(typeof router.describe().voiceReady, "boolean");
+});
+
+test("probeVoiceEngineNow() settles the engine state so the first hello is honest", async () => {
+  const ready = await probeVoiceEngineNow();
+  assert.equal(typeof ready, "boolean");
+  // After an awaited probe the sync read is deterministic, never "not yet probed".
+  assert.equal(voiceEngineReady(), ready);
+  // A second call inside the TTL reuses the cached result.
+  assert.equal(await probeVoiceEngineNow(), ready);
 });

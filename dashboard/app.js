@@ -3,6 +3,7 @@
 
 import { applyTheme, paletteFrom } from "./theme.js";
 import {
+  applySpeaker,
   getMicId,
   getSpeakerId,
   listAudioDevices,
@@ -11,6 +12,7 @@ import {
   resolveDeviceId,
   setMicId,
   setSpeakerId,
+  shouldSpeakReply,
   supportsSpeakerSelect,
   unlockDeviceLabels,
 } from "./audio.js";
@@ -61,10 +63,12 @@ function handle(msg) {
       aiInfo = msg.ai;
       // hello carries the freshest AI info (e.g. after set_voice); keep the cached copy in sync.
       if (modelsMsg) modelsMsg.current = msg.ai;
+      syncVoiceState(msg.ai);
       renderAi();
       renderVoiceSection();
       break;
     case "models":
+      syncVoiceState(msg.current);
       renderModels(msg);
       break;
     case "history":
@@ -265,7 +269,10 @@ function renderAgentEvent(event, replay) {
         settleThinking(currentTurn);
         currentTurn.root.classList.remove("active");
       }
-      if (!replay && $("speak").checked && turnText.trim()) speak(turnText);
+      // Spoken replies need the neural voice enabled in the AI menu. In the
+      // in-game overlay the HUD owns playback (overlay.js) so we stay silent here.
+      if (shouldSpeakReply({ replay, voiceEnabled: voiceState.enabled, speakChecked: $("speak").checked, overlayMode: Boolean(overlay), text: turnText }))
+        speakNeural(turnText);
       currentTurn = null;
       break;
   }
@@ -498,9 +505,24 @@ const VOICE_OPTIONS = [
 ];
 const voiceSample = (name) => `Hey Ethan, I'm ${name}, and this is how I sound.`;
 
+// Neural-voice spoken-reply state, from the hub. Single source of truth for
+// "should Telos talk back with the human voice". The composer checkbox mirrors it.
+const voiceState = { name: VOICE_OPTIONS[0].id, enabled: false, ready: true };
+function syncVoiceState(ai) {
+  if (!ai) return;
+  if (ai.voice) voiceState.name = ai.voice;
+  voiceState.enabled = Boolean(ai.voiceEnabled);
+  // Older hubs don't send voiceReady; assume the engine is there rather than
+  // flashing a bogus warning.
+  voiceState.ready = ai.voiceReady !== false;
+  const speak = $("speak");
+  if (speak) speak.checked = voiceState.enabled;
+}
+
 let modelsMsg = null;
 let connectId = null; // provider id (or "jev") with the connect panel open
 let connectBusy = null; // provider id while a key check is in flight; error toasts go inline
+let connectCache = null; // msg.connect: MCP setup details, shown under the Claude card
 
 // Jev (TypeSafe) fast path: on when a key is set; the key itself never comes back from the hub.
 function jevPill() {
@@ -542,17 +564,21 @@ function openAiMenu() {
   send({ type: "list_models" });
 }
 
-// Voice section of the AI menu. Reads the dashboard's current AI info
-// (from either the "models" or the "hello" message) and sends set_voice.
+// Voice section of the AI menu. Reads the synced voice state (from either the
+// "models" or the "hello" message) and sends set_voice.
 function renderVoiceSection() {
-  const ai = modelsMsg?.current ?? aiInfo ?? {};
-  const known = VOICE_OPTIONS.some((v) => v.id === ai.voice) ? ai.voice : VOICE_OPTIONS[0].id;
-  renderVoice(known, Boolean(ai.voiceEnabled));
+  renderVoice(voiceState.name, voiceState.enabled);
 }
 
 function renderVoice(voice, enabled) {
   const row = $("voice-row");
   row.replaceChildren();
+
+  // The voice engine lives on the PC (edge-tts). Say so plainly when it's
+  // missing — picking a voice still works, samples and replies just can't play.
+  if (!voiceState.ready) {
+    row.append(el("p", "voice-warn", "Voice engine not installed on this PC — run: python -m pip install edge-tts"));
+  }
 
   const label = el("label", "voice-toggle");
   const cb = el("input");
@@ -566,11 +592,23 @@ function renderVoice(voice, enabled) {
   const list = el("div", "voice-list");
   list.setAttribute("role", "radiogroup");
   list.setAttribute("aria-label", "Voice");
-  for (const v of VOICE_OPTIONS) {
+  /** Play a sample and say plainly why it failed (engine missing) instead of going silent. */
+  const sample = (v) => {
+    if (!voiceState.ready) {
+      toast("Voice engine not installed on this PC — run: python -m pip install edge-tts", "error");
+      return;
+    }
+    const audio = playVoiceSample(v.id, voiceSample(v.name));
+    audio.addEventListener("error", () => {
+      toast("Couldn't play the sample — run: python -m pip install edge-tts", "error");
+    });
+  };
+  VOICE_OPTIONS.forEach((v, i) => {
     const b = el("div", "voice-option");
     b.setAttribute("role", "radio");
     b.setAttribute("tabindex", "0");
     b.setAttribute("aria-checked", String(v.id === voice));
+    b.style.animationDelay = `${Math.min(i * 45, 270)}ms`;
     const names = el("span", "voice-names");
     names.append(el("span", "voice-name", v.name), el("span", "voice-desc", v.desc));
     const play = el("button", "voice-play");
@@ -580,12 +618,12 @@ function renderVoice(voice, enabled) {
     play.setAttribute("aria-label", `Play a sample of ${v.name}'s voice`);
     play.addEventListener("click", (e) => {
       e.stopPropagation();
-      playVoiceSample(v.id, voiceSample(v.name));
+      sample(v);
     });
     b.append(names, play);
     const choose = () => {
       send({ type: "set_voice", voice: v.id, enabled: cb.checked });
-      playVoiceSample(v.id, voiceSample(v.name));
+      sample(v);
     };
     b.addEventListener("click", choose);
     b.addEventListener("keydown", (e) => {
@@ -594,8 +632,14 @@ function renderVoice(voice, enabled) {
         choose();
       }
     });
+    // 21st.dev-style spotlight follows the cursor, same as the provider cards.
+    b.addEventListener("pointermove", (e) => {
+      const r = b.getBoundingClientRect();
+      b.style.setProperty("--mx", `${e.clientX - r.left}px`);
+      b.style.setProperty("--my", `${e.clientY - r.top}px`);
+    });
     list.append(b);
-  }
+  });
   row.append(list);
   cb.addEventListener("change", () => send({ type: "set_voice", voice, enabled: cb.checked }));
 
@@ -685,6 +729,8 @@ function providerCards() {
           ? ["not running", "warn"]
           : ["needs key", "warn"],
       detail: p.ready ? `${p.detail} · ${p.models.length} model${p.models.length === 1 ? "" : "s"}` : p.detail,
+      // The Claude subscription (Pro/Max, no key) lives under the Claude card, not at the bottom.
+      caption: p.id === "claude" ? "Use your Claude subscription — no key needed" : undefined,
       selected: modelsMsg.current.provider === p.id,
     };
   });
@@ -703,6 +749,7 @@ function providerCards() {
 function renderModels(msg) {
   modelsMsg = msg;
   connectBusy = null;
+  connectCache = msg.connect;
   renderVoiceSection();
   const grid = $("provider-grid");
   grid.replaceChildren(
@@ -724,6 +771,7 @@ function renderModels(msg) {
         el("span", `pill ${c.pill[1]}`, c.pill[0]),
         el("span", "provider-detail", c.detail),
       );
+      if (c.caption) b.append(el("span", "provider-caption", c.caption));
       b.addEventListener("click", () => openConnect(c.id));
       // Spotlight hover, 21st.dev spotlight-card pattern.
       b.addEventListener("pointermove", (e) => {
@@ -734,11 +782,64 @@ function renderModels(msg) {
       return b;
     }),
   );
-  $("cc-cmd").textContent = msg.connect.claudeCode;
-  $("desktop-json").textContent = msg.connect.desktopConfig;
-  $("desktop-path").textContent = msg.connect.desktopConfigPath;
   if (connectId) openConnect(connectId, true);
   if (aiInfo) renderAi();
+}
+
+/** Copyable code block with its own copy button (for dynamic panels). */
+function copyBlock(text) {
+  const wrap = el("div", "copy-block");
+  const pre = el("pre");
+  pre.textContent = text;
+  const btn = el("button", "link", "copy");
+  btn.type = "button";
+  btn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast("Copied.");
+    } catch {
+      getSelection().selectAllChildren(pre); // no clipboard over plain http: select it instead
+    }
+  });
+  wrap.append(pre, btn);
+  return wrap;
+}
+
+/**
+ * The "use your Claude subscription" path, now nested under the Claude card
+ * instead of a bottom banner: Claude Code / Claude Desktop on a Pro/Max plan
+ * become the brain, no API key.
+ */
+function claudeSubscriptionDetails() {
+  const det = el("details", "sub-details");
+  det.append(el("summary", null, "Use your Claude subscription instead — no key"));
+  det.append(
+    el(
+      "p",
+      "muted small",
+      "Let Claude Desktop or Claude Code be the brain instead. They run on your Pro/Max plan, call Telos's tools, and every change still shows up in this dashboard.",
+    ),
+  );
+  const d1 = el("details");
+  d1.append(el("summary", null, "Claude Code"));
+  d1.append(el("p", "small", "Run this once, then start claude and ask it to mod your game:"));
+  d1.append(copyBlock(connectCache?.claudeCode ?? ""));
+  const d2 = el("details");
+  d2.append(el("summary", null, "Claude Desktop"));
+  d2.append(
+    el(
+      "p",
+      "small",
+      "In Claude Desktop open Settings → Developer → Edit Config, put this in the file (merge it into mcpServers if you already have some), then restart Claude Desktop. It starts Telos for you.",
+    ),
+  );
+  d2.append(copyBlock(connectCache?.desktopConfig ?? ""));
+  const where = el("p", "muted small", "File: ");
+  const code = el("code", null, connectCache?.desktopConfigPath ?? "");
+  where.append(code);
+  d2.append(where);
+  det.append(d1, d2);
+  return det;
 }
 
 function connectHead(name, logo, pill) {
@@ -800,6 +901,9 @@ function openConnect(id, soft) {
 function buildProviderPanel(panel, p) {
   const meta = PROVIDER_META[p.id] ?? {};
   panel.append(connectHead(p.label, meta.logo, p.ready ? ["ready", "on"] : ["not ready", "warn"]));
+
+  // The subscription path is Claude-specific; it works with or without an API key.
+  if (p.id === "claude") panel.append(claudeSubscriptionDetails());
 
   if (p.ready) {
     const row = el("div", "model-row");
@@ -949,18 +1053,6 @@ function buildJevPanel(panel) {
 }
 
 $("ai-chip").addEventListener("click", openAiMenu);
-
-for (const b of document.querySelectorAll("[data-copy]")) {
-  b.addEventListener("click", async () => {
-    const text = $(b.dataset.copy).textContent;
-    try {
-      await navigator.clipboard.writeText(text);
-      toast("Copied.");
-    } catch {
-      getSelection().selectAllChildren($(b.dataset.copy)); // no clipboard over plain http: select it instead
-    }
-  });
-}
 
 // ---------- game picker ----------
 
@@ -1163,7 +1255,7 @@ function startRecognition(newMode) {
   };
   r.start();
   if (newMode === "ptt") {
-    window.speechSynthesis?.cancel();
+    stopSpokenReply();
     $("mic").classList.add("listening");
     voiceStatus("Listening… click the mic (or Ctrl+Space) when you're done.");
   } else {
@@ -1201,7 +1293,7 @@ function onHandsFreeUtterance(transcript) {
     if (rest) return sendVoice(rest);
     armedUntil = Date.now() + 8000;
     voiceStatus("Yes? I'm listening…");
-    window.speechSynthesis?.cancel();
+    stopSpokenReply();
     return;
   }
   if (Date.now() < armedUntil && text) {
@@ -1214,7 +1306,7 @@ function onHandsFreeUtterance(transcript) {
 
 function sendVoice(text) {
   voiceStatus(`You: ${text}`);
-  window.speechSynthesis?.cancel();
+  stopSpokenReply();
   send({ type: "chat", text });
 }
 
@@ -1240,7 +1332,7 @@ async function toggleLocalVoice() {
   }
   startingVoice = true;
   try {
-    window.speechSynthesis?.cancel();
+    stopSpokenReply();
     stopRecording = await startRecording(
       // Auto-stop only when still recording; otherwise a late timer would start a fresh one.
       () => {
@@ -1279,13 +1371,35 @@ if (localVoice) {
   });
 }
 
-function speak(text) {
-  if (!window.speechSynthesis) return;
-  const clean = text.replace(/[*`#_]/g, "").replace(/0x[0-9A-F]+/gi, "that address");
-  const utterance = new SpeechSynthesisUtterance(clean);
-  utterance.rate = 1.08;
-  window.speechSynthesis.cancel();
-  window.speechSynthesis.speak(utterance);
+// Spoken replies, neural-voice edition: the hub's /voice/say endpoint with the
+// chosen voice, routed to the selected speaker. This is the human voice the
+// AI menu configures — no more robot speechSynthesis.
+let replyAudio = null;
+
+/** Stop whatever reply audio is currently playing (mic is about to open, etc.). */
+function stopSpokenReply() {
+  if (replyAudio) {
+    replyAudio.pause();
+    replyAudio = null;
+  }
+}
+
+async function speakNeural(text) {
+  stopSpokenReply();
+  if (!voiceState.ready) {
+    toast("Voice engine not installed on this PC — run: python -m pip install edge-tts", "error");
+    return;
+  }
+  const audio = new Audio(`/voice/say?voice=${encodeURIComponent(voiceState.name)}&text=${encodeURIComponent(text.slice(0, 600))}`);
+  replyAudio = audio;
+  audio.addEventListener("error", () => {
+    toast("Couldn't play the voice reply — run: python -m pip install edge-tts", "error");
+  });
+  audio.addEventListener("ended", () => {
+    if (replyAudio === audio) replyAudio = null;
+  });
+  await applySpeaker(audio, getSpeakerId());
+  audio.play().catch(() => {});
 }
 
 // ---------- composer ----------
@@ -1366,16 +1480,11 @@ function toast(text, level = "info") {
   setTimeout(() => t.remove(), level === "error" ? 7000 : 3500);
 }
 
-function save() {
-  try {
-    localStorage.setItem("scruff.prefs", JSON.stringify({ speak: $("speak").checked }));
-  } catch {}
-}
-try {
-  const prefs = JSON.parse(localStorage.getItem("scruff.prefs") ?? "{}");
-  $("speak").checked = Boolean(prefs.speak);
-} catch {}
-$("speak").addEventListener("change", save);
+// The composer checkbox is a second surface for the same "speak replies with a
+// human voice" setting the AI menu owns — it mirrors the hub, it isn't a local pref.
+$("speak").addEventListener("change", () => {
+  send({ type: "set_voice", voice: voiceState.name, enabled: $("speak").checked });
+});
 
 if (overlay) {
   overlay.onPanel((open) => {

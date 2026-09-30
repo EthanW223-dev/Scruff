@@ -6,6 +6,16 @@
 const MIC_KEY = "telos.audio.mic";
 const SPEAKER_KEY = "telos.audio.speaker";
 
+/**
+ * Pure: should this reply be spoken aloud with the neural voice? Needs the
+ * human-voice toggle on (a hub setting) and the composer's read-aloud box
+ * checked. The in-game overlay owns playback there, so an ordinary browser
+ * dashboard tab must stay silent — never double-play.
+ */
+export function shouldSpeakReply({ replay, voiceEnabled, speakChecked, overlayMode, text }) {
+  return !replay && voiceEnabled && speakChecked && !overlayMode && String(text ?? "").trim().length > 0;
+}
+
 export function getMicId() {
   try {
     return localStorage.getItem(MIC_KEY) || "";

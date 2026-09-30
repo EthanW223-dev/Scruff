@@ -1,4 +1,4 @@
-// The in-game HUD: one button (the skull orb, inlined from dashboard/button.svg), Telos's replies
+// The in-game HUD: one button (an abstract energy orb built from layered gradients), Telos's replies
 // as little windows, and the values it's holding. Everything is click-through except the button;
 // the full panel opens with a hotkey or a click on it. The button is draggable (see below).
 
@@ -12,6 +12,13 @@ export function startHud({ toolLabel }) {
   const hud = $("hud");
   const button = $("hud-button");
   hud.hidden = false;
+  // Cursor-tracking glow (Aceternity GlowingEffect pattern): feed the cursor position
+  // into --mx/--my so the orb's radial highlight follows it. Cheap: one style write.
+  button.addEventListener("pointermove", (e) => {
+    const r = button.getBoundingClientRect();
+    button.style.setProperty("--mx", `${e.clientX - r.left}px`);
+    button.style.setProperty("--my", `${e.clientY - r.top}px`);
+  });
   // Only true when this page runs inside the Electron overlay (not a browser tab).
   const overlayMode = document.body.classList.contains("overlay");
 
@@ -26,6 +33,7 @@ export function startHud({ toolLabel }) {
   // Spoken replies: which neural voice, and whether they're on (from the hello/models message).
   let voiceEnabled = false;
   let voiceName = "en-US-AriaNeural";
+  let voiceReady = true; // older hubs don't send it; don't nag when it's absent
   let ttsAudio = null;
 
   bridge.hotkeys().then(({ panel, talk }) => {
@@ -79,6 +87,10 @@ export function startHud({ toolLabel }) {
   /** Plays a spoken reply through the hub's /voice/say TTS route. Never called for errors/notices. */
   async function speakReply(text) {
     if (ttsAudio) ttsAudio.pause();
+    if (!voiceReady) {
+      toast("Voice engine not installed — run: python -m pip install edge-tts", "error");
+      return;
+    }
     const audio = new Audio(`/voice/say?voice=${encodeURIComponent(voiceName)}&text=${encodeURIComponent(text.slice(0, 600))}`);
     ttsAudio = audio;
     setSpeaking(true);
@@ -89,7 +101,10 @@ export function startHud({ toolLabel }) {
       }
     };
     audio.addEventListener("ended", done);
-    audio.addEventListener("error", done);
+    audio.addEventListener("error", () => {
+      toast("Couldn't play the voice reply — run: python -m pip install edge-tts", "error");
+      done();
+    });
     // Honor the chosen speaker (no-op where the browser lacks setSinkId).
     await applySpeaker(audio, getSpeakerId());
     audio.play().catch(done);
@@ -148,7 +163,9 @@ export function startHud({ toolLabel }) {
           idle();
           // Spoken replies, overlay mode only: a browser dashboard tab must never double-play.
           // Errors and notices never reach here; only the assistant's reply text does.
-          if (overlayMode && voiceEnabled && said) speakReply(said);
+          // The composer checkbox is a second surface for the same setting; respect it.
+          const speakChecked = document.getElementById("speak")?.checked !== false;
+          if (overlayMode && voiceEnabled && speakChecked && said) speakReply(said);
         }
         break;
     }
@@ -177,6 +194,7 @@ export function startHud({ toolLabel }) {
       if (ai) {
         voiceEnabled = Boolean(ai.voiceEnabled);
         voiceName = ai.voice || voiceName;
+        voiceReady = ai.voiceReady !== false;
       }
     } else if (msg.type === "state") {
       const attached = msg.game.attached;
@@ -212,18 +230,72 @@ export function startHud({ toolLabel }) {
   // remembered in localStorage. A clean pointerup keeps the normal click (toggles the panel);
   // the click after a drag is swallowed. The click-through overlay keeps working because the
   // button itself still has pointer-events:auto.
+  //
+  // The spot is 100% the user's: it is stored in screen coordinates and the button is only
+  // ever positioned from that saved spot — or from the theme corner, before the first drag.
+  // The overlay window follows the game window around (see followGame in overlay/main.mjs),
+  // so the page translates screen coords into viewport coords using the window's current
+  // screen offset. The game moving, resizing, or switching never moves the button on screen.
+  // localStorage is written only by drags; automatic re-seats never rewrite it.
+  const HUD_POS_KEY = "telos-hud-pos-v2"; // v1 stored viewport coords; v2 stores screen coords
+  let winOffset = { x: 0, y: 0 }; // screen coords of the viewport's top-left corner
+  let savedSpot = null; // {x, y} in screen coords, null until the first drag
   let drag = null;
   let suppressClick = false;
+  try {
+    const s = JSON.parse(localStorage.getItem(HUD_POS_KEY) ?? "null");
+    if (s && Number.isFinite(s.x) && Number.isFinite(s.y)) savedSpot = { x: s.x, y: s.y };
+  } catch {}
   function placeButton(x, y) {
     button.style.position = "fixed";
     button.style.left = `${Math.round(x)}px`;
     button.style.top = `${Math.round(y)}px`;
     button.style.zIndex = "9999";
   }
+  /** Seat the button at a screen-coordinate spot, clamped minimally into the window. */
+  function placeAtScreen(sx, sy) {
+    const vx = Math.round(sx - winOffset.x);
+    const vy = Math.round(sy - winOffset.y);
+    // The window may have shrunk around the saved spot: keep the button as close as
+    // possible to where the user put it, never jump it back to a default. The saved
+    // spot itself is untouched, so it returns exactly when the window grows back.
+    const w = button.offsetWidth || 48;
+    const h = button.offsetHeight || 48;
+    placeButton(
+      Math.min(Math.max(vx, 0), Math.max(0, window.innerWidth - w)),
+      Math.min(Math.max(vy, 0), Math.max(0, window.innerHeight - h)),
+    );
+  }
+  const applySavedSpot = () => {
+    if (savedSpot && !drag?.moved) placeAtScreen(savedSpot.x, savedSpot.y);
+  };
+  // Learn the window's screen offset, then seat the button. Falls back gracefully when
+  // the wrapper predates this protocol (offset stays 0,0).
+  let offsetSettled = false;
+  const settleOffset = (b) => {
+    if (offsetSettled) return;
+    offsetSettled = true;
+    if (b && Number.isFinite(b.x) && Number.isFinite(b.y)) winOffset = { x: b.x, y: b.y };
+    applySavedSpot();
+  };
   try {
-    const saved = JSON.parse(localStorage.getItem("telos-hud-pos") ?? "null");
-    if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) placeButton(saved.x, saved.y);
+    const p = bridge.getWindowBounds?.();
+    if (p && typeof p.then === "function") p.then(settleOffset, () => settleOffset(null));
+    else settleOffset(null);
+  } catch {
+    settleOffset(null);
+  }
+  setTimeout(() => settleOffset(null), 800);
+  // The game window moved under us: re-seat at the saved screen spot (clamped, not rewritten).
+  try {
+    bridge.onWindowBounds?.((b) => {
+      if (!b || !Number.isFinite(b.x) || !Number.isFinite(b.y)) return;
+      winOffset = { x: b.x, y: b.y };
+      applySavedSpot();
+    });
   } catch {}
+  // Safety net: a viewport resize the main process didn't report still re-seats minimally.
+  window.addEventListener("resize", applySavedSpot);
   button.addEventListener("pointerdown", (e) => {
     drag = { x0: e.clientX, y0: e.clientY, moved: false, offX: 0, offY: 0 };
     try {
@@ -245,8 +317,11 @@ export function startHud({ toolLabel }) {
     if (!drag) return;
     if (drag.moved) {
       const rect = button.getBoundingClientRect();
+      // The only writer: the user's drag, stored in screen coordinates.
+      savedSpot = { x: Math.round(rect.left + winOffset.x), y: Math.round(rect.top + winOffset.y) };
       try {
-        localStorage.setItem("telos-hud-pos", JSON.stringify({ x: Math.round(rect.left), y: Math.round(rect.top) }));
+        localStorage.setItem(HUD_POS_KEY, JSON.stringify(savedSpot));
+        localStorage.removeItem("telos-hud-pos"); // v1 viewport-coord key, now meaningless
       } catch {}
       suppressClick = true;
     }

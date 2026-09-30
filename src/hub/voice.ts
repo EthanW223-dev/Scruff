@@ -53,6 +53,40 @@ export function voiceCacheKey(text: string, voice: string): string {
 /** undefined = not probed yet, null = probed and missing. */
 let pythonWithTts: string | null | undefined;
 
+/** Last background probe of the edge-tts engine; null until the first probe finishes. */
+let engineReady: boolean | null = null;
+let engineProbedAt = 0;
+const ENGINE_PROBE_TTL = 60_000;
+
+/**
+ * Starts (or refreshes) the background probe for the edge-tts engine. Cheap to
+ * call often: it re-probes at most once a minute, so installing edge-tts while
+ * the hub runs flips the dashboard's voice section without a restart.
+ * Resolves with the probe result; the hub awaits the first call at startup so
+ * the first hello already carries the true engine state.
+ */
+export function probeVoiceEngineNow(): Promise<boolean> {
+  const now = Date.now();
+  if (engineReady !== null && now - engineProbedAt < ENGINE_PROBE_TTL)
+    return Promise.resolve(engineReady);
+  engineProbedAt = now;
+  // A past miss is cached as null; drop it so a later install can succeed.
+  if (engineReady === false) pythonWithTts = undefined;
+  return findPython().then(
+    () => (engineReady = true),
+    () => (engineReady = false),
+  );
+}
+
+export function probeVoiceEngine(): void {
+  void probeVoiceEngineNow();
+}
+
+/** Sync read of the last engine probe. False until the first probe completes. */
+export function voiceEngineReady(): boolean {
+  return engineReady === true;
+}
+
 async function findPython(): Promise<string> {
   if (pythonWithTts !== undefined) {
     if (pythonWithTts === null) throw new VoiceError("The edge-tts module isn't installed.", "pip install edge-tts");

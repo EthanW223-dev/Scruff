@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 // @ts-ignore: dashboard JS is untyped; the runtime import works fine.
-import { fallbackLabel, resolveDeviceId } from "../dashboard/audio.js";
+import { fallbackLabel, resolveDeviceId, shouldSpeakReply } from "../dashboard/audio.js";
 
 test("fallbackLabel numbers microphones and speakers from 1", () => {
   assert.equal(fallbackLabel("audioinput", 0), "Microphone 1");
@@ -22,4 +22,15 @@ test("resolveDeviceId falls back to the first device when the saved one vanished
 
 test("resolveDeviceId returns empty when no devices are listed", () => {
   assert.equal(resolveDeviceId([], "a"), "");
+});
+
+test("shouldSpeakReply needs the voice on, the box checked, and a real reply", () => {
+  const base = { replay: false, voiceEnabled: true, speakChecked: true, overlayMode: false, text: "Done." };
+  assert.equal(shouldSpeakReply(base), true);
+  assert.equal(shouldSpeakReply({ ...base, replay: true }), false);
+  assert.equal(shouldSpeakReply({ ...base, voiceEnabled: false }), false);
+  assert.equal(shouldSpeakReply({ ...base, speakChecked: false }), false);
+  assert.equal(shouldSpeakReply({ ...base, text: "   " }), false);
+  // The in-game overlay owns playback: a browser tab must never double-play.
+  assert.equal(shouldSpeakReply({ ...base, overlayMode: true }), false);
 });

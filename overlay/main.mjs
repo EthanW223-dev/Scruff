@@ -151,6 +151,9 @@ function followGame() {
   if (key !== lastBounds) {
     lastBounds = key;
     win.setBounds(rounded);
+    // The HUD button's spot is the user's, kept in screen coordinates by the page.
+    // Tell the page the window moved so it can keep the button visually put.
+    win.webContents.send("window-bounds", rounded);
   }
   if (visible && !win.isVisible()) win.showInactive();
   else if (!visible && win.isVisible()) win.hide();
@@ -191,6 +194,9 @@ ipcMain.on("track", (_e, pid) => {
 });
 ipcMain.handle("capture", () => captureGame());
 ipcMain.handle("hotkeys", () => HOTKEYS);
+// The page positions the HUD button in screen coordinates; it needs the window's
+// screen offset to translate them into viewport coordinates.
+ipcMain.handle("window-bounds", () => (win && !win.isDestroyed() ? win.getBounds() : null));
 
 app.whenReady().then(async () => {
   // Push-to-talk needs the microphone and the AI menu's copy buttons the clipboard; nothing else.

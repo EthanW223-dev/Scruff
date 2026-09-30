@@ -9,4 +9,8 @@ contextBridge.exposeInMainWorld("scruffOverlay", {
   hotkeys: () => ipcRenderer.invoke("hotkeys"),
   onPanel: (callback) => ipcRenderer.on("panel", (_e, open) => callback(open)),
   onTalk: (callback) => ipcRenderer.on("talk", () => callback()),
+  // Where the overlay window sits on screen; the HUD button's spot is stored in
+  // screen coordinates so the game window moving never moves the button.
+  getWindowBounds: () => ipcRenderer.invoke("window-bounds"),
+  onWindowBounds: (callback) => ipcRenderer.on("window-bounds", (_e, bounds) => callback(bounds)),
 });

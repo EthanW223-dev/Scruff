@@ -8,37 +8,22 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- In-game overlay only: one button, reply notes, active mods. Swap the skull orb below for your own art. -->
+  <!-- In-game overlay only: one button (an abstract energy orb). Layers: aurora core,
+       a BorderBeam light traveler riding the rim (vanilla adaptation of the Magic UI
+       component published on 21st.dev), two orbiting particles, a cursor-tracking
+       glow (Aceternity GlowingEffect-style), and a listening pulse ring.
+       Every color comes from the active game theme (--accent / --accent-2). -->
   <div id="hud" class="hud" hidden>
-    <button id="hud-button" class="hud-button interactive" type="button" title="Telos">
-      <svg viewBox="0 0 64 64" aria-hidden="true">
-        <defs>
-          <radialGradient id="orb-bg" cx="50%" cy="40%" r="70%">
-            <stop offset="0%" stop-color="#2b2b38"/>
-            <stop offset="65%" stop-color="#14141c"/>
-            <stop offset="100%" stop-color="#0a0a0f"/>
-          </radialGradient>
-        </defs>
-        <g class="orb-halo">
-          <circle cx="32" cy="32" r="29.5" fill="none" stroke="#ef7b9c" stroke-width="6" opacity="0.14"/>
-        </g>
-        <g class="orb-ring">
-          <circle cx="32" cy="32" r="28.5" fill="none" stroke="#ef7b9c" stroke-width="1.6" stroke-dasharray="5 9" opacity="0.85"/>
-        </g>
-        <circle class="orb-body" cx="32" cy="32" r="23" fill="url(#orb-bg)" stroke="#3d3d4d" stroke-width="1.5"/>
-        <g class="orb-skull" fill="#ef7b9c" opacity="0.92">
-          <circle cx="32" cy="28.5" r="10.5"/>
-          <rect x="24.5" y="32" width="15" height="10" rx="3.5"/>
-          <g fill="#14141c">
-            <ellipse cx="27.8" cy="28.8" rx="2.9" ry="3.5"/>
-            <ellipse cx="36.2" cy="28.8" rx="2.9" ry="3.5"/>
-            <path d="M32 33.2l-2.1 3.6h4.2z"/>
-            <rect x="28.6" y="38" width="1.2" height="4"/>
-            <rect x="31.4" y="38" width="1.2" height="4"/>
-            <rect x="34.2" y="38" width="1.2" height="4"/>
-          </g>
-        </g>
-      </svg>
+    <button id="hud-button" class="hud-button interactive" type="button" aria-label="Telos voice control" title="Telos">
+      <span class="orb" aria-hidden="true">
+        <span class="orb-halo"></span>
+        <span class="orb-core"></span>
+        <span class="hud-beam"></span>
+        <span class="orb-orbit o1"><span class="orb-particle"></span></span>
+        <span class="orb-orbit o2"><span class="orb-particle"></span></span>
+        <span class="orb-pulse"></span>
+        <span class="orb-glow"></span>
+      </span>
     </button>
     <div id="hud-mods" class="hud-mods"></div>
     <div id="hud-toasts" class="hud-toasts" aria-live="polite"></div>
@@ -141,22 +126,6 @@
       </section>
       <div id="provider-grid" class="provider-grid" role="listbox" aria-label="AI providers"></div>
       <div id="connect-panel" class="connect-panel" hidden></div>
-
-      <section class="subscription">
-        <h3><img class="sub-logo" src="logos/anthropic.svg" alt="" aria-hidden="true"> Use your Claude subscription <span class="tag">no key</span></h3>
-        <p class="muted small">Let Claude Desktop or Claude Code be the brain instead. They run on your Pro/Max plan, call Telos's tools, and every change still shows up in this dashboard.</p>
-        <details>
-          <summary>Claude Code</summary>
-          <p class="small">Run this once, then start <code>claude</code> and ask it to mod your game:</p>
-          <div class="copy-block"><pre id="cc-cmd"></pre><button type="button" class="link" data-copy="cc-cmd">copy</button></div>
-        </details>
-        <details>
-          <summary>Claude Desktop</summary>
-          <p class="small">In Claude Desktop open Settings → Developer → Edit Config, put this in the file (merge it into <code>mcpServers</code> if you already have some), then restart Claude Desktop. It starts Telos for you.</p>
-          <div class="copy-block"><pre id="desktop-json"></pre><button type="button" class="link" data-copy="desktop-json">copy</button></div>
-          <p class="muted small">File: <code id="desktop-path"></code></p>
-        </details>
-      </section>
     </form>
   </dialog>
 

@@ -17,6 +17,8 @@ import { installBridge, removeBridge, unityFlavor } from "../games/bepinex.ts";
 import { installUnrealBridge, removeUnrealBridge } from "../games/unreal.ts";
 import {
   DEFAULT_VOICE,
+  probeVoiceEngine,
+  probeVoiceEngineNow,
   sanitizeVoiceText,
   synthesizeVoice,
   VOICE_ALLOWLIST,
@@ -99,10 +101,15 @@ function connectInfo(root: string, port: number) {
   };
 }
 
-export function startServer(opts: ServerOptions): Promise<http.Server> {
+export async function startServer(opts: ServerOptions): Promise<http.Server> {
   const { agent, games, adapters, screen, mcp, router, themes, jev } = opts;
   const aiInfo = () =>
     router?.describe() ?? { provider: "custom", model: agent.brain.model, providerLabel: "Custom", ready: true, problem: undefined };
+  // Keep the dashboard's voice section honest about whether edge-tts is installed.
+  // Await the first probe so the first hello already carries the true state.
+  await probeVoiceEngineNow();
+  const probeTimer = setInterval(probeVoiceEngine, 60_000);
+  probeTimer.unref?.();
   const dashboards = new Set<WebSocket>();
   const transcript: AgentEvent[] = [];
 
@@ -357,6 +364,13 @@ export function startServer(opts: ServerOptions): Promise<http.Server> {
       case "frame":
         screen.frame(String(msg.id), msg.data, msg.error);
         break;
+      default: {
+        // A newer dashboard talking to an older Telos (the user pulled but didn't
+        // restart it): say so out loud instead of silently dropping the message.
+        const t = String(msg.type ?? "?");
+        if (t !== "?") toast(ws, `Telos didn't understand "${t}" — restart Telos to pick up the latest update.`, "error");
+        break;
+      }
     }
   }
 

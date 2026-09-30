@@ -406,25 +406,33 @@ textarea:focus { box-shadow: 3px 3px 0 var(--accent); }
 .provider-card[aria-selected="true"] { background: color-mix(in srgb, var(--accent) 20%, var(--bg)); border-color: var(--accent); box-shadow: 4px 4px 0 var(--accent); }
 .provider-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* AI menu sections: the voice row holds the toggle, voice list, and device dropdowns. */
+/* AI menu sections: the voice row holds the toggle, voice list, and device dropdowns.
+   Themed like the provider cards: accent edge, spotlight hover, hard shadow, staggered entrance. */
 .ai-section { margin: 14px 0 4px; }
 .ai-section h3 { margin: 0 0 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
-.voice-row { display: flex; flex-direction: column; align-items: stretch; gap: 12px; padding: 12px; border: 1px solid var(--line); background: var(--surface); }
+.voice-row { position: relative; display: flex; flex-direction: column; align-items: stretch; gap: 12px; padding: 12px; border: 1px solid var(--line); background: var(--surface); overflow: hidden; }
+.voice-row::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 2px; background: linear-gradient(90deg, var(--accent), var(--accent-2, var(--accent)), transparent); opacity: 0.85; }
+.voice-warn { margin: 0; padding: 8px 10px; font-size: 13px; color: var(--danger); border: 1px dashed var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
 .voice-toggle { display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
 .voice-toggle input { width: 16px; height: 16px; accent-color: var(--accent); }
 .voice-list { display: flex; flex-direction: column; gap: 8px; }
-.voice-option { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 12px; border: 1px solid var(--line); background: var(--bg); color: inherit; font: inherit; cursor: pointer; border-radius: 8px; text-align: left; }
+.voice-option { position: relative; display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 12px; border: 1px solid var(--line); background: var(--bg); color: inherit; font: inherit; cursor: pointer; border-radius: 8px; text-align: left; overflow: hidden; transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease, background .16s ease; animation: card-in .38s cubic-bezier(.2,.7,.3,1) backwards; }
+.voice-option::before { content: ""; position: absolute; inset: 0; background: radial-gradient(200px circle at var(--mx, 50%) var(--my, 50%), color-mix(in srgb, var(--accent) 26%, transparent), transparent 70%); opacity: 0; transition: opacity .22s ease; pointer-events: none; }
 .voice-option:hover, .voice-option:focus-visible { border-color: var(--accent); outline: none; }
-.voice-option[aria-checked="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.voice-option:hover { transform: translate(-2px, -2px); box-shadow: 4px 4px 0 var(--text); }
+.voice-option:hover::before { opacity: 1; }
+.voice-option:active { transform: translate(2px, 2px); box-shadow: 0 0 0 var(--text); }
+.voice-option[aria-checked="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--bg)); box-shadow: 3px 3px 0 var(--accent); }
 .voice-names { display: flex; flex-direction: column; gap: 1px; }
 .voice-name { font-weight: 600; font-size: 14px; }
 .voice-desc { font-size: 12px; color: var(--muted); }
-.voice-play { margin-left: auto; width: 34px; height: 34px; flex: none; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: inherit; font-size: 13px; cursor: pointer; }
-.voice-play:hover { border-color: var(--accent); color: var(--accent); }
+.voice-play { position: relative; z-index: 1; margin-left: auto; width: 34px; height: 34px; flex: none; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: inherit; font-size: 13px; cursor: pointer; transition: border-color .16s ease, color .16s ease, box-shadow .16s ease, transform .16s ease; }
+.voice-play:hover { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 45%, transparent); transform: scale(1.06); }
 .device-rows { display: flex; flex-direction: column; gap: 8px; padding-top: 4px; border-top: 1px dashed var(--line); }
 .device-row { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
 .device-row > span { flex: none; width: 88px; }
-.device-row select { flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); padding: 6px 8px; border-radius: 6px; }
+.device-row select { flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); padding: 6px 8px; border-radius: 6px; transition: border-color .16s ease, box-shadow .16s ease; }
+.device-row select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 @keyframes card-in { from { opacity: 0; transform: translateY(12px); } }
 .provider-logo { width: 34px; height: 34px; color: var(--text); }
 .provider-logo img { width: 100%; height: 100%; display: block; }
@@ -461,7 +469,7 @@ textarea:focus { box-shadow: 3px 3px 0 var(--accent); }
 @media (prefers-reduced-motion: reduce) {
   .cursor, .spin { animation: none; }
   .provider-card, .connect-panel { animation: none; transition: none; }
-  .hud-button, .hud-button svg, .orb-halo, .orb-ring { animation: none !important; }
+  .hud-button, .orb, .orb-halo, .orb-core::after, .hud-beam::after, .orb-glow, .orb-orbit, .orb-pulse { animation: none !important; }
   .msg.fresh, .msg.fresh .bubble, .turn.active .text, .thinking summary,
   .primary, .primary.launch, textarea:focus, .turn.active::after { animation: none !important; transition: none !important; }
 }
@@ -531,19 +539,14 @@ body[data-genre="military"] .msg.fresh { animation: military-in .26s linear both
 @keyframes military-in { from { opacity: 0; transform: translateX(20px); clip-path: inset(0 0 0 100%); } to { opacity: 1; transform: none; clip-path: inset(0 0 0 0); } }
 body[data-genre="military"] .turn.active::after { animation: mil-blink .34s steps(2) infinite; }
 @keyframes mil-blink { 50% { opacity: .2; } }
-.sub-logo { width: 20px; height: 20px; vertical-align: -4px; margin-right: 2px; color: var(--text); }
-.subscription { border-top: 1px solid var(--line); padding-top: 12px; display: flex; flex-direction: column; gap: 6px; }
-.subscription h3 { margin: 0; font: 600 18px/1.1 var(--font-display); letter-spacing: -0.01em; }
-.subscription p { margin: 0; }
-.subscription h3 .tag { display: inline-block; margin-left: 6px; padding: 1px 6px; background: var(--surface-2); color: var(--muted); font: 12px/1.4 var(--mono); vertical-align: 3px; letter-spacing: 0; }
-.subscription h3 .tag.on { background: var(--accent); color: var(--accent-ink); }
-.subscription h3 .tag.bad { background: var(--danger); color: #fff; }
+/* The Claude subscription path, nested under the Claude card instead of a bottom banner. */
+.sub-details { margin-top: 10px; border: 1px solid var(--line); padding: 8px 10px; background: var(--surface); }
+.sub-details > summary { cursor: pointer; font-weight: 600; font-size: 13.5px; }
+.sub-details p { margin: 8px 0 6px; }
+.sub-details details { margin: 6px 0; border: 1px solid var(--line); padding: 7px 10px; background: var(--bg); }
+.sub-details summary { cursor: pointer; }
+.provider-caption { font-size: 11.5px; color: var(--muted); }
 .jev-problem { color: var(--danger); font-family: var(--mono); overflow-wrap: anywhere; }
-.subscription a { color: inherit; }
-.subscription .primary { height: 34px; padding: 0 14px; font-size: 19px; }
-.subscription details { border: 1px solid var(--line); padding: 7px 10px; }
-.subscription summary { cursor: pointer; font: 19px/1 var(--pixel); }
-.subscription details p { margin: 8px 0 6px; }
 .copy-block { position: relative; }
 .copy-block pre { margin: 0; padding: 9px 50px 9px 10px; background: var(--surface); border: 1px solid var(--line); font: 11.5px/1.45 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .copy-block button { position: absolute; top: 7px; right: 9px; }
@@ -580,9 +583,15 @@ body[data-corner$="left"] .hud { left: 16px; align-items: flex-start; }
 body[data-corner^="top"] .hud { top: 16px; }
 body[data-corner^="bottom"] .hud { bottom: 16px; flex-direction: column-reverse; }
 
-/* The overlay's one control: a glowing skull orb (inline SVG in index.html, master art in
-   dashboard/button.svg). Idle it breathes, busy it spins its ring, listening it pulses red,
-   and it pops when a reply chunk lands. Draggable in overlay.js; position:fixed once moved. */
+/* The overlay's one control: an abstract energy orb. All color comes from the active
+   game theme (--accent / --accent-2); no hardcoded hues anywhere in this block.
+   Rim light: BorderBeam — a vanilla adaptation of the Magic UI component published
+   on 21st.dev. A gradient traveler rides the border via `offset-path: rect()`,
+   clipped to the border band by the intersect-mask pattern; beam colors are CSS
+   vars so the game theme drives them. Hover glow follows the cursor the way
+   Aceternity's GlowingEffect does (radial gradient at --mx/--my, JS-fed).
+   Idle it breathes, busy the beam races, listening it pulses, and it pops when a
+   reply chunk lands. Draggable in overlay.js; position:fixed once moved. */
 .hud-button {
   position: relative;
   pointer-events: auto;
@@ -594,36 +603,149 @@ body[data-corner^="bottom"] .hud { bottom: 16px; flex-direction: column-reverse;
   background: transparent;
   cursor: pointer;
 }
-.hud-button svg { display: block; width: 100%; height: 100%; overflow: visible; }
-.hud-button:hover .orb-halo { opacity: 0.32; }
 .hud-button:active { transform: scale(0.94); }
-.orb-halo { transition: opacity 0.25s ease; }
-.orb-ring { transform-box: fill-box; transform-origin: center; }
+.hud-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.orb { position: relative; display: block; width: 100%; height: 100%; }
+.orb-halo {
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 55%, transparent) 0%, transparent 70%);
+  filter: blur(4px);
+  opacity: 0.55;
+  transition: opacity 0.25s ease;
+}
+.hud-button:hover .orb-halo { opacity: 0.95; }
+.orb-core {
+  position: absolute;
+  inset: 9px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 32% 28%, color-mix(in srgb, var(--accent-2, var(--accent)) 80%, white) 0%, transparent 52%),
+    radial-gradient(circle at 68% 74%, var(--accent) 0%, transparent 58%),
+    radial-gradient(circle at 50% 50%, var(--surface-2) 0%, var(--bg) 78%);
+  box-shadow:
+    inset 0 0 8px rgba(0, 0, 0, 0.6),
+    0 0 10px color-mix(in srgb, var(--accent) 45%, transparent);
+  overflow: hidden;
+}
+.orb-core::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0deg, rgba(255, 255, 255, 0.18) 40deg, transparent 95deg);
+  animation: orb-sheen 9s linear infinite;
+}
+@keyframes orb-sheen { to { transform: rotate(360deg); } }
+@keyframes hud-spin { to { transform: rotate(360deg); } }
+/* BorderBeam layer: the traveler is a gradient square whose center rides a circular
+   offset-path; the intersect mask reveals only the border band, so the light
+   appears to run around the rim. --beam-from/--beam-to alias the theme accents. */
+.hud-beam {
+  --beam-size: 44px;
+  --beam-duration: 9s;
+  --beam-from: var(--accent);
+  --beam-to: var(--accent-2, var(--accent));
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  pointer-events: none;
+  -webkit-mask: linear-gradient(transparent, transparent), linear-gradient(#fff, #fff);
+  -webkit-mask-clip: padding-box, border-box;
+  -webkit-mask-composite: source-in;
+  mask: linear-gradient(transparent, transparent), linear-gradient(#fff, #fff);
+  mask-clip: padding-box, border-box;
+  mask-composite: intersect;
+}
+.hud-beam::after {
+  content: "";
+  position: absolute;
+  aspect-ratio: 1 / 1;
+  width: var(--beam-size);
+  background: linear-gradient(to left, var(--beam-from), var(--beam-to), transparent);
+  offset-path: rect(0 auto auto 0 round 22px);
+  offset-anchor: 50% 50%;
+  animation: hud-beam-travel var(--beam-duration) linear infinite;
+}
+@keyframes hud-beam-travel { to { offset-distance: 100%; } }
+/* Cursor-tracking glow: JS feeds --mx/--my on pointermove (see overlay.js). */
+.orb-glow {
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  background: radial-gradient(48px circle at var(--mx, 50%) var(--my, 50%),
+    color-mix(in srgb, var(--accent) 55%, transparent), transparent 70%);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  pointer-events: none;
+}
+.hud-button:hover .orb-glow, .hud-button:focus-visible .orb-glow { opacity: 1; }
+.orb-orbit { position: absolute; inset: 0; animation: hud-spin 12s linear infinite; }
+.orb-orbit.o2 { animation-duration: 19s; animation-direction: reverse; }
+.orb-particle {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+}
+.o2 .orb-particle {
+  top: auto;
+  bottom: -1px;
+  width: 4px;
+  height: 4px;
+  background: var(--accent-2, var(--accent));
+  box-shadow: 0 0 6px var(--accent-2, var(--accent));
+}
+.orb-pulse {
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  border: 2px solid var(--danger);
+  opacity: 0;
+  pointer-events: none;
+}
 
-.hud[data-mode="idle"] .hud-button { animation: hud-breathe 3s ease-in-out infinite; }
+.hud[data-mode="idle"] .hud-button { animation: hud-breathe 3.2s ease-in-out infinite; }
 @keyframes hud-breathe {
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.05); }
 }
-.hud[data-mode="idle"] .orb-halo { animation: hud-halo 3s ease-in-out infinite; }
+.hud[data-mode="idle"] .orb-halo { animation: hud-halo 3.2s ease-in-out infinite; }
 @keyframes hud-halo {
-  0%, 100% { opacity: 0.10; }
-  50% { opacity: 0.22; }
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.75; }
 }
-.hud[data-mode="busy"] .orb-ring { animation: hud-spin 1.1s linear infinite; }
-@keyframes hud-spin { to { transform: rotate(360deg); } }
+.hud[data-mode="busy"] .hud-beam { --beam-duration: 1.6s; }
+.hud[data-mode="busy"] .orb-orbit { animation-duration: 2.2s; }
+.hud[data-mode="busy"] .orb-orbit.o2 { animation-duration: 3.1s; }
+/* Pixel-genre games: the beam travels in discrete steps. */
+body[data-genre="pixel"] .hud-beam::after { animation-timing-function: steps(14); }
 .hud[data-mode="listening"] .hud-button { animation: hud-listen 0.9s ease-in-out infinite; }
 @keyframes hud-listen {
   0%, 100% { transform: scale(1); filter: drop-shadow(0 0 5px var(--danger)); }
   50% { transform: scale(1.12); filter: drop-shadow(0 0 15px var(--danger)); }
 }
-/* Reply arrival: JS re-triggers this on the inner svg so it never fights the breathe. */
-.hud-button.pop svg { animation: hud-pop 0.45s ease; }
+.hud[data-mode="listening"] .orb-pulse { animation: hud-pulse 1.1s ease-out infinite; }
+@keyframes hud-pulse {
+  0% { transform: scale(0.6); opacity: 0.9; }
+  100% { transform: scale(1.9); opacity: 0; }
+}
+/* Reply arrival: JS re-triggers this on the core so it never fights the breathe. */
+.hud-button.pop .orb-core { animation: hud-pop 0.45s ease; }
 @keyframes hud-pop {
   0% { transform: scale(1); }
   35% { transform: scale(1.2); }
   100% { transform: scale(1); }
 }
+/* Pixel-art games get a stepped, sprite-like orbit (beam steps are set with the beam). */
+body[data-genre="pixel"] .orb-orbit { animation-timing-function: steps(14); }
 
 .hud-mods { display: flex; flex-wrap: wrap; gap: 6px; }
 body[data-corner$="right"] .hud-mods { justify-content: flex-end; }

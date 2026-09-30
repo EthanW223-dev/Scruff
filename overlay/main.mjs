@@ -88,7 +88,13 @@ async function ensureHub() {
     }
   }
   const node = process.env.npm_node_execpath || "node";
-  hub = spawn(node, [path.join(root, "node_modules", "tsx", "dist", "cli.mjs"), path.join(root, "src", "index.ts")], {
+  // SCRUFF_LAN=1 exposes the hub on the LAN/tailnet for phone access (the hub
+  // prints a tokenized "From your phone" URL). The hub must stay a child of the
+  // overlay: only the interactive session can see game window titles, so a hub
+  // started anywhere else (SSH, WMI, session 0) shows an empty game list.
+  const hubArgs = [path.join(root, "node_modules", "tsx", "dist", "cli.mjs"), path.join(root, "src", "index.ts")];
+  if (process.env.SCRUFF_LAN === "1") hubArgs.push("--lan");
+  hub = spawn(node, hubArgs, {
     cwd: root,
     stdio: ["ignore", "inherit", "inherit"],
     windowsHide: true,

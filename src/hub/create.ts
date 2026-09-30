@@ -12,6 +12,7 @@ import type { ModelRouter } from "./models.ts";
 import { ScreenBridge } from "./screen.ts";
 import { startServer } from "./server.ts";
 import { ThemeStore } from "./themes.ts";
+import { codeVersion } from "./version.ts";
 import { unityBridgeConnected, unityBridgeTools } from "./unitybridge.ts";
 import { unrealBridgeConnected, unrealBridgeTools } from "./unrealbridge.ts";
 import { visionFromBrain, type VisionClient } from "./vision.ts";
@@ -130,6 +131,7 @@ export async function createHub(opts: HubOptions) {
     adapters,
     screen,
     mcp,
+    version: codeVersion(opts.root),
   });
 
   return {

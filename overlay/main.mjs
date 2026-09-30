@@ -5,7 +5,7 @@
 // Hotkeys work while the game has focus: one opens the panel (chat, mods, undo), one is
 // push-to-talk. The overlay follows the game window on Windows and hides when you alt-tab.
 import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, Menu, nativeImage, screen, session, shell, Tray } from "electron";
-import { spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,18 +35,57 @@ let lastBounds = "";
 if (!app.requestSingleInstanceLock()) app.quit();
 app.on("second-instance", () => setPanel(true));
 
-async function hubRunning() {
+async function hubHealth() {
   try {
     const res = await fetch(`${base}/health`, { signal: AbortSignal.timeout(1500) });
-    return (await res.json()).app === "scruff";
+    return await res.json();
   } catch {
-    return false;
+    return null;
+  }
+}
+
+/** Short git commit of the code on disk; "unknown" when git isn't available. */
+function codeVersion() {
+  try {
+    return (
+      execSync("git rev-parse --short HEAD", {
+        cwd: root,
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 5000,
+      })
+        .toString()
+        .trim() || "unknown"
+    );
+  } catch {
+    return "unknown";
   }
 }
 
 /** Uses a running hub (npm run hub, Claude Desktop...) or starts one next to the overlay. */
 async function ensureHub() {
-  if (await hubRunning()) return;
+  const health = await hubHealth();
+  if (health?.app === "scruff") {
+    // A hub is already on the port. Reuse it only if it's running this same
+    // code — after a git pull, a stale hub would silently swallow messages the
+    // new dashboard sends (e.g. voice selection) instead of handling them.
+    // When either side can't report a version, keep the old reuse behavior.
+    const mine = codeVersion();
+    if (!health.version || health.version === "unknown" || mine === "unknown" || health.version === mine) return;
+    try {
+      const pid = Number(fs.readFileSync(path.join(root, ".scruff", "hub.pid"), "utf8").trim());
+      if (pid) process.kill(pid);
+    } catch {
+      // No pidfile (hub predates it): can't safely retire it; fall through and
+      // let the spawn below fail loudly on the busy port instead of running stale.
+    }
+    for (let i = 0; i < 40 && (await hubHealth()); i++) await new Promise((r) => setTimeout(r, 250));
+    if (await hubHealth()) {
+      throw new Error(
+        `A stale Telos hub is still on port ${port} and couldn't be retired automatically. ` +
+          `Kill the node.exe running src/index.ts in Task Manager, then relaunch Telos.`,
+      );
+    }
+  }
   const node = process.env.npm_node_execpath || "node";
   hub = spawn(node, [path.join(root, "node_modules", "tsx", "dist", "cli.mjs"), path.join(root, "src", "index.ts")], {
     cwd: root,
@@ -58,7 +97,7 @@ async function ensureHub() {
     if (code) console.error(`The Scruff hub stopped (exit code ${code}).`);
   });
   for (let i = 0; i < 80; i++) {
-    if (await hubRunning()) return;
+    if (await hubHealth()) return;
     await new Promise((r) => setTimeout(r, 250));
   }
   throw new Error(`The Scruff hub didn't start on port ${port}.`);

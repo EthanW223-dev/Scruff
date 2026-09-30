@@ -42,6 +42,8 @@ export interface ServerOptions {
   adapters: AdapterRegistry;
   screen: ScreenBridge;
   mcp: McpEndpoint;
+  /** Short git commit of the serving code; lets the overlay spot a stale hub. */
+  version?: string;
 }
 
 const MIME: Record<string, string> = {
@@ -387,7 +389,7 @@ export async function startServer(opts: ServerOptions): Promise<http.Server> {
       return;
     }
     if (url.pathname === "/health") {
-      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ app: "scruff" }));
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ app: "scruff", version: opts.version ?? "unknown" }));
       return;
     }
     if (url.pathname === "/voice/say") {

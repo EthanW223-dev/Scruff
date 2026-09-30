@@ -23,6 +23,15 @@ export async function startTelos(options: { lan?: boolean; quiet?: boolean } = {
 
   const hub = await createHub({ root, port, lan: Boolean(options.lan), token, router });
 
+  // Pidfile so the overlay can retire a stale hub after a code update instead
+  // of silently reusing it (new dashboard talking to old hub = dead features).
+  try {
+    fs.mkdirSync(path.join(root, ".scruff"), { recursive: true });
+    fs.writeFileSync(path.join(root, ".scruff", "hub.pid"), String(process.pid));
+  } catch {
+    // Best effort; the overlay just won't be able to retire us.
+  }
+
   const ai = router.describe();
   log(`\n  Telos is running → http://localhost:${port}\n`);
   if (options.lan) {

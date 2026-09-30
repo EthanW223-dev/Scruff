@@ -8,8 +8,8 @@ import { mcpInstructions } from "./prompt.ts";
 import type { HubTool, ToolResultContent } from "./tools.ts";
 
 /**
- * Scruff as an MCP server, so a Claude app (Claude Desktop, Claude Code) can be the brain
- * instead of the built-in chat. That's how Scruff runs on a Claude Pro/Max subscription: the
+ * Telos as an MCP server, so a Claude app (Claude Desktop, Claude Code) can be the brain
+ * instead of the built-in chat. That's how Telos runs on a Claude Pro/Max subscription: the
  * Claude app does the talking and calls these tools. Exposed over HTTP at /mcp on the hub,
  * and over stdio by src/mcp-stdio.ts for apps that launch servers themselves.
  */
@@ -79,7 +79,7 @@ export class McpEndpoint extends EventEmitter {
   private async call(tool: HubTool, args: unknown, signal: AbortSignal): Promise<CallToolResult> {
     const id = `mcp_${this.nextId++}`;
     if (Date.now() - this.lastActivity > QUIET_MS) {
-      this.onEvent({ type: "notice", text: "Your Claude app is using Scruff." });
+      this.onEvent({ type: "notice", text: "Your Claude app is using Telos." });
     }
     this.lastActivity = Date.now();
     this.onEvent({ type: "tool_call", id, name: tool.name, input: args });

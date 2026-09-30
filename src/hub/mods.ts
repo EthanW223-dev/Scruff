@@ -1,5 +1,5 @@
 /**
- * Scruff's full mod layer: what "change anything in the game" means on each engine, how a
+ * Telos's full mod layer: what "change anything in the game" means on each engine, how a
  * player's plain-English mod request maps to bridge tools, and honest limits.
  *
  * Engines fall into three tiers:
@@ -8,7 +8,7 @@
  * - planned (Unreal Engine): the adapter protocol is defined and a bridge is scaffolded in
  *   bridge-unreal/, but it is not tested against real games yet. Numbers work via memory.
  * - numbers-only (Godot, GameMaker, RPG Maker, Ren'Py, Source, unknown): memory editing.
- *   Structural mods there need per-game reverse engineering, which Scruff doesn't do.
+ *   Structural mods there need per-game reverse engineering, which Telos doesn't do.
  */
 
 export type ModTier = "full" | "planned" | "numbers";
@@ -35,7 +35,7 @@ const PLANNED_NOTE =
 
 const NUMBERS_NOTE =
   "Only number changes work on this engine (memory editing). Colors, models, spawning and " +
-  "removing things need per-game reverse engineering, which Scruff doesn't do — say so plainly. ";
+  "removing things need per-game reverse engineering, which Telos doesn't do — say so plainly. ";
 
 /** Engine strings come from src/games/profile.ts. */
 export function engineModSupport(engine: string, bridgeConnected: boolean): EngineModSupport {

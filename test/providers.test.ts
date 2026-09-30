@@ -7,7 +7,7 @@ test("Claude history converts to chat-completions messages in a valid order", ()
   const messages = toChatMessages(
     "be brief",
     [
-      { role: "user", content: [{ type: "text", text: "[Scruff status] ..." }, { type: "text", text: "give me gold" }] },
+      { role: "user", content: [{ type: "text", text: "[Telos status] ..." }, { type: "text", text: "give me gold" }] },
       {
         role: "assistant",
         content: [
@@ -32,7 +32,7 @@ test("Claude history converts to chat-completions messages in a valid order", ()
     ["system", "user", "assistant", "tool", "tool", "user"],
     "tool results come straight after the tool calls; the screenshot follows as a user image",
   );
-  assert.equal(messages[1].content, "[Scruff status] ...\n\ngive me gold");
+  assert.equal(messages[1].content, "[Telos status] ...\n\ngive me gold");
   const assistant = messages[2] as { content: string; tool_calls: { id: string; function: { name: string; arguments: string } }[] };
   assert.equal(assistant.content, "On it.", "thinking blocks are dropped");
   assert.deepEqual(assistant.tool_calls.map((c) => [c.id, c.function.name, JSON.parse(c.function.arguments)]), [

@@ -1,7 +1,7 @@
 import type { ProcessInfo } from "./types.ts";
 
 /**
- * Scruff is for single-player games. Editing memory while an anti-cheat is running gets
+ * Telos is for single-player games. Editing memory while an anti-cheat is running gets
  * accounts banned (and cheating in multiplayer ruins it for everyone else), so the hub
  * refuses to attach when it spots one. This is a best-effort name check, not a guarantee.
  */
@@ -73,7 +73,7 @@ export function checkAttachSafety(target: ProcessInfo, running: ProcessInfo[]): 
   if (game) {
     return {
       ok: false,
-      reason: `${game} is an online game with anti-cheat. Scruff only mods single-player games, so it won't touch it.`,
+      reason: `${game} is an online game with anti-cheat. Telos only mods single-player games, so it won't touch it.`,
     };
   }
   for (const p of running) {
@@ -83,7 +83,7 @@ export function checkAttachSafety(target: ProcessInfo, running: ProcessInfo[]): 
         ok: false,
         reason:
           `${ac} is running (${p.name}). Editing memory while an anti-cheat is active can get your account banned, ` +
-          "so Scruff won't attach. If this is a single-player game, launch it in offline mode without the anti-cheat.",
+          "so Telos won't attach. If this is a single-player game, launch it in offline mode without the anti-cheat.",
       };
     }
   }

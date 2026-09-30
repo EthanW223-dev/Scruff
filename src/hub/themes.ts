@@ -7,7 +7,7 @@ import { defineTool, type HubTool } from "./tools.ts";
 
 /**
  * How the overlay (and dashboard) look for each game: colors lifted from the game's own UI,
- * a font mood that matches its genre, and the corner it sits in. Saved per game, so Scruff
+ * a font mood that matches its genre, and the corner it sits in. Saved per game, so Telos
  * looks at home the next time that game is attached.
  */
 
@@ -102,9 +102,9 @@ export class ThemeStore extends EventEmitter {
     return defineTool({
       name: "style_overlay",
       description:
-        "Restyle Scruff's in-game overlay to fit the current game: colors taken from the game's own UI (look at the " +
+        "Restyle Telos's in-game overlay to fit the current game: colors taken from the game's own UI (look at the " +
         "screen first), a font mood matching its genre, and a corner the game's HUD leaves free. Saved per game. " +
-        "Also use it when the player asks to change how Scruff looks.",
+        "Also use it when the player asks to change how Telos looks.",
       input: ThemeInput,
       run: (input) => {
         const theme = this.set(input, "ai");

@@ -65,7 +65,7 @@ function trustedRequest(req: http.IncomingMessage, token: string): boolean {
   return url.searchParams.get("token") === token;
 }
 
-/** How to plug Scruff into a Claude app, shown in the dashboard's AI menu. */
+/** How to plug Telos into a Claude app, shown in the dashboard's AI menu. */
 function connectInfo(root: string, port: number) {
   const mcpUrl = `http://localhost:${port}/mcp`;
   const desktop = {
@@ -173,7 +173,7 @@ export function startServer(opts: ServerOptions): Promise<http.Server> {
         );
         break;
       case "set_model": {
-        if (!router) throw new Error("This Scruff can't switch models.");
+        if (!router) throw new Error("This Telos can't switch models.");
         agent.setBrain(router.select({ provider: msg.provider as ProviderId, model: String(msg.model ?? "") }));
         transcript.length = 0;
         broadcast({ type: "hello", ai: aiInfo() });
@@ -188,7 +188,7 @@ export function startServer(opts: ServerOptions): Promise<http.Server> {
         break;
       }
       case "set_provider_key": {
-        if (!router) throw new Error("This Scruff can't switch models.");
+        if (!router) throw new Error("This Telos can't switch models.");
         const id = String(msg.provider ?? "");
         const key = typeof msg.key === "string" ? msg.key : null;
         await router.setProviderKey(id, key);
@@ -215,8 +215,8 @@ export function startServer(opts: ServerOptions): Promise<http.Server> {
         toast(
           ws,
           updating
-            ? "Updated the Scruff bridge. Start the game again to load it."
-            : `Installed${report.installedBepInEx ? " BepInEx and" : ""} the Scruff bridge. Restart the game to load it.`,
+            ? "Updated the Telos bridge. Start the game again to load it."
+            : `Installed${report.installedBepInEx ? " BepInEx and" : ""} the Telos bridge. Restart the game to load it.`,
           "info",
         );
         break;
@@ -225,7 +225,7 @@ export function startServer(opts: ServerOptions): Promise<http.Server> {
         if (!games.profile) throw new Error("Attach to the game first.");
         const report = removeBridge(games.profile);
         games.emit("update");
-        toast(ws, `Removed the Scruff bridge${report.keptBepInEx ? "" : " and BepInEx"}. Restart the game to finish.`, "info");
+        toast(ws, `Removed the Telos bridge${report.keptBepInEx ? "" : " and BepInEx"}. Restart the game to finish.`, "info");
         break;
       }
       case "list_games":

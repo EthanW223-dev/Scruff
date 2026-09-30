@@ -128,7 +128,7 @@ after(() => {
   fakeOllama.close();
 });
 
-test("with no Claude key, Scruff picks the local Ollama model on its own", () => {
+test("with no Claude key, Telos picks the local Ollama model on its own", () => {
   const hello = inbox.find((m) => m.type === "hello");
   assert.equal(hello.ai.provider, "ollama");
   assert.equal(hello.ai.model, "qwen3:8b", "embedding models are skipped");

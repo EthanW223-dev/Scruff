@@ -6,8 +6,8 @@ import type { HubTool } from "./tools.ts";
 import { confirmQuestion, hudQuestion, parseConfirm, parseNumber, VisionError, type VisionClient } from "./vision.ts";
 
 /**
- * Scruff's fast path: every message goes to Jev first (one call, a fraction of a second). When
- * Jev is sure the message is a simple command (undo, set or lock a value Scruff already found,
+ * Telos's fast path: every message goes to Jev first (one call, a fraction of a second). When
+ * Jev is sure the message is a simple command (undo, set or lock a value Telos already found,
  * pick the game, "I have 5 cans, give me 99", "now it's 4.75"), code does it right away through
  * the same tools the chat model uses. Anything else, or anything Jev isn't sure about, goes to
  * the chat model, which is told what the fast path did.
@@ -35,7 +35,7 @@ export interface QuickPathOptions {
   /**
    * Screenshot the game window. In the overlay this is automatic (no clicks); in a plain
    * browser tab it needs the player's screen share. Enables hands-free scanning: the
-   * player just plays while Scruff watches the HUD for the number to change.
+   * player just plays while Telos watches the HUD for the number to change.
    */
   capture?: () => Promise<string>;
   /** A chat model that can read screenshots (Claude, or a local vision model). */
@@ -188,14 +188,14 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
     const intents: Record<string, string> = {};
     if (session) {
       intents.find_and_change =
-        "The player says how much of something they have right now and wants Scruff to change it " +
+        "The player says how much of something they have right now and wants Telos to change it " +
         "(for example 'I have 5 soup cans, give me 99' or 'I've got 350 gold, max it out').";
       intents.change_no_number =
         "The player wants something in the game changed (more, full, max, infinite, or a set amount) but doesn't say " +
         "how much they have right now (for example 'give me max health', 'make my food infinite', 'I want more ammo').";
       if (search) {
         intents.report_new_amount =
-          "The player tells Scruff the amount of `search.what` the game shows now " +
+          "The player tells Telos the amount of `search.what` the game shows now " +
           "(for example 'ok now it's 4.75', 'it says 73', 'I have 3 now' or just a number).";
         intents.report_direction =
           "The player says `search.what` went down, went up, or stayed the same in the game, without giving a number " +
@@ -209,12 +209,12 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
         intents.read_known = "The player asks how much of one of the `found_values` they have.";
       }
       if (hasChanges) {
-        intents.undo_last = "The player wants Scruff's most recent change taken back (undo that, put it back).";
-        intents.undo_all = "The player wants every change Scruff made taken back (undo everything, reset it all).";
+        intents.undo_last = "The player wants Telos's most recent change taken back (undo that, put it back).";
+        intents.undo_all = "The player wants every change Telos made taken back (undo everything, reset it all).";
       }
     }
     if (processes.length) {
-      intents.pick_game = "The player names the game they are playing, or asks Scruff to connect to a game.";
+      intents.pick_game = "The player names the game they are playing, or asks Telos to connect to a game.";
     }
     if (!Object.keys(intents).length) return { handled: false };
     intents.other = "Anything else: questions, advice, how the overlay looks, or anything unclear.";
@@ -230,7 +230,7 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
 
     const numberOptions = Object.fromEntries(numbers.map((n, i) => [`n${i}`, `${n.text} (in "…${n.context}…")`]));
     const questions: Record<string, JevQuestion> = {
-      intent: { type: "choice", instructions: "What does the player want Scruff to do with `player_message`?", criteria: intents },
+      intent: { type: "choice", instructions: "What does the player want Telos to do with `player_message`?", criteria: intents },
     };
     if (session) {
       questions.wanted_number = {
@@ -814,7 +814,7 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
       }
       const n = result.count.toLocaleString("en-US");
       // Too many to write: narrow further. Hands-free when the player said what to set it to
-      // and the screen can be read: the player just plays, Scruff watches the HUD for the
+      // and the screen can be read: the player just plays, Telos watches the HUD for the
       // number to change and narrows on its own.
       const goal: Goal | null = mine?.goal ?? session!.searchGoal ?? null;
       if (goal !== null && canWatch()) {

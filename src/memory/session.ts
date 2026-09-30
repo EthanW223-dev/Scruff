@@ -32,7 +32,7 @@ const WATCH_MS = 1000;
 const WATCH_MAX_MOVES = 5;
 
 /**
- * Everything Scruff knows about the game it's attached to: scan results, the values
+ * Everything Telos knows about the game it's attached to: scan results, the values
  * being watched or frozen, and every change it made (so any of them can be undone).
  *
  * Events: "change" (state the dashboard shows changed), "detached" (game exited).

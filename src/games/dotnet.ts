@@ -221,7 +221,7 @@ export function readFields(buf: Buffer): FieldInfo[] {
   return fields;
 }
 
-/** How Scruff's memory scanner would search for a field of this .NET type, if it can. */
+/** How Telos's memory scanner would search for a field of this .NET type, if it can. */
 export function scanTypeFor(valueType: string): string | null {
   return (
     {

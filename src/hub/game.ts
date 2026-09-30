@@ -29,15 +29,15 @@ function baseName(name: string): string {
 /** Owns the attached game (if any). Emits "update" whenever the dashboard should refresh. */
 export class GameManager extends EventEmitter {
   session: GameSession | null = null;
-  /** What Scruff learned from the attached game's files. */
+  /** What Telos learned from the attached game's files. */
   profile: GameProfile | null = null;
-  /** The Unity bridge Scruff ships, to spot an older one installed in the game. */
+  /** The Unity bridge Telos ships, to spot an older one installed in the game. */
   bridgeDll: string | null = null;
   scanProgress: number | null = null;
 
   async listGames(search?: string): Promise<ProcessInfo[]> {
     const all = await listProcesses();
-    // Word-based, so "scruff dungeon" finds "Scruff's Dungeon" and "the witcher game" finds "witcher3.exe".
+    // Word-based, so "scruff dungeon" finds "Telos's Dungeon" and "the witcher game" finds "witcher3.exe".
     const words = (search ?? "")
       .toLowerCase()
       .split(/[^a-z0-9]+/)
@@ -82,7 +82,7 @@ export class GameManager extends EventEmitter {
 
   /**
    * The game just quit, so its bridge file is free: if the installed Unity bridge is older than the
-   * one Scruff ships, put the new one in now, ready for the next start. Emits "notice" with the outcome.
+   * one Telos ships, put the new one in now, ready for the next start. Emits "notice" with the outcome.
    */
   async updateBridge(tries = 4): Promise<boolean> {
     const profile = this.profile;
@@ -92,10 +92,10 @@ export class GameManager extends EventEmitter {
       await new Promise((r) => setTimeout(r, 1500));
       try {
         await installBridge(profile, { bridgeDll: this.bridgeDll });
-        this.emit("notice", "Updated the Scruff bridge in the game; it loads the next time you start it.");
+        this.emit("notice", "Updated the Telos bridge in the game; it loads the next time you start it.");
         return true;
       } catch (err) {
-        if (attempt === tries) this.emit("notice", `Couldn't update the Scruff bridge: ${(err as Error).message}`);
+        if (attempt === tries) this.emit("notice", `Couldn't update the Telos bridge: ${(err as Error).message}`);
       }
     }
     return false;
@@ -145,7 +145,7 @@ const WRITE_CHECK_MS = 400;
 const optionalType = z
   .enum(VALUE_TYPES)
   .optional()
-  .describe("Usually leave out: Scruff knows how each scan result is stored.");
+  .describe("Usually leave out: Telos knows how each scan result is stored.");
 const address = z.string().describe("Hex address from find_value's results, e.g. 0x1A2B3C40");
 
 /** `status` adds what the game tools don't know about: adapters, screen sharing. */
@@ -166,7 +166,7 @@ export function memoryTools(games: GameManager, status: () => Record<string, unk
     const current = s.scanner.resultAddresses(10).map(hex);
     const watched = [...s.watch.keys()].map(hex);
     throw new Error(
-      `${hex(addr)} isn't in the current scan results or the mod list, so Scruff won't write to it. ` +
+      `${hex(addr)} isn't in the current scan results or the mod list, so Telos won't write to it. ` +
         (current.length ? `Current results: ${current.join(", ")}${s.scanner.count > 10 ? ", …" : ""}. ` : "No scan results. ") +
         (watched.length ? `Mod list: ${watched.join(", ")}.` : ""),
     );
@@ -177,7 +177,7 @@ export function memoryTools(games: GameManager, status: () => Record<string, unk
     const s = games.requireSession();
     const known = s.scanner.typeOf(addr) ?? s.watch.get(addr)?.type;
     const type = known ?? given;
-    if (!type) throw new Error(`Scruff doesn't know how ${hex(addr)} is stored. Pass type (int32, float, ...).`);
+    if (!type) throw new Error(`Telos doesn't know how ${hex(addr)} is stored. Pass type (int32, float, ...).`);
     return type;
   };
 
@@ -214,8 +214,8 @@ export function memoryTools(games: GameManager, status: () => Record<string, unk
     defineTool({
       name: "attach_to_game",
       description:
-        "Attach Scruff to a running game so its memory can be scanned and edited. Only works for single-player " +
-        "games: Scruff refuses games with anti-cheat running.",
+        "Attach Telos to a running game so its memory can be scanned and edited. Only works for single-player " +
+        "games: Telos refuses games with anti-cheat running.",
       input: z.object({ pid: z.number().int().describe("Process id from list_running_games") }),
       async run({ pid }) {
         const s = await games.attach(pid);
@@ -227,7 +227,7 @@ export function memoryTools(games: GameManager, status: () => Record<string, unk
       name: "game_status",
       readOnly: true,
       description:
-        "What Scruff is attached to, the current search, the values being watched or frozen (with live values), " +
+        "What Telos is attached to, the current search, the values being watched or frozen (with live values), " +
         "recent changes that can be undone, connected game adapters, and whether the screen is shared.",
       input: z.object({}),
       run() {
@@ -244,8 +244,8 @@ export function memoryTools(games: GameManager, status: () => Record<string, unk
         "Find where the game keeps a value (gold, soup cans, ammo, health, hunger...). Give `what` it is and, if the " +
         "game shows one, the number right now. The first call searches all memory, checking whole numbers and " +
         "decimals at once. When many places match, have the player change it in-game, then call again with the SAME " +
-        "`what` and the new number: Scruff narrows the existing results (it does not start over). NO NUMBER (a bar, a " +
-        "meter, or the player doesn't know it)? Call with just `what`: Scruff snapshots the game's memory, then narrow " +
+        "`what` and the new number: Telos narrows the existing results (it does not start over). NO NUMBER (a bar, a " +
+        "meter, or the player doesn't know it)? Call with just `what`: Telos snapshots the game's memory, then narrow " +
         "with `change` (decreased / increased / unchanged) as the player makes it go down or up. Never give up for lack " +
         "of a number. Set new_search to start over.",
       input: z.object({
@@ -262,7 +262,7 @@ export function memoryTools(games: GameManager, status: () => Record<string, unk
           .boolean()
           .default(true)
           .describe(
-            "true for numbers that only change when the player does something (items, money, ammo): Scruff then " +
+            "true for numbers that only change when the player does something (items, money, ammo): Telos then " +
               "watches the results live and drops ones that change on their own. false for health that regenerates, timers, positions.",
           ),
         type: z
@@ -273,7 +273,7 @@ export function memoryTools(games: GameManager, status: () => Record<string, unk
         goal: z
           .number()
           .optional()
-          .describe("What the player wants it to become, if they said. Scruff remembers it, so a later \"now it's 4.75\" can finish the job."),
+          .describe("What the player wants it to become, if they said. Telos remembers it, so a later \"now it's 4.75\" can finish the job."),
       }),
       async run({ what, value, min, max, change, by, type, new_search, steady, goal }, ctx) {
         const s = games.requireSession();
@@ -340,7 +340,7 @@ export function memoryTools(games: GameManager, status: () => Record<string, unk
                 : `${count.toLocaleString()} places still match. Ask the player to change the ${what} in-game (use, ` +
                 `spend, eat, drop or pick up some), then call find_value again with what: "${what}" and the new number.` +
                 (steady && count <= WATCH_LIMIT
-                  ? ` Meanwhile Scruff watches them live and drops ones that change on their own, so calling ` +
+                  ? ` Meanwhile Telos watches them live and drops ones that change on their own, so calling ` +
                     `find_value again with the same number in a little while may already show fewer.`
                   : "");
         return json({
@@ -389,7 +389,7 @@ export function memoryTools(games: GameManager, status: () => Record<string, unk
       description:
         "Set the value at one or more addresses from the current search results or the mod list (e.g. all remaining " +
         "results). Every write is logged and can be undone. Only write once results are narrowed down: writing to " +
-        "random memory can crash the game. Scruff checks the write stuck; if the game puts the old value back, " +
+        "random memory can crash the game. Telos checks the write stuck; if the game puts the old value back, " +
         "use freeze_value.",
       input: z.object({
         addresses: z.array(address).min(1).max(64),
@@ -482,7 +482,7 @@ export function memoryTools(games: GameManager, status: () => Record<string, unk
 
     defineTool({
       name: "revert_all_changes",
-      description: "Undo every change Scruff made to this game, newest first.",
+      description: "Undo every change Telos made to this game, newest first.",
       input: z.object({}),
       run() {
         return `Reverted ${games.requireSession().revertAll()} change(s).`;

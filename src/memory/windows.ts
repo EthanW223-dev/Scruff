@@ -60,7 +60,7 @@ export class WindowsBackend implements ProcessBackend {
     );
     if (!this.handle) {
       throw new Error(
-        `Windows refused access to process ${pid}. Try running Scruff as administrator; ` +
+        `Windows refused access to process ${pid}. Try running Telos as administrator; ` +
           "games protected by anti-cheat can't be opened at all.",
       );
     }

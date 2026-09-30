@@ -1,4 +1,4 @@
-// Scruff dashboard: chat with the AI, see and control what it changed in your game.
+// Telos dashboard: chat with the AI, see and control what it changed in your game.
 // The same page runs inside the in-game overlay (Electron), which provides window.scruffOverlay.
 
 import { applyTheme, paletteFrom } from "./theme.js";
@@ -27,7 +27,7 @@ function connect() {
   ws = new WebSocket(url);
   ws.onmessage = (e) => handle(JSON.parse(e.data));
   ws.onclose = () => {
-    setBanner("Lost connection to Scruff. Is it still running? Reconnecting…");
+    setBanner("Lost connection to Telos. Is it still running? Reconnecting…");
     setTimeout(connect, 1500);
   };
   ws.onopen = () => {
@@ -351,15 +351,15 @@ function bridgeRow(bridge) {
     dd.append(" ", button);
   };
   if (!bridge.installed) {
-    action("install", "install_bridge", "Add BepInEx and the Scruff bridge to the game folder, so the AI can change anything in it (needs a game restart)");
+    action("install", "install_bridge", "Add BepInEx and the Telos bridge to the game folder, so the AI can change anything in it (needs a game restart)");
   } else {
     if (bridge.outdated) action("update", "install_bridge", "Quit the game first (it keeps the bridge file open), then update and start it again");
-    if (!connected) action("remove", "remove_bridge", "Take the bridge (and BepInEx, if Scruff added it) out of the game");
+    if (!connected) action("remove", "remove_bridge", "Take the bridge (and BepInEx, if Telos added it) out of the game");
   }
   return [el("dt", "", "Bridge"), dd];
 }
 
-// What Scruff read from the game's files when it attached.
+// What Telos read from the game's files when it attached.
 function renderGameFiles(profile) {
   $("game-panel").hidden = !profile;
   if (!profile) return;
@@ -946,7 +946,7 @@ function grabVideoFrame() {
 // ---------- voice ----------
 
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-const WAKE = /^\s*(?:hey|okay|ok|yo)?[\s,]*(?:scruff|scruffy|scruffs|scuff|scruf|scrub|scrubs|scoff)\b[\s,.!?:]*/i;
+const WAKE = /^\s*(?:hey|okay|ok|yo)?[\s,]*(?:scruff|scruffy|scruffs|telos|scruf|scrub|scrubs|scoff)\b[\s,.!?:]*/i;
 let recognizer = null;
 let mode = null; // null | "ptt" | "handsfree"
 let armedUntil = 0;
@@ -1013,7 +1013,7 @@ function startRecognition(newMode) {
     $("mic").classList.add("listening");
     voiceStatus("Listening… click the mic (or Ctrl+Space) when you're done.");
   } else {
-    voiceStatus('Hands-free: say "Scruff, …" to ask something.');
+    voiceStatus('Hands-free: say "Telos, …" to ask something.');
   }
 }
 
@@ -1054,7 +1054,7 @@ function onHandsFreeUtterance(transcript) {
     armedUntil = 0;
     sendVoice(text);
   } else {
-    voiceStatus('Hands-free: say "Scruff, …" to ask something.');
+    voiceStatus('Hands-free: say "Telos, …" to ask something.');
   }
 }
 

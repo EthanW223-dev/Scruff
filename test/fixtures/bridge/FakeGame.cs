@@ -1,5 +1,5 @@
 // A stand-in for a Unity game, for testing the bridge's own code (WebSocket client, JSON and the
-// reflection that reads and changes the game's objects) against a real Scruff hub under Mono.
+// reflection that reads and changes the game's objects) against a real Telos hub under Mono.
 // Unity itself can't run in the tests, so Vector3 and Color are small look-alikes here.
 using System;
 using System.Collections.Generic;

@@ -44,7 +44,7 @@ export class ScreenBridge extends EventEmitter {
     const sharer = [...this.sharers].at(-1);
     if (!sharer) {
       return Promise.reject(
-        new Error("Screen sharing is off. Ask the user to click 'Share screen' in the Scruff dashboard and pick the game window."),
+        new Error("Screen sharing is off. Ask the user to click 'Share screen' in the Telos dashboard and pick the game window."),
       );
     }
     const id = String(this.nextId++);

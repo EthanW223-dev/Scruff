@@ -11,7 +11,7 @@ import { createHub } from "../src/hub/create.ts";
 import { fakeModel, text } from "./fake-model.ts";
 
 // The Unity bridge's own code (bridge/src: WebSocket client, JSON, reflection) running under Mono
-// and connected to a real Scruff hub, with a stand-in game model instead of Unity. Needs Mono
+// and connected to a real Telos hub, with a stand-in game model instead of Unity. Needs Mono
 // (apt install mono-mcs mono-runtime); skipped without it.
 
 const root = path.resolve(import.meta.dirname, "..");
@@ -67,7 +67,7 @@ after(async () => {
   hub?.close();
 });
 
-test("the bridge connects to Scruff as the 'unity' adapter", { skip: !hasMono && "needs Mono" }, () => {
+test("the bridge connects to Telos as the 'unity' adapter", { skip: !hasMono && "needs Mono" }, () => {
   assert.deepEqual(
     hub.adapters.state().find((a) => a.prefix === "unity")?.tools,
     ["get", "set", "call", "echo", "types"],
@@ -107,7 +107,7 @@ test("converts values: vectors (written back through structs), colors, enums, te
   }
   r = await bridge("set", { type: "GameManager", path: "Instance.player.mode", value: "fly" });
   assert.deepEqual(r.json(), { before: "Walk", after: "Fly" });
-  const motto = "Scruff wuz here ✓ \"quoted\" \\ back\nslash";
+  const motto = "Telos wuz here ✓ \"quoted\" \\ back\nslash";
   r = await bridge("set", { type: "GameManager", path: "Instance.player.motto", value: motto });
   assert.equal(r.json().after, motto);
 });

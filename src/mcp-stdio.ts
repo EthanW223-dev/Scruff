@@ -1,11 +1,11 @@
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
-import { startScruff } from "./index.ts";
+import { startTelos } from "./index.ts";
 
 /**
- * Scruff for Claude Desktop (or any MCP client that launches servers over stdio).
- * Claude Desktop runs this when it starts. If the Scruff hub isn't already running, this
+ * Telos for Claude Desktop (or any MCP client that launches servers over stdio).
+ * Claude Desktop runs this when it starts. If the Telos hub isn't already running, this
  * starts it (dashboard and all) in this process; then it relays MCP messages between the
  * Claude app and the hub's /mcp endpoint. stdout carries only MCP messages.
  */
@@ -24,10 +24,10 @@ async function hubRunning(): Promise<boolean> {
 
 if (!(await hubRunning())) {
   try {
-    await startScruff({ quiet: true });
-    console.error(`Scruff started. Dashboard: http://localhost:${port}`);
+    await startTelos({ quiet: true });
+    console.error(`Telos started. Dashboard: http://localhost:${port}`);
   } catch (err) {
-    console.error(`Couldn't start Scruff on port ${port}: ${(err as Error).message}`);
+    console.error(`Couldn't start Telos on port ${port}: ${(err as Error).message}`);
     process.exit(1);
   }
 }
@@ -39,12 +39,12 @@ client.onmessage = (message: JSONRPCMessage) => {
   upstream.send(message).catch((err: Error) => {
     // Answer requests that couldn't be delivered, so the Claude app doesn't hang.
     if ("id" in message && "method" in message) {
-      void client.send({ jsonrpc: "2.0", id: message.id, error: { code: -32603, message: `Scruff hub: ${err.message}` } });
+      void client.send({ jsonrpc: "2.0", id: message.id, error: { code: -32603, message: `Telos hub: ${err.message}` } });
     }
   });
 };
 upstream.onmessage = (message) => void client.send(message);
-upstream.onerror = (err) => console.error(`Scruff hub connection: ${err.message}`);
+upstream.onerror = (err) => console.error(`Telos hub connection: ${err.message}`);
 client.onclose = () => process.exit(0);
 
 await upstream.start();

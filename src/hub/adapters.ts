@@ -127,7 +127,7 @@ export class AdapterRegistry extends EventEmitter {
       name: "use_game_adapter",
       description:
         "Call a tool provided by a connected game adapter (a plugin running inside the game). The available " +
-        "adapter tools and their input schemas are listed in the latest [Scruff status] note.",
+        "adapter tools and their input schemas are listed in the latest [Telos status] note.",
       input: z.looseObject({
         tool: z.string().describe("Full adapter tool name as listed in the status note, e.g. demo__spawn_coins"),
         input: z.record(z.string(), z.unknown()).default({}).describe("Arguments matching that tool's input schema"),

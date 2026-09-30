@@ -4,7 +4,7 @@ import type { ModelStream, StreamFactory } from "../agent.ts";
 
 /**
  * Any model behind an OpenAI-compatible chat API: Ollama, LM Studio, llama.cpp, vLLM, Jan,
- * OpenRouter, OpenAI, Groq, Gemini... Scruff keeps its history in Claude's message format, so
+ * OpenRouter, OpenAI, Groq, Gemini... Telos keeps its history in Claude's message format, so
  * this converts each request to chat completions and turns the streamed answer back into a
  * Claude-shaped message.
  */
@@ -38,7 +38,7 @@ export function openAICompatibleStreamFactory(config: OpenAICompatibleConfig): S
         stream = await client.chat.completions.create(toRequest(params, vision), { signal });
       } catch (err) {
         if (vision && isImageRejection(err)) {
-          // Vision calls from Scruff (screenshots) would rather fail than have a blind
+          // Vision calls from Telos (screenshots) would rather fail than have a blind
           // model answer without the image.
           if (strictVision(params)) throw new ImageNotSupportedError(`${config.label} can't see images with ${params.model}.`);
           vision = false;

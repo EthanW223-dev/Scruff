@@ -6,7 +6,7 @@ import type { ProcessBackend, Region, ValueType } from "./types.ts";
 
 /**
  * "Unknown value" scans, for things with no number on screen (health bars, hunger, a timer) or
- * a number the player doesn't know. Scruff copies the game's writable memory to a temp file and
+ * a number the player doesn't know. Telos copies the game's writable memory to a temp file and
  * keeps one bit per possible slot and type saying "could still be it". Each step compares the
  * game's memory now with the copy ("went down", "went up", "stayed the same"), clears the bits
  * that don't fit, and saves the new values as the next baseline. Once few enough candidates are

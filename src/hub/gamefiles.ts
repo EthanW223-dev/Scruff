@@ -108,7 +108,7 @@ export function gameFileTools(games: GameManager, backupDir: string): HubTool[] 
   const profile = (): GameProfile => {
     if (!games.profile) {
       throw new Error(
-        games.session ? "Scruff couldn't find this game's files (it didn't report where it's installed)." : "Not attached to a game.",
+        games.session ? "Telos couldn't find this game's files (it didn't report where it's installed)." : "Not attached to a game.",
       );
     }
     return games.profile;
@@ -144,7 +144,7 @@ export function gameFileTools(games: GameManager, backupDir: string): HubTool[] 
       name: "game_info",
       readOnly: true,
       description:
-        "What Scruff found in the attached game's files: engine, install folder, where saves and settings live, " +
+        "What Telos found in the attached game's files: engine, install folder, where saves and settings live, " +
         "and whether its code can be searched. Check this after attaching.",
       input: z.object({}),
       run() {

@@ -80,7 +80,7 @@ test("hands-free: read HUD, auto-narrow on change, verify each write on screen",
   games.session = session;
   const tools = memoryTools(games, () => ({}));
 
-  // The "player" eats twice while Scruff watches: 12 of the 20 go 12 -> 11, then 2 go 11 -> 10.
+  // The "player" eats twice while Telos watches: 12 of the 20 go 12 -> 11, then 2 go 11 -> 10.
   const eaten1 = plants.slice(0, 12);
   const eaten2 = plants.slice(0, 2);
   let visionCalls = 0;
@@ -259,7 +259,7 @@ test("a misread that empties the search restarts fresh instead of watching nothi
   const outcome = await handler("give me 99 food", (e) => events.push(e), new AbortController().signal);
 
   assert.equal(outcome.handled, true);
-  // The misread emptied the search; Scruff restarted it fresh instead of watching on nothing.
+  // The misread emptied the search; Telos restarted it fresh instead of watching on nothing.
   const progress = events
     .filter((e) => e.type === "tool_progress")
     .map((e) => (e as { text: string }).text)

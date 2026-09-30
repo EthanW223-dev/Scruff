@@ -14,7 +14,7 @@ export class LinuxBackend implements ProcessBackend {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === "EACCES" || code === "EPERM") {
         throw new Error(
-          `Permission denied opening process ${pid}. Run Scruff with sudo, or allow it with ` +
+          `Permission denied opening process ${pid}. Run Telos with sudo, or allow it with ` +
             "`echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope`.",
         );
       }

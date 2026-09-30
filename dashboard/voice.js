@@ -1,4 +1,4 @@
-// Push-to-talk recording for Scruff's local speech-to-text: 16 kHz mono PCM, what Whisper expects.
+// Push-to-talk recording for Telos's local speech-to-text: 16 kHz mono PCM, what Whisper expects.
 
 const WORKLET = `
 class PcmCapture extends AudioWorkletProcessor {

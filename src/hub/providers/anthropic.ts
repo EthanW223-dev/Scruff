@@ -14,7 +14,7 @@ const FALLBACKS = /^claude-(opus-5|fable-5)/;
 export function claudeStreamFactory(client: Anthropic, effort: Effort): StreamFactory {
   return (params, signal) => {
     const modern = MODERN.test(params.model);
-    // strictVision is a Scruff-internal flag for the OpenAI-compatible provider; never send it.
+    // strictVision is a Telos-internal flag for the OpenAI-compatible provider; never send it.
     const { strictVision: _strictVision, ...rest } = params as typeof params & { strictVision?: boolean };
     return client.beta.messages.stream(
       {

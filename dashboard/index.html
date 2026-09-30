@@ -3,15 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Scruff</title>
+  <title>Telos</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <!-- In-game overlay only: one button, reply notes, active mods. Swap dashboard/button.svg for your own art. -->
   <div id="hud" class="hud" hidden>
-    <button id="hud-button" class="hud-button interactive" type="button" title="Scruff">
-      <img src="button.svg" alt="Scruff" width="44" height="44">
+    <button id="hud-button" class="hud-button interactive" type="button" title="Telos">
+      <img src="button.svg" alt="Telos" width="44" height="44">
     </button>
     <div id="hud-mods" class="hud-mods"></div>
     <div id="hud-toasts" class="hud-toasts" aria-live="polite"></div>
@@ -19,14 +19,14 @@
 
   <div id="app" class="app">
   <div class="win-bar app-bar">
-    <span class="win-title">Scruff.exe<span id="app-bar-game"></span></span>
+    <span class="win-title">Telos.exe<span id="app-bar-game"></span></span>
     <button id="app-close" class="win-close" type="button" aria-label="Close" hidden>×</button>
   </div>
   <header class="topbar">
     <div class="chips">
       <button class="chip" id="ai-chip" title="Choose the AI"><span class="dot"></span><span id="ai-label">AI</span></button>
       <button class="chip" id="game-chip" title="Pick the game to mod"><span class="dot"></span><span id="game-label">No game</span></button>
-      <button class="chip" id="screen-chip" title="Let Scruff see your game"><span class="dot"></span><span id="screen-label">Share screen</span></button>
+      <button class="chip" id="screen-chip" title="Let Telos see your game"><span class="dot"></span><span id="screen-label">Share screen</span></button>
       <span class="chip static" id="adapter-chip" hidden><span class="dot on"></span><span id="adapter-label"></span></span>
     </div>
     <nav class="tabs" role="tablist">
@@ -56,7 +56,7 @@
       <form id="composer" class="composer">
         <div id="voice-status" class="voice-status" hidden></div>
         <div class="composer-row">
-          <textarea id="input" rows="1" placeholder="Tell Scruff what to change…" autocomplete="off"></textarea>
+          <textarea id="input" rows="1" placeholder="Tell Telos what to change…" autocomplete="off"></textarea>
           <button type="button" id="mic" class="icon-btn" title="Push to talk (Ctrl+Space)" aria-label="Push to talk">
             <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
           </button>
@@ -64,7 +64,7 @@
           <button type="button" id="stop" class="danger" hidden>Stop</button>
         </div>
         <div class="composer-opts">
-          <label id="handsfree-label" title="Keep listening; start a request by saying 'Scruff, …'"><input type="checkbox" id="handsfree"> Hands-free ("Scruff, …")</label>
+          <label id="handsfree-label" title="Keep listening; start a request by saying 'Telos, …'"><input type="checkbox" id="handsfree"> Hands-free ("Telos, …")</label>
           <label><input type="checkbox" id="speak"> Read replies aloud</label>
           <button type="button" id="new-chat" class="link">New chat</button>
         </div>
@@ -82,7 +82,7 @@
           <div class="progress" hidden id="scan-progress"><div></div></div>
         </div>
         <ul id="watch" class="watch"></ul>
-        <p id="watch-empty" class="muted small">Values Scruff finds and changes show up here. Toggle a lock to freeze one.</p>
+        <p id="watch-empty" class="muted small">Values Telos finds and changes show up here. Toggle a lock to freeze one.</p>
       </div>
       <div class="panel">
         <div class="panel-head"><h2>Changes</h2></div>
@@ -113,7 +113,7 @@
 
       <section class="subscription">
         <h3><img class="sub-logo" src="logos/anthropic.svg" alt="" aria-hidden="true"> Use your Claude subscription <span class="tag">no key</span></h3>
-        <p class="muted small">Let Claude Desktop or Claude Code be the brain instead. They run on your Pro/Max plan, call Scruff's tools, and every change still shows up in this dashboard.</p>
+        <p class="muted small">Let Claude Desktop or Claude Code be the brain instead. They run on your Pro/Max plan, call Telos's tools, and every change still shows up in this dashboard.</p>
         <details>
           <summary>Claude Code</summary>
           <p class="small">Run this once, then start <code>claude</code> and ask it to mod your game:</p>
@@ -121,7 +121,7 @@
         </details>
         <details>
           <summary>Claude Desktop</summary>
-          <p class="small">In Claude Desktop open Settings → Developer → Edit Config, put this in the file (merge it into <code>mcpServers</code> if you already have some), then restart Claude Desktop. It starts Scruff for you.</p>
+          <p class="small">In Claude Desktop open Settings → Developer → Edit Config, put this in the file (merge it into <code>mcpServers</code> if you already have some), then restart Claude Desktop. It starts Telos for you.</p>
           <div class="copy-block"><pre id="desktop-json"></pre><button type="button" class="link" data-copy="desktop-json">copy</button></div>
           <p class="muted small">File: <code id="desktop-path"></code></p>
         </details>
@@ -137,7 +137,7 @@
       </div>
       <input id="picker-search" type="search" placeholder="Search running programs…" autocomplete="off">
       <ul id="picker-list" class="picker-list"></ul>
-      <p class="muted small">Single-player games only. Scruff won't attach when it sees anti-cheat running.</p>
+      <p class="muted small">Single-player games only. Telos won't attach when it sees anti-cheat running.</p>
       <div class="picker-foot">
         <button type="button" id="detach" class="link" hidden>Detach from current game</button>
         <button type="button" id="picker-refresh" class="link">Refresh</button>

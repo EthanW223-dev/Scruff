@@ -14,7 +14,7 @@ import { JevClient, JevError, type JevQuestion } from "../src/hub/jev.ts";
 import { findNumbers, findPhrases, maxFor, quickPath } from "../src/hub/quick.ts";
 import { fakeModel, text } from "./fake-model.ts";
 
-// Jev (TypeSafe's System One model) as Scruff's fast path. A stand-in TypeSafe server speaks the
+// Jev (TypeSafe's System One model) as Telos's fast path. A stand-in TypeSafe server speaks the
 // documented API (POST /v1/systemone, GET /v1/models); a small rule set plays Jev's part.
 
 type Questions = Record<string, JevQuestion & { criteria: any }>;
@@ -136,7 +136,7 @@ test("with no chat AI, Jev explains what it can do instead of failing", async ()
 
 // ---------- the whole loop on the demo game ----------
 
-const TITLE = `Scruff's Dungeon QA${process.pid}`;
+const TITLE = `Telos's Dungeon QA${process.pid}`;
 let api: ReturnType<typeof mockTypeSafe>;
 let hub: Awaited<ReturnType<typeof createHub>>;
 let game: ChildProcessWithoutNullStreams;
@@ -262,7 +262,7 @@ test("anything else goes to the chat model, which hears what Jev already did", a
   assert.equal(turn.reply, "Paris.");
   assert.equal(model.calls.length, 1);
   const sent = JSON.stringify(model.calls[0].messages.at(-1));
-  assert.match(sent, /Handled instantly by Scruff's fast path \(Jev\)/);
+  assert.match(sent, /Handled instantly by Telos's fast path \(Jev\)/);
   assert.match(sent, /undo everything/);
   assert.match(sent, /Set gold to 99,999/);
 });
@@ -337,7 +337,7 @@ test("no number: 'give me max health' snapshots memory, narrows by down/same/up,
   assert.match(turn.reply, /make it go down or up/);
   assert.ok(hub.games.session!.scanner.isSnapshot, "no number: a snapshot");
 
-  // The player plays: takes hits, waits, drinks a potion; tells Scruff only which way it went.
+  // The player plays: takes hits, waits, drinks a potion; tells Telos only which way it went.
   const moves = ["fight", "wait", "fight", "heal 4", "wait", "fight", "heal 4", "fight", "wait", "heal 4", "fight", "wait"];
   const said: string[] = [];
   for (const move of moves) {

@@ -83,7 +83,7 @@ test("the default theme applies before any game is attached", async () => {
 
 test("a screenshot palette is used for a new game until something is chosen on purpose", async () => {
   await chat("attach to the dungeon game");
-  assert.equal(hub.games.session?.target.name, "Scruff's Dungeon");
+  assert.equal(hub.games.session?.target.name, "Telos's Dungeon");
   dash.send(JSON.stringify({ type: "suggest_theme", theme: { accent: "#3aa0ff", background: "#081018", text: "#e6f0ff" } }));
   await waitFor(() => lastState()?.theme.source === "auto", "auto theme");
   assert.equal(lastState().theme.accent, "#3aa0ff");

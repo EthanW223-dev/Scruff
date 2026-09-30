@@ -11,7 +11,7 @@ import WebSocket from "ws";
 import { createHub } from "../src/hub/create.ts";
 import { fakeModel, text } from "./fake-model.ts";
 
-// The "use your Claude subscription" path: a Claude app connects to Scruff over MCP and
+// The "use your Claude subscription" path: a Claude app connects to Telos over MCP and
 // drives the same tools. Here a real MCP client plays the Claude app.
 
 const root = path.resolve(import.meta.dirname, "..");
@@ -60,7 +60,7 @@ after(async () => {
   hub?.close();
 });
 
-test("lists Scruff's tools with instructions and read-only hints", async () => {
+test("lists Telos's tools with instructions and read-only hints", async () => {
   const client = await connectHttp();
   assert.match(client.getInstructions() ?? "", /game_status first/);
   const { tools } = await client.listTools();
@@ -135,7 +135,7 @@ test("stdio bridge relays to a running hub (the Claude Desktop setup)", async ()
   const { tools } = await client.listTools();
   assert.ok(tools.some((t) => t.name === "game_status"));
   const status = JSON.parse(textOf(await client.callTool({ name: "game_status", arguments: {} })));
-  assert.equal(status.name, "Scruff's Dungeon", "same hub, same attached game");
+  assert.equal(status.name, "Telos's Dungeon", "same hub, same attached game");
 });
 
 test("stdio bridge starts its own hub when none is running", async () => {

@@ -181,7 +181,7 @@ test("an older installed bridge is spotted and updated once the game has quit", 
   const zipFile = path.join(install, "..", "bepinex.zip");
   fs.writeFileSync(zipFile, bepinexZip());
   await installBridge(profile, { bridgeDll: old, bepinexZip: zipFile });
-  assert.equal(bridgeState(profile, BRIDGE).outdated, true, "differs from the bridge Scruff ships");
+  assert.equal(bridgeState(profile, BRIDGE).outdated, true, "differs from the bridge Telos ships");
   assert.equal(bridgeState(profile, old).outdated, undefined);
 
   const games = new GameManager();
@@ -190,7 +190,7 @@ test("an older installed bridge is spotted and updated once the game has quit", 
   const notices: string[] = [];
   games.on("notice", (t: string) => notices.push(t));
   assert.equal(await games.updateBridge(1), true);
-  assert.match(notices[0], /Updated the Scruff bridge/);
+  assert.match(notices[0], /Updated the Telos bridge/);
   assert.equal(bridgeState(profile, BRIDGE).outdated, undefined);
   assert.ok(fs.readFileSync(path.join(install, "BepInEx/plugins/ScruffBridge/ScruffBridge.dll")).equals(fs.readFileSync(BRIDGE)));
   assert.equal(await games.updateBridge(1), false, "nothing to do when current");

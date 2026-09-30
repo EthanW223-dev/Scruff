@@ -33,7 +33,7 @@ const policy = (params: Parameters<typeof lastUserText>[0]): Reply => {
     case "find_value": {
       const found = JSON.parse(last.result);
       if (found.search === "started") return { content: [text("Found some candidates. Spend a little gold and tell me the new amount.")] };
-      // No type given: Scruff knows how each result is stored.
+      // No type given: Telos knows how each result is stored.
       return { content: [toolUse("write_value", { addresses: found.addresses.map((r: any) => r.address), value: 99999, label: "Gold" })] };
     }
     default:
@@ -105,7 +105,7 @@ after(() => {
 test("serves the dashboard", async () => {
   const res = await fetch(`http://127.0.0.1:${port}/`);
   assert.equal(res.status, 200);
-  assert.match(await res.text(), /<title>Scruff<\/title>/);
+  assert.match(await res.text(), /<title>Telos<\/title>/);
 });
 
 test("chat → scan → refine → write changes the game's gold", async () => {
@@ -148,7 +148,7 @@ test("history is append-only and the system prompt and tools never change", () =
   }
   // The status note (game + adapters) went along with the first message.
   const firstUser = JSON.stringify(calls[0].messages[0].content);
-  assert.match(firstUser, /Scruff status/);
+  assert.match(firstUser, /Telos status/);
   assert.match(firstUser, /demo__spawn_gold/);
 });
 

@@ -1,4 +1,4 @@
-// The in-game HUD: one button (dashboard/button.svg), Scruff's replies as little windows, and
+// The in-game HUD: one button (dashboard/button.svg), Telos's replies as little windows, and
 // the values it's holding. Everything is click-through except the button; the full panel opens
 // with a hotkey or a click on it.
 
@@ -35,7 +35,7 @@ export function startHud({ toolLabel }) {
     if (listening) return status("Listening…", "listening");
     if (voice) return status(voice, "busy");
     if (busy) return status(working || "Thinking…", "busy");
-    status(game ? `Scruff · ${game}` : "Scruff");
+    status(game ? `Telos · ${game}` : "Telos");
   }
 
   function toast(text, kind = "", ms = 6000) {

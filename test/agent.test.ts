@@ -90,7 +90,7 @@ test("a refusal drops the turn so it isn't replayed", async () => {
   const msgs = model.calls.at(-1)!.messages;
   assert.equal(msgs.length, 1);
   assert.match(JSON.stringify(msgs[0].content), /something else/);
-  assert.match(JSON.stringify(msgs[0].content), /Scruff status/, "status note is re-sent after a rollback");
+  assert.match(JSON.stringify(msgs[0].content), /Telos status/, "status note is re-sent after a rollback");
 });
 
 test("a tool call cut off by max_tokens is never run", async () => {

@@ -5,7 +5,7 @@ import path from "node:path";
 /**
  * Client for Jev, TypeSafe's System One model (https://docs.typesafe.ai). Jev doesn't chat or
  * write text: it takes a `state` and typed questions (pick one option, score on levels, yes/no)
- * and answers all of them in one fast call, each with calibrated probabilities. Scruff uses it
+ * and answers all of them in one fast call, each with calibrated probabilities. Telos uses it
  * to understand quick commands without waiting on a chat model.
  */
 

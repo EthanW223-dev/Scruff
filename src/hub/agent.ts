@@ -152,13 +152,13 @@ export class Agent extends EventEmitter {
     }
     if (events.length) parts.push(`Game events since the last message:\n${events.map((e) => `- ${e}`).join("\n")}`);
     if (this.quickLog.length) {
-      parts.push(`Handled instantly by Scruff's fast path (Jev) since your last reply:\n${this.quickLog.map((l) => `- ${l}`).join("\n")}`);
+      parts.push(`Handled instantly by Telos's fast path (Jev) since your last reply:\n${this.quickLog.map((l) => `- ${l}`).join("\n")}`);
       this.quickLog = [];
     }
-    if (quickNote) parts.push(`Scruff's fast path (Jev) already did this for the message below: ${quickNote}`);
+    if (quickNote) parts.push(`Telos's fast path (Jev) already did this for the message below: ${quickNote}`);
     if (!parts.length) return text;
     return [
-      { type: "text", text: `[Scruff status]\n${parts.join("\n\n")}\n[/Scruff status]` },
+      { type: "text", text: `[Telos status]\n${parts.join("\n\n")}\n[/Telos status]` },
       { type: "text", text },
     ];
   }

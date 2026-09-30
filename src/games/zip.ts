@@ -51,7 +51,7 @@ export function readZip(buf: Buffer): ZipEntry[] {
   return entries;
 }
 
-/** Builds a zip (deflated). Used by tests; Scruff itself only reads them. */
+/** Builds a zip (deflated). Used by tests; Telos itself only reads them. */
 export function writeZip(files: Record<string, Buffer | string>): Buffer {
   const locals: Buffer[] = [];
   const centrals: Buffer[] = [];

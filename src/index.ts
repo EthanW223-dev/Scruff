@@ -12,7 +12,7 @@ const envFile = path.join(root, ".env");
 if (fs.existsSync(envFile)) process.loadEnvFile(envFile);
 
 /** Starts the hub. Logs go to stderr so the MCP stdio bridge can run it in-process. */
-export async function startScruff(options: { lan?: boolean; quiet?: boolean } = {}) {
+export async function startTelos(options: { lan?: boolean; quiet?: boolean } = {}) {
   const port = Number(process.env.SCRUFF_PORT ?? 7777);
   const log = (line = "") => {
     if (!options.quiet) console.error(line);
@@ -24,7 +24,7 @@ export async function startScruff(options: { lan?: boolean; quiet?: boolean } = 
   const hub = await createHub({ root, port, lan: Boolean(options.lan), token, router });
 
   const ai = router.describe();
-  log(`\n  Scruff is running → http://localhost:${port}\n`);
+  log(`\n  Telos is running → http://localhost:${port}\n`);
   if (options.lan) {
     const ips = Object.values(os.networkInterfaces())
       .flat()
@@ -44,11 +44,11 @@ const samePath = (a: string, b: string) =>
 
 // Run directly (npm start), not when imported by the MCP bridge.
 if (process.argv[1] && samePath(path.resolve(process.argv[1]), fileURLToPath(import.meta.url))) {
-  const hub = await startScruff({ lan: process.argv.includes("--lan") }).catch((err: NodeJS.ErrnoException) => {
+  const hub = await startTelos({ lan: process.argv.includes("--lan") }).catch((err: NodeJS.ErrnoException) => {
     const port = process.env.SCRUFF_PORT ?? 7777;
     console.error(
       err.code === "EADDRINUSE"
-        ? `Port ${port} is busy. Scruff may already be running (Claude Desktop starts it too): open http://localhost:${port}`
+        ? `Port ${port} is busy. Telos may already be running (Claude Desktop starts it too): open http://localhost:${port}`
         : err,
     );
     process.exit(1);

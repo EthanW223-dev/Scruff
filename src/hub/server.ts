@@ -15,6 +15,15 @@ import { ThemeInput, type ThemeStore } from "./themes.ts";
 import { parseAddress } from "../memory/types.ts";
 import { installBridge, removeBridge, unityFlavor } from "../games/bepinex.ts";
 import { installUnrealBridge, removeUnrealBridge } from "../games/unreal.ts";
+import { buildSystemPrompt, PERSONA_IDS } from "./prompt.ts";
+import {
+  DEFAULT_VOICE,
+  sanitizeVoiceText,
+  synthesizeVoice,
+  VOICE_ALLOWLIST,
+  VoiceError,
+  type VoiceId,
+} from "./voice.ts";
 
 export interface ServerOptions {
   port: number;
@@ -204,6 +213,28 @@ export function startServer(opts: ServerOptions): Promise<http.Server> {
         );
         break;
       }
+      case "set_persona": {
+        if (!router) throw new Error("This Telos can't switch personas.");
+        const persona = String(msg.persona ?? "");
+        router.setPersona(persona);
+        agent.setSystem(buildSystemPrompt(persona as (typeof PERSONA_IDS)[number]));
+        toast(ws, persona === "grim" ? "Grim here. Same tools, more honesty." : "Back to Telos mode.", "info");
+        broadcast({ type: "hello", ai: aiInfo() });
+        break;
+      }
+      case "set_voice": {
+        if (!router) throw new Error("This Telos can't change voices.");
+        const voice = String(msg.voice ?? "");
+        const enabled = msg.enabled !== false;
+        router.setVoice(voice, enabled);
+        toast(
+          ws,
+          enabled ? `Voice replies on (${voice}).` : "Voice replies off.",
+          "info",
+        );
+        broadcast({ type: "hello", ai: aiInfo() });
+        break;
+      }
       case "install_bridge": {
         if (!games.profile) throw new Error("Attach to the game first.");
         const port = (server.address() as AddressInfo).port;
@@ -353,6 +384,26 @@ export function startServer(opts: ServerOptions): Promise<http.Server> {
     }
     if (url.pathname === "/health") {
       res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ app: "scruff" }));
+      return;
+    }
+    if (url.pathname === "/voice/say") {
+      // Spoken replies: text in, mp3 out (cached). The overlay plays these on turn_end.
+      const clean = sanitizeVoiceText(url.searchParams.get("text") ?? "");
+      if (!clean) {
+        res.writeHead(400, { "content-type": "text/plain; charset=utf-8" }).end("Nothing to say.");
+        return;
+      }
+      const wanted = url.searchParams.get("voice") ?? router?.voice ?? process.env.SCRUFF_VOICE ?? DEFAULT_VOICE;
+      const voice: VoiceId = VOICE_ALLOWLIST.includes(wanted as VoiceId) ? (wanted as VoiceId) : DEFAULT_VOICE;
+      synthesizeVoice({ text: clean, voice, cacheDir: path.join(opts.dataDir, "voice") })
+        .then(({ file }) => {
+          res.writeHead(200, { "content-type": "audio/mpeg", "cache-control": "public, max-age=86400" });
+          fs.createReadStream(file).pipe(res);
+        })
+        .catch((err) => {
+          const hint = err instanceof VoiceError ? err.hint : "pip install edge-tts";
+          res.writeHead(503, { "content-type": "text/plain; charset=utf-8" }).end(`Voice synthesis unavailable: ${(err as Error).message}\n${hint}`);
+        });
       return;
     }
     const rel = url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname).replace(/^\/+/, "");

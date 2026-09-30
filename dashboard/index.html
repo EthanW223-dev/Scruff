@@ -8,10 +8,37 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- In-game overlay only: one button, reply notes, active mods. Swap dashboard/button.svg for your own art. -->
+  <!-- In-game overlay only: one button, reply notes, active mods. Swap the skull orb below for your own art. -->
   <div id="hud" class="hud" hidden>
     <button id="hud-button" class="hud-button interactive" type="button" title="Telos">
-      <img src="button.svg" alt="Telos" width="44" height="44">
+      <svg viewBox="0 0 64 64" aria-hidden="true">
+        <defs>
+          <radialGradient id="orb-bg" cx="50%" cy="40%" r="70%">
+            <stop offset="0%" stop-color="#2b2b38"/>
+            <stop offset="65%" stop-color="#14141c"/>
+            <stop offset="100%" stop-color="#0a0a0f"/>
+          </radialGradient>
+        </defs>
+        <g class="orb-halo">
+          <circle cx="32" cy="32" r="29.5" fill="none" stroke="#ef7b9c" stroke-width="6" opacity="0.14"/>
+        </g>
+        <g class="orb-ring">
+          <circle cx="32" cy="32" r="28.5" fill="none" stroke="#ef7b9c" stroke-width="1.6" stroke-dasharray="5 9" opacity="0.85"/>
+        </g>
+        <circle class="orb-body" cx="32" cy="32" r="23" fill="url(#orb-bg)" stroke="#3d3d4d" stroke-width="1.5"/>
+        <g class="orb-skull" fill="#ef7b9c" opacity="0.92">
+          <circle cx="32" cy="28.5" r="10.5"/>
+          <rect x="24.5" y="32" width="15" height="10" rx="3.5"/>
+          <g fill="#14141c">
+            <ellipse cx="27.8" cy="28.8" rx="2.9" ry="3.5"/>
+            <ellipse cx="36.2" cy="28.8" rx="2.9" ry="3.5"/>
+            <path d="M32 33.2l-2.1 3.6h4.2z"/>
+            <rect x="28.6" y="38" width="1.2" height="4"/>
+            <rect x="31.4" y="38" width="1.2" height="4"/>
+            <rect x="34.2" y="38" width="1.2" height="4"/>
+          </g>
+        </g>
+      </svg>
     </button>
     <div id="hud-mods" class="hud-mods"></div>
     <div id="hud-toasts" class="hud-toasts" aria-live="polite"></div>
@@ -108,6 +135,14 @@
         <button value="close" class="icon-btn" aria-label="Close">✕</button>
       </div>
       <p class="muted small">Pick a brain. Local models connect with one click; cloud ones walk you through it.</p>
+      <section class="ai-section">
+        <h3>Persona</h3>
+        <div id="persona-row" class="provider-grid persona-grid" role="listbox" aria-label="Persona"></div>
+      </section>
+      <section class="ai-section">
+        <h3>Voice</h3>
+        <div id="voice-row" class="voice-row"></div>
+      </section>
       <div id="provider-grid" class="provider-grid" role="listbox" aria-label="AI providers"></div>
       <div id="connect-panel" class="connect-panel" hidden></div>
 

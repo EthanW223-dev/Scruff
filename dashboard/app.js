@@ -47,7 +47,10 @@ function handle(msg) {
   switch (msg.type) {
     case "hello":
       aiInfo = msg.ai;
+      // hello carries the freshest AI info (e.g. after set_persona/set_voice); keep the cached copy in sync.
+      if (modelsMsg) modelsMsg.current = msg.ai;
       renderAi();
+      renderPersonaVoice();
       break;
     case "models":
       renderModels(msg);
@@ -475,6 +478,17 @@ const PROVIDER_META = {
 };
 const JEV_LOGO = "logos/typesafe.svg";
 
+const PERSONAS = [
+  { id: "telos", name: "Telos", detail: "The game-modding sidekick." },
+  { id: "grim", name: "Grim", detail: "Ethan's AI — my personality. Works with any model." },
+];
+const VOICE_OPTIONS = [
+  ["en-US-AriaNeural", "Aria — warm, natural"],
+  ["en-US-JennyNeural", "Jenny — friendly"],
+  ["en-US-GuyNeural", "Guy — deep"],
+  ["en-GB-SoniaNeural", "Sonia — British"],
+];
+
 let modelsMsg = null;
 let connectId = null; // provider id (or "jev") with the connect panel open
 let connectBusy = null; // provider id while a key check is in flight; error toasts go inline
@@ -519,6 +533,64 @@ function openAiMenu() {
   send({ type: "list_models" });
 }
 
+// Persona + voice sections of the AI menu. They read the dashboard's current AI info
+// (from either the "models" or the "hello" message) and send set_persona / set_voice.
+function renderPersonaVoice() {
+  const ai = modelsMsg?.current ?? aiInfo ?? {};
+  renderPersonas(ai.persona ?? "telos");
+  renderVoice(ai.voice ?? VOICE_OPTIONS[0][0], Boolean(ai.voiceEnabled));
+}
+
+function renderPersonas(persona) {
+  const row = $("persona-row");
+  row.replaceChildren(
+    ...PERSONAS.map((p, i) => {
+      const b = el("button", "provider-card persona-card");
+      b.type = "button";
+      b.dataset.id = p.id;
+      b.setAttribute("role", "option");
+      b.setAttribute("aria-selected", String(persona === p.id));
+      b.style.animationDelay = `${Math.min(i * 55, 330)}ms`;
+      b.append(el("span", "provider-name", p.name), el("span", "provider-detail", p.detail));
+      b.addEventListener("click", () => send({ type: "set_persona", persona: p.id }));
+      // Spotlight hover, same as provider cards.
+      b.addEventListener("pointermove", (e) => {
+        const r = b.getBoundingClientRect();
+        b.style.setProperty("--mx", `${e.clientX - r.left}px`);
+        b.style.setProperty("--my", `${e.clientY - r.top}px`);
+      });
+      return b;
+    }),
+  );
+}
+
+function renderVoice(voice, enabled) {
+  const row = $("voice-row");
+  row.replaceChildren();
+  const label = el("label", "voice-toggle");
+  const cb = el("input");
+  cb.type = "checkbox";
+  cb.checked = enabled;
+  label.append(cb, el("span", null, "Speak replies with a human voice"));
+  const sel = el("select");
+  sel.setAttribute("aria-label", "Voice");
+  for (const [id, name] of VOICE_OPTIONS) {
+    const o = el("option", null, name);
+    o.value = id;
+    sel.append(o);
+  }
+  sel.value = [...sel.options].some((o) => o.value === voice) ? voice : VOICE_OPTIONS[0][0];
+  cb.addEventListener("change", () => send({ type: "set_voice", voice: sel.value, enabled: cb.checked }));
+  sel.addEventListener("change", () => {
+    send({ type: "set_voice", voice: sel.value, enabled: cb.checked });
+    // Preview the new voice immediately.
+    new Audio(`/voice/say?voice=${encodeURIComponent(sel.value)}&text=${encodeURIComponent("Hey Ethan, this is how I sound now.")}`)
+      .play()
+      .catch(() => {});
+  });
+  row.append(label, sel);
+}
+
 function providerCards() {
   const cards = modelsMsg.providers.map((p) => {
     const meta = PROVIDER_META[p.id] ?? {};
@@ -550,6 +622,7 @@ function providerCards() {
 function renderModels(msg) {
   modelsMsg = msg;
   connectBusy = null;
+  renderPersonaVoice();
   const grid = $("provider-grid");
   grid.replaceChildren(
     ...providerCards().map((c, i) => {

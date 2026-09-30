@@ -28,6 +28,8 @@ export interface Brain {
 
 export interface AgentOptions {
   brain: Brain;
+  /** Overrides the default system prompt (the persona); see prompt.ts. */
+  system?: string;
   /** Fixed for the session; see prompt.ts for why. */
   tools: HubTool[];
   /** Status text (attached game, adapters, events). Sent with a user message when it changes. */
@@ -105,6 +107,14 @@ export class Agent extends EventEmitter {
   setBrain(brain: Brain): void {
     this.reset();
     this.opts.brain = brain;
+  }
+
+  /**
+   * Switches the persona (system prompt) without rebuilding the agent or dropping
+   * the conversation. The dashboard drives this through set_persona.
+   */
+  setSystem(system: string): void {
+    this.opts.system = system;
   }
 
   private emitEvent(event: AgentEvent): void {
@@ -263,7 +273,7 @@ export class Agent extends EventEmitter {
     return {
       model: this.opts.brain.model,
       max_tokens: MAX_TOKENS,
-      system: SYSTEM_PROMPT,
+      system: this.opts.system ?? SYSTEM_PROMPT,
       tools: this.apiTools,
       messages,
     };

@@ -1,6 +1,6 @@
-// The in-game HUD: one button (dashboard/button.svg), Telos's replies as little windows, and
-// the values it's holding. Everything is click-through except the button; the full panel opens
-// with a hotkey or a click on it.
+// The in-game HUD: one button (the skull orb, inlined from dashboard/button.svg), Telos's replies
+// as little windows, and the values it's holding. Everything is click-through except the button;
+// the full panel opens with a hotkey or a click on it. The button is draggable (see below).
 
 const $ = (id) => document.getElementById(id);
 const MAX_TOASTS = 4;
@@ -10,6 +10,8 @@ export function startHud({ toolLabel }) {
   const hud = $("hud");
   const button = $("hud-button");
   hud.hidden = false;
+  // Only true when this page runs inside the Electron overlay (not a browser tab).
+  const overlayMode = document.body.classList.contains("overlay");
 
   let game = null;
   let busy = false;
@@ -19,6 +21,10 @@ export function startHud({ toolLabel }) {
   let reply = null;
   let replyText = "";
   let keys = "";
+  // Spoken replies: which neural voice, and whether they're on (from the hello/models message).
+  let voiceEnabled = false;
+  let voiceName = "en-US-AriaNeural";
+  let ttsAudio = null;
 
   bridge.hotkeys().then(({ panel, talk }) => {
     keys = `Open: ${pretty(panel)}  ·  Talk: ${pretty(talk)}`;
@@ -63,6 +69,39 @@ export function startHud({ toolLabel }) {
     }, ms);
   }
 
+  /** Shows "Speaking…" on the HUD button while the voice reply plays. */
+  function setSpeaking(on) {
+    window.dispatchEvent(new CustomEvent("scruff", { detail: { type: "voice_status", text: on ? "Speaking…" : "" } }));
+  }
+
+  /** Plays a spoken reply through the hub's /voice/say TTS route. Never called for errors/notices. */
+  function speakReply(text) {
+    if (ttsAudio) ttsAudio.pause();
+    const audio = new Audio(`/voice/say?voice=${encodeURIComponent(voiceName)}&text=${encodeURIComponent(text.slice(0, 600))}`);
+    ttsAudio = audio;
+    setSpeaking(true);
+    const done = () => {
+      if (ttsAudio === audio) {
+        ttsAudio = null;
+        setSpeaking(false);
+      }
+    };
+    audio.addEventListener("ended", done);
+    audio.addEventListener("error", done);
+    audio.play().catch(done);
+  }
+
+  /** Little pop on the orb each time a batch of reply text lands (throttled). */
+  let lastPop = 0;
+  function pop() {
+    const now = Date.now();
+    if (now - lastPop < 500) return;
+    lastPop = now;
+    button.classList.remove("pop");
+    void button.offsetWidth; // restart the animation
+    button.classList.add("pop");
+  }
+
   function onAgent(e) {
     switch (e.type) {
       case "user":
@@ -86,6 +125,7 @@ export function startHud({ toolLabel }) {
         if (!reply) reply = toast("", "", 0);
         replyText += e.text;
         reply.querySelector(".body").textContent = replyText.replace(/\*\*|`/g, "");
+        pop();
         break;
       case "error":
         toast(e.text, "error", 9000);
@@ -96,10 +136,16 @@ export function startHud({ toolLabel }) {
       case "turn_end":
         busy = false;
         working = "";
-        if (reply) fadeOut(reply, 8000 + Math.min(12000, replyText.length * 40));
-        reply = null;
-        replyText = "";
-        idle();
+        {
+          const said = replyText.trim();
+          if (reply) fadeOut(reply, 8000 + Math.min(12000, replyText.length * 40));
+          reply = null;
+          replyText = "";
+          idle();
+          // Spoken replies, overlay mode only: a browser dashboard tab must never double-play.
+          // Errors and notices never reach here; only the assistant's reply text does.
+          if (overlayMode && voiceEnabled && said) speakReply(said);
+        }
         break;
     }
   }
@@ -122,7 +168,13 @@ export function startHud({ toolLabel }) {
     const msg = e.detail;
     if (msg.type === "agent") onAgent(msg.event);
     else if (msg.type === "history") busy = false;
-    else if (msg.type === "state") {
+    else if (msg.type === "hello" || msg.type === "models") {
+      const ai = msg.type === "hello" ? msg.ai : msg.current;
+      if (ai) {
+        voiceEnabled = Boolean(ai.voiceEnabled);
+        voiceName = ai.voice || voiceName;
+      }
+    } else if (msg.type === "state") {
       const attached = msg.game.attached;
       game = attached ? attached.title || attached.name.replace(/\.exe$/i, "") : null;
       renderMods(attached?.watch ?? []);
@@ -149,7 +201,60 @@ export function startHud({ toolLabel }) {
       bridge.setInteractive(over);
     }
   });
-  button.addEventListener("click", () => bridge.setPanel(!document.body.classList.contains("panel-open")));
+  // Draggable button: a pointerdown starts a potential drag, and once the pointer moves
+  // more than 6px it becomes a drag — the button follows at position:fixed and the spot is
+  // remembered in localStorage. A clean pointerup keeps the normal click (toggles the panel);
+  // the click after a drag is swallowed. The click-through overlay keeps working because the
+  // button itself still has pointer-events:auto.
+  let drag = null;
+  let suppressClick = false;
+  function placeButton(x, y) {
+    button.style.position = "fixed";
+    button.style.left = `${Math.round(x)}px`;
+    button.style.top = `${Math.round(y)}px`;
+    button.style.zIndex = "9999";
+  }
+  try {
+    const saved = JSON.parse(localStorage.getItem("telos-hud-pos") ?? "null");
+    if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) placeButton(saved.x, saved.y);
+  } catch {}
+  button.addEventListener("pointerdown", (e) => {
+    drag = { x0: e.clientX, y0: e.clientY, moved: false, offX: 0, offY: 0 };
+    try {
+      button.setPointerCapture(e.pointerId);
+    } catch {}
+  });
+  button.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    if (!drag.moved) {
+      if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) <= 6) return;
+      drag.moved = true;
+      const rect = button.getBoundingClientRect();
+      drag.offX = drag.x0 - rect.left;
+      drag.offY = drag.y0 - rect.top;
+    }
+    placeButton(e.clientX - drag.offX, e.clientY - drag.offY);
+  });
+  const endDrag = () => {
+    if (!drag) return;
+    if (drag.moved) {
+      const rect = button.getBoundingClientRect();
+      try {
+        localStorage.setItem("telos-hud-pos", JSON.stringify({ x: Math.round(rect.left), y: Math.round(rect.top) }));
+      } catch {}
+      suppressClick = true;
+    }
+    drag = null;
+  };
+  button.addEventListener("pointerup", endDrag);
+  button.addEventListener("pointercancel", endDrag);
+  button.addEventListener("click", () => {
+    if (suppressClick) {
+      suppressClick = false;
+      return;
+    }
+    bridge.setPanel(!document.body.classList.contains("panel-open"));
+  });
 
   // Closing the panel hands focus back to the game.
   document.addEventListener("keydown", (e) => {

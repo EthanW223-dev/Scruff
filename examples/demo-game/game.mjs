@@ -1,16 +1,16 @@
 #!/usr/bin/env node
-// Scruff's Dungeon: a tiny terminal game to practise live-modding on.
+// Telos's Dungeon: a tiny terminal game to practise live-modding on.
 //
 //   npm run demo-game             play it (keys shown on screen)
 //   npm run demo-game -- --headless   no UI; reads commands from stdin (used by the tests)
 //
-// Gold and health live in raw memory exactly like a real game's would, so Scruff's memory
-// scanner can find and change them. If the Scruff hub is running, the game also connects as a
+// Gold and health live in raw memory exactly like a real game's would, so Telos's memory
+// scanner can find and change them. If the Telos hub is running, the game also connects as a
 // game adapter and gives Claude a few extra powers (spawn gold, change the weather, ...).
 
 import WebSocket from "ws";
 
-process.title = process.env.SCRUFF_DEMO_TITLE ?? "Scruff's Dungeon"; // what shows up in Scruff's game picker
+process.title = process.env.SCRUFF_DEMO_TITLE ?? "Telos's Dungeon"; // what shows up in Telos's game picker
 const HUB = process.env.SCRUFF_ADAPTER_URL ?? "ws://127.0.0.1:7777/ws/adapter";
 const headless = process.argv.includes("--headless");
 
@@ -83,7 +83,7 @@ function snapshot() {
   return { name: state.name, gold: gold[0], health: health[0], maxHealth: maxHealth[0], potions: potions[0], weather: state.weather, enemy: state.enemy };
 }
 
-// --- Scruff game adapter (optional) -----------------------------------------------------------
+// --- Telos game adapter (optional) -----------------------------------------------------------
 
 const adapter = {
   ws: null,
@@ -95,7 +95,7 @@ const adapter = {
       this.ws = ws;
       ws.send(JSON.stringify({
         type: "hello",
-        name: "Scruff's Dungeon",
+        name: "Telos's Dungeon",
         game: "demo",
         description: "Terminal demo RPG. Gold is an int32 and health is a float in memory.",
         tools: [
@@ -186,7 +186,7 @@ if (headless) {
       ...state.log.map((l) => "  " + l),
       "",
       "  [f] fight   [b] buy potion (25g)   [d] drink potion   [q] quit",
-      `  Scruff: ${adapter.connected ? "\x1b[32mconnected as a game adapter\x1b[0m" : "not connected (start it with `npm start`)"}`,
+      `  Telos: ${adapter.connected ? "\x1b[32mconnected as a game adapter\x1b[0m" : "not connected (start it with `npm start`)"}`,
     ];
     process.stdout.write(out.join("\n") + "\n");
   };

@@ -405,6 +405,16 @@ textarea:focus { box-shadow: 3px 3px 0 var(--accent); }
 .provider-card:active { transform: translate(2px, 2px); box-shadow: 0 0 0 var(--text); }
 .provider-card[aria-selected="true"] { background: color-mix(in srgb, var(--accent) 20%, var(--bg)); border-color: var(--accent); box-shadow: 4px 4px 0 var(--accent); }
 .provider-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* AI menu sections: persona cards reuse the provider-card look; the voice row is a toggle + dropdown. */
+.ai-section { margin: 14px 0 4px; }
+.ai-section h3 { margin: 0 0 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.persona-grid { grid-template-columns: repeat(2, 1fr); }
+.persona-card .provider-detail { font-size: 12px; }
+.voice-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 12px; border: 1px solid var(--line); background: var(--surface); }
+.voice-toggle { display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
+.voice-toggle input { width: 16px; height: 16px; accent-color: var(--accent); }
+.voice-row select { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); padding: 6px 8px; border-radius: 6px; }
 @keyframes card-in { from { opacity: 0; transform: translateY(12px); } }
 .provider-logo { width: 34px; height: 34px; color: var(--text); }
 .provider-logo img { width: 100%; height: 100%; display: block; }
@@ -441,6 +451,7 @@ textarea:focus { box-shadow: 3px 3px 0 var(--accent); }
 @media (prefers-reduced-motion: reduce) {
   .cursor, .spin { animation: none; }
   .provider-card, .connect-panel { animation: none; transition: none; }
+  .hud-button, .hud-button svg, .orb-halo, .orb-ring { animation: none !important; }
   .msg.fresh, .msg.fresh .bubble, .turn.active .text, .thinking summary,
   .primary, .primary.launch, textarea:focus, .turn.active::after { animation: none !important; transition: none !important; }
 }
@@ -559,24 +570,50 @@ body[data-corner$="left"] .hud { left: 16px; align-items: flex-start; }
 body[data-corner^="top"] .hud { top: 16px; }
 body[data-corner^="bottom"] .hud { bottom: 16px; flex-direction: column-reverse; }
 
-/* The overlay's one control. Its look is dashboard/button.svg; state shows as a frame around it. */
+/* The overlay's one control: a glowing skull orb (inline SVG in index.html, master art in
+   dashboard/button.svg). Idle it breathes, busy it spins its ring, listening it pulses red,
+   and it pops when a reply chunk lands. Draggable in overlay.js; position:fixed once moved. */
 .hud-button {
   position: relative;
   pointer-events: auto;
   width: 48px;
   height: 48px;
   padding: 0;
-  border: 2px solid var(--line);
-  background: var(--bg);
-  box-shadow: 3px 3px 0 var(--shadow);
-  transition: transform 0.08s, box-shadow 0.08s;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
 }
-.hud-button img { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
-.hud-button:hover { transform: translate(-1px, -1px); box-shadow: 5px 5px 0 var(--shadow); }
-.hud-button:active { transform: translate(2px, 2px); box-shadow: 0 0 0 var(--shadow); }
-.hud-button::after { content: ""; position: absolute; inset: -7px; border: 2px dashed transparent; pointer-events: none; }
-.hud[data-mode="busy"] .hud-button::after { border-color: var(--accent); animation: blink 0.8s steps(2) infinite; }
-.hud[data-mode="listening"] .hud-button::after { border: 3px solid var(--danger); animation: blink 0.5s steps(2) infinite; }
+.hud-button svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.hud-button:hover .orb-halo { opacity: 0.32; }
+.hud-button:active { transform: scale(0.94); }
+.orb-halo { transition: opacity 0.25s ease; }
+.orb-ring { transform-box: fill-box; transform-origin: center; }
+
+.hud[data-mode="idle"] .hud-button { animation: hud-breathe 3s ease-in-out infinite; }
+@keyframes hud-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+.hud[data-mode="idle"] .orb-halo { animation: hud-halo 3s ease-in-out infinite; }
+@keyframes hud-halo {
+  0%, 100% { opacity: 0.10; }
+  50% { opacity: 0.22; }
+}
+.hud[data-mode="busy"] .orb-ring { animation: hud-spin 1.1s linear infinite; }
+@keyframes hud-spin { to { transform: rotate(360deg); } }
+.hud[data-mode="listening"] .hud-button { animation: hud-listen 0.9s ease-in-out infinite; }
+@keyframes hud-listen {
+  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 5px var(--danger)); }
+  50% { transform: scale(1.12); filter: drop-shadow(0 0 15px var(--danger)); }
+}
+/* Reply arrival: JS re-triggers this on the inner svg so it never fights the breathe. */
+.hud-button.pop svg { animation: hud-pop 0.45s ease; }
+@keyframes hud-pop {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
 
 .hud-mods { display: flex; flex-wrap: wrap; gap: 6px; }
 body[data-corner$="right"] .hud-mods { justify-content: flex-end; }

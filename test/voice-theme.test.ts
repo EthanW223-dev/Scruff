@@ -96,7 +96,7 @@ test("the AI styles the overlay for this game; unreadable colors get fixed; it's
   assert.equal(theme.corner, "bottom-left");
   assert.ok(contrast(theme.text, theme.background) >= 4.5, "text was made readable");
   const saved = JSON.parse(fs.readFileSync(path.join(dataDir, "themes.json"), "utf8"));
-  assert.equal(saved["scruff's dungeon"].accent, "#e0a526");
+  assert.equal(saved["telos's dungeon"].accent, "#e0a526");
 
   // Screenshot suggestions no longer override it.
   dash.send(JSON.stringify({ type: "suggest_theme", theme: { accent: "#00ff00" } }));

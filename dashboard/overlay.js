@@ -2,6 +2,8 @@
 // as little windows, and the values it's holding. Everything is click-through except the button;
 // the full panel opens with a hotkey or a click on it. The button is draggable (see below).
 
+import { applySpeaker, getSpeakerId } from "./audio.js";
+
 const $ = (id) => document.getElementById(id);
 const MAX_TOASTS = 4;
 
@@ -75,7 +77,7 @@ export function startHud({ toolLabel }) {
   }
 
   /** Plays a spoken reply through the hub's /voice/say TTS route. Never called for errors/notices. */
-  function speakReply(text) {
+  async function speakReply(text) {
     if (ttsAudio) ttsAudio.pause();
     const audio = new Audio(`/voice/say?voice=${encodeURIComponent(voiceName)}&text=${encodeURIComponent(text.slice(0, 600))}`);
     ttsAudio = audio;
@@ -88,6 +90,8 @@ export function startHud({ toolLabel }) {
     };
     audio.addEventListener("ended", done);
     audio.addEventListener("error", done);
+    // Honor the chosen speaker (no-op where the browser lacks setSinkId).
+    await applySpeaker(audio, getSpeakerId());
     audio.play().catch(done);
   }
 
@@ -188,6 +192,8 @@ export function startHud({ toolLabel }) {
   });
   window.addEventListener("scruff:voice", (e) => {
     listening = e.detail === "listening";
+    // Don't let a spoken reply bleed into the new recording.
+    if (listening && ttsAudio) ttsAudio.pause();
     idle();
   });
   window.addEventListener("scruff:toast", (e) => toast(e.detail.text, e.detail.level === "error" ? "error" : "step", 5000));

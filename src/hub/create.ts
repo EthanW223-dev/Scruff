@@ -9,7 +9,6 @@ import { McpEndpoint } from "./mcp.ts";
 import { engineModSupport } from "./mods.ts";
 import { quickPath } from "./quick.ts";
 import type { ModelRouter } from "./models.ts";
-import { buildSystemPrompt } from "./prompt.ts";
 import { ScreenBridge } from "./screen.ts";
 import { startServer } from "./server.ts";
 import { ThemeStore } from "./themes.ts";
@@ -100,7 +99,6 @@ export async function createHub(opts: HubOptions) {
   const jev = new JevService(new JevSettings(path.join(dataDir, "typesafe.json")), opts.jev);
   const agent = new Agent({
     brain,
-    system: opts.router ? buildSystemPrompt(opts.router.persona) : undefined,
     tools,
     status: () => ({ note: statusNote(), events: adapters.drainEvents().map((e) => `${e.adapter}: ${e.text}`) }),
     quick: quickPath({

@@ -15,7 +15,6 @@ import { ThemeInput, type ThemeStore } from "./themes.ts";
 import { parseAddress } from "../memory/types.ts";
 import { installBridge, removeBridge, unityFlavor } from "../games/bepinex.ts";
 import { installUnrealBridge, removeUnrealBridge } from "../games/unreal.ts";
-import { buildSystemPrompt, PERSONA_IDS } from "./prompt.ts";
 import {
   DEFAULT_VOICE,
   sanitizeVoiceText,
@@ -211,15 +210,6 @@ export function startServer(opts: ServerOptions): Promise<http.Server> {
             connect: connectInfo(opts.root, (server.address() as AddressInfo).port),
           }),
         );
-        break;
-      }
-      case "set_persona": {
-        if (!router) throw new Error("This Telos can't switch personas.");
-        const persona = String(msg.persona ?? "");
-        router.setPersona(persona);
-        agent.setSystem(buildSystemPrompt(persona as (typeof PERSONA_IDS)[number]));
-        toast(ws, persona === "grim" ? "Grim here. Same tools, more honesty." : "Back to Telos mode.", "info");
-        broadcast({ type: "hello", ai: aiInfo() });
         break;
       }
       case "set_voice": {

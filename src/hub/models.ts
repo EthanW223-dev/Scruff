@@ -5,7 +5,6 @@ import OpenAI from "openai";
 import type { Brain } from "./agent.ts";
 import { CLAUDE_MODELS, claudeStreamFactory, listClaudeModels, type Effort } from "./providers/anthropic.ts";
 import { openAICompatibleStreamFactory } from "./providers/openai.ts";
-import { PERSONA_IDS, type PersonaId } from "./prompt.ts";
 import { DEFAULT_VOICE, VOICE_ALLOWLIST, type VoiceId } from "./voice.ts";
 
 export const PROVIDER_IDS = ["claude", "ollama", "lmstudio", "openai"] as const;
@@ -16,9 +15,8 @@ export interface Selection {
   model: string;
 }
 
-/** The settings.json shape: model selection plus persona and voice, all dashboard-settable. */
+/** The settings.json shape: model selection plus voice, all dashboard-settable. */
 export interface SavedSettings extends Selection {
-  persona?: PersonaId;
   voice?: string;
   voiceEnabled?: boolean;
 }
@@ -86,8 +84,6 @@ export class ModelRouter {
   private keysFile: string;
   private savedKeys: Record<string, string> = {};
   selection: Selection = { provider: "claude", model: "claude-opus-5" };
-  /** Which AI personality the agent uses; the dashboard switches it. */
-  persona: PersonaId = "telos";
   /** Neural voice for spoken replies, and whether the overlay speaks them. */
   voice: VoiceId = DEFAULT_VOICE;
   voiceEnabled = false;
@@ -138,7 +134,6 @@ export class ModelRouter {
     const saved = this.loadSaved();
     if (saved) {
       this.selection = saved.selection;
-      this.persona = saved.persona;
       this.voice = saved.voice;
       this.voiceEnabled = saved.voiceEnabled;
       return;
@@ -187,17 +182,9 @@ export class ModelRouter {
       providerLabel: def.id === "claude" ? "Claude" : def.label,
       ready: !def.missing,
       problem: def.missing,
-      persona: this.persona,
       voice: this.voice,
       voiceEnabled: this.voiceEnabled,
     };
-  }
-
-  /** Switches the AI persona (dashboard). Validates before saving. */
-  setPersona(persona: string): void {
-    if (!PERSONA_IDS.includes(persona as PersonaId)) throw new Error(`Unknown persona ${persona}.`);
-    this.persona = persona as PersonaId;
-    this.save();
   }
 
   /** Sets the spoken-reply voice and whether the overlay speaks replies. */
@@ -316,15 +303,13 @@ export class ModelRouter {
     }
   }
 
-  private loadSaved(): { selection: Selection; persona: PersonaId; voice: VoiceId; voiceEnabled: boolean } | null {
+  private loadSaved(): { selection: Selection; voice: VoiceId; voiceEnabled: boolean } | null {
     try {
       const saved = JSON.parse(fs.readFileSync(this.settingsFile, "utf8")) as SavedSettings;
       if (!(PROVIDER_IDS.includes(saved.provider) && typeof saved.model === "string" && saved.model)) return null;
-      const persona = PERSONA_IDS.includes(saved.persona as PersonaId) ? (saved.persona as PersonaId) : "telos";
       const voice = VOICE_ALLOWLIST.includes(saved.voice as VoiceId) ? (saved.voice as VoiceId) : DEFAULT_VOICE;
       return {
         selection: { provider: saved.provider, model: saved.model },
-        persona,
         voice,
         voiceEnabled: saved.voiceEnabled === true,
       };
@@ -337,7 +322,7 @@ export class ModelRouter {
   private save(): void {
     try {
       fs.mkdirSync(path.dirname(this.settingsFile), { recursive: true });
-      const settings: SavedSettings = { ...this.selection, persona: this.persona, voice: this.voice, voiceEnabled: this.voiceEnabled };
+      const settings: SavedSettings = { ...this.selection, voice: this.voice, voiceEnabled: this.voiceEnabled };
       fs.writeFileSync(this.settingsFile, JSON.stringify(settings, null, 2));
     } catch {
       // not fatal: the choice just won't survive a restart

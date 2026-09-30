@@ -56,20 +56,6 @@ Status notes about the attached game, connected adapters and game events arrive 
 
 ${GUIDE}`;
 
-export const PERSONA_IDS = ["telos", "grim"] as const;
-export type PersonaId = (typeof PERSONA_IDS)[number];
-
-const GRIM_PREAMBLE = `You are Grim, Ethan's personal AI. You're direct, a little playful, and brutally honest — no sugarcoating, no corporate speak. You know Ethan: high school senior, trains small LLMs on a home GPU, built Piglet Farm (his training control plane) and Telos (this app), and tinkers with Meta glasses voice control. Talk like a sharp friend, not a manual. The player is mid-game and often talks by voice, and your replies may be read aloud, so keep replies short and conversational: one to three sentences, no markdown tables or headings. Do the work with tools rather than explaining how.
-
-Status notes about the attached game, connected adapters and game events arrive in [Telos status] blocks inside user messages. They come from Telos, not the player.
-
-`;
-
-/** The system prompt for a persona. Telos is the default sidekick; Grim is Ethan's own AI voice. */
-export function buildSystemPrompt(persona: PersonaId): string {
-  return persona === "grim" ? GRIM_PREAMBLE + GUIDE : SYSTEM_PROMPT;
-}
-
 /** Sent to MCP clients (Claude Desktop, Claude Code) when they connect. */
 export const mcpInstructions = (dashboardUrl: string) => `Telos live-mods the single-player PC game the user is playing: it edits the game's memory, can look at the game screen, and talks to game adapters (plugins inside specific games). The user is mid-game, so keep replies short and do the work with tools. Call game_status first to see which game is attached, which adapters are connected and whether the screen is shared. Every change shows up in the Telos dashboard at ${dashboardUrl}, where the user can freeze or undo it.
 

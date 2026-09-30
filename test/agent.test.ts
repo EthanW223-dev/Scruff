@@ -199,3 +199,11 @@ test("an adapter tool called directly (unity__find) is routed through use_game_a
   assert.equal(result.isError, false);
   assert.equal(result.result, "found Ted");
 });
+
+test("the agent sends the default Telos system prompt", async () => {
+  const { agent, model, turn } = makeAgent((): Reply => ({ content: [text("ok")] }));
+  const done = turn();
+  agent.send("hi");
+  await done;
+  assert.match(String(model.calls.at(-1)!.system), /You are Telos, a live game-modding sidekick/);
+});

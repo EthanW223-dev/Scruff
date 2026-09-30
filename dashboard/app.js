@@ -2,6 +2,18 @@
 // The same page runs inside the in-game overlay (Electron), which provides window.scruffOverlay.
 
 import { applyTheme, paletteFrom } from "./theme.js";
+import {
+  getMicId,
+  getSpeakerId,
+  listAudioDevices,
+  onDeviceChange,
+  playVoiceSample,
+  resolveDeviceId,
+  setMicId,
+  setSpeakerId,
+  supportsSpeakerSelect,
+  unlockDeviceLabels,
+} from "./audio.js";
 import { startRecording } from "./voice.js";
 
 const $ = (id) => document.getElementById(id);
@@ -47,10 +59,10 @@ function handle(msg) {
   switch (msg.type) {
     case "hello":
       aiInfo = msg.ai;
-      // hello carries the freshest AI info (e.g. after set_persona/set_voice); keep the cached copy in sync.
+      // hello carries the freshest AI info (e.g. after set_voice); keep the cached copy in sync.
       if (modelsMsg) modelsMsg.current = msg.ai;
       renderAi();
-      renderPersonaVoice();
+      renderVoiceSection();
       break;
     case "models":
       renderModels(msg);
@@ -478,16 +490,13 @@ const PROVIDER_META = {
 };
 const JEV_LOGO = "logos/typesafe.svg";
 
-const PERSONAS = [
-  { id: "telos", name: "Telos", detail: "The game-modding sidekick." },
-  { id: "grim", name: "Grim", detail: "Ethan's AI — my personality. Works with any model." },
-];
 const VOICE_OPTIONS = [
-  ["en-US-AriaNeural", "Aria — warm, natural"],
-  ["en-US-JennyNeural", "Jenny — friendly"],
-  ["en-US-GuyNeural", "Guy — deep"],
-  ["en-GB-SoniaNeural", "Sonia — British"],
+  { id: "en-US-AriaNeural", name: "Aria", desc: "Warm and natural" },
+  { id: "en-US-JennyNeural", name: "Jenny", desc: "Friendly and upbeat" },
+  { id: "en-US-GuyNeural", name: "Guy", desc: "Deep and calm" },
+  { id: "en-GB-SoniaNeural", name: "Sonia", desc: "British, crisp" },
 ];
+const voiceSample = (name) => `Hey Ethan, I'm ${name}, and this is how I sound.`;
 
 let modelsMsg = null;
 let connectId = null; // provider id (or "jev") with the connect panel open
@@ -533,62 +542,134 @@ function openAiMenu() {
   send({ type: "list_models" });
 }
 
-// Persona + voice sections of the AI menu. They read the dashboard's current AI info
-// (from either the "models" or the "hello" message) and send set_persona / set_voice.
-function renderPersonaVoice() {
+// Voice section of the AI menu. Reads the dashboard's current AI info
+// (from either the "models" or the "hello" message) and sends set_voice.
+function renderVoiceSection() {
   const ai = modelsMsg?.current ?? aiInfo ?? {};
-  renderPersonas(ai.persona ?? "telos");
-  renderVoice(ai.voice ?? VOICE_OPTIONS[0][0], Boolean(ai.voiceEnabled));
-}
-
-function renderPersonas(persona) {
-  const row = $("persona-row");
-  row.replaceChildren(
-    ...PERSONAS.map((p, i) => {
-      const b = el("button", "provider-card persona-card");
-      b.type = "button";
-      b.dataset.id = p.id;
-      b.setAttribute("role", "option");
-      b.setAttribute("aria-selected", String(persona === p.id));
-      b.style.animationDelay = `${Math.min(i * 55, 330)}ms`;
-      b.append(el("span", "provider-name", p.name), el("span", "provider-detail", p.detail));
-      b.addEventListener("click", () => send({ type: "set_persona", persona: p.id }));
-      // Spotlight hover, same as provider cards.
-      b.addEventListener("pointermove", (e) => {
-        const r = b.getBoundingClientRect();
-        b.style.setProperty("--mx", `${e.clientX - r.left}px`);
-        b.style.setProperty("--my", `${e.clientY - r.top}px`);
-      });
-      return b;
-    }),
-  );
+  const known = VOICE_OPTIONS.some((v) => v.id === ai.voice) ? ai.voice : VOICE_OPTIONS[0].id;
+  renderVoice(known, Boolean(ai.voiceEnabled));
 }
 
 function renderVoice(voice, enabled) {
   const row = $("voice-row");
   row.replaceChildren();
+
   const label = el("label", "voice-toggle");
   const cb = el("input");
   cb.type = "checkbox";
   cb.checked = enabled;
   label.append(cb, el("span", null, "Speak replies with a human voice"));
-  const sel = el("select");
-  sel.setAttribute("aria-label", "Voice");
-  for (const [id, name] of VOICE_OPTIONS) {
-    const o = el("option", null, name);
-    o.value = id;
-    sel.append(o);
+  row.append(label);
+
+  // One row per voice: pick it by clicking, hear it with the play button.
+  // Sampling never changes the selection.
+  const list = el("div", "voice-list");
+  list.setAttribute("role", "radiogroup");
+  list.setAttribute("aria-label", "Voice");
+  for (const v of VOICE_OPTIONS) {
+    const b = el("div", "voice-option");
+    b.setAttribute("role", "radio");
+    b.setAttribute("tabindex", "0");
+    b.setAttribute("aria-checked", String(v.id === voice));
+    const names = el("span", "voice-names");
+    names.append(el("span", "voice-name", v.name), el("span", "voice-desc", v.desc));
+    const play = el("button", "voice-play");
+    play.type = "button";
+    play.textContent = "▶";
+    play.title = `Hear ${v.name}`;
+    play.setAttribute("aria-label", `Play a sample of ${v.name}'s voice`);
+    play.addEventListener("click", (e) => {
+      e.stopPropagation();
+      playVoiceSample(v.id, voiceSample(v.name));
+    });
+    b.append(names, play);
+    const choose = () => {
+      send({ type: "set_voice", voice: v.id, enabled: cb.checked });
+      playVoiceSample(v.id, voiceSample(v.name));
+    };
+    b.addEventListener("click", choose);
+    b.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        choose();
+      }
+    });
+    list.append(b);
   }
-  sel.value = [...sel.options].some((o) => o.value === voice) ? voice : VOICE_OPTIONS[0][0];
-  cb.addEventListener("change", () => send({ type: "set_voice", voice: sel.value, enabled: cb.checked }));
-  sel.addEventListener("change", () => {
-    send({ type: "set_voice", voice: sel.value, enabled: cb.checked });
-    // Preview the new voice immediately.
-    new Audio(`/voice/say?voice=${encodeURIComponent(sel.value)}&text=${encodeURIComponent("Hey Ethan, this is how I sound now.")}`)
-      .play()
-      .catch(() => {});
-  });
-  row.append(label, sel);
+  row.append(list);
+  cb.addEventListener("change", () => send({ type: "set_voice", voice, enabled: cb.checked }));
+
+  // Local audio devices: which mic push-to-talk uses, which speaker replies play on.
+  const audioRow = el("div", "device-rows");
+  const micLabel = el("label", "device-row");
+  const micSel = el("select");
+  micSel.id = "mic-select";
+  micSel.setAttribute("aria-label", "Microphone");
+  micLabel.append(el("span", null, "Microphone"), micSel);
+  micSel.addEventListener("change", () => setMicId(micSel.value));
+  audioRow.append(micLabel);
+  if (supportsSpeakerSelect()) {
+    const spkLabel = el("label", "device-row");
+    const spkSel = el("select");
+    spkSel.id = "speaker-select";
+    spkSel.setAttribute("aria-label", "Speaker");
+    spkLabel.append(el("span", null, "Speaker"), spkSel);
+    spkSel.addEventListener("change", () => setSpeakerId(spkSel.value));
+    audioRow.append(spkLabel);
+  }
+  row.append(audioRow);
+  refreshAudioDevices();
+}
+
+/** (Re)fills the microphone/speaker dropdowns; keeps the saved choice when still plugged in. */
+let audioDevicesBound = false;
+async function refreshAudioDevices() {
+  const micSel = $("mic-select");
+  const spkSel = $("speaker-select");
+  if ((!micSel && !spkSel) || !$("ai-dialog").open) return;
+  if (!audioDevicesBound) {
+    audioDevicesBound = true;
+    onDeviceChange(() => refreshAudioDevices());
+  }
+  try {
+    // Real labels need mic permission; ask once so the lists show names, not "Microphone 1".
+    await unlockDeviceLabels().catch(() => {});
+    const { inputs, outputs } = await listAudioDevices();
+    if (micSel) {
+      const keep = resolveDeviceId(inputs, getMicId());
+      micSel.replaceChildren(
+        ...inputs.map((d) => {
+          const o = el("option", null, d.label);
+          o.value = d.deviceId;
+          return o;
+        }),
+      );
+      if (inputs.length) {
+        micSel.value = keep;
+        setMicId(keep); // persist the fallback when the saved mic vanished
+      } else {
+        micSel.replaceChildren(el("option", null, "No microphone found"));
+      }
+    }
+    if (spkSel) {
+      const keep = resolveDeviceId(outputs, getSpeakerId());
+      spkSel.replaceChildren(
+        ...outputs.map((d) => {
+          const o = el("option", null, d.label);
+          o.value = d.deviceId;
+          return o;
+        }),
+      );
+      if (outputs.length) {
+        spkSel.value = keep;
+        setSpeakerId(keep);
+      } else {
+        spkSel.replaceChildren(el("option", null, "No speaker found"));
+      }
+    }
+  } catch (err) {
+    toast(`Couldn't list audio devices: ${err.message}`, "error");
+  }
 }
 
 function providerCards() {
@@ -622,7 +703,7 @@ function providerCards() {
 function renderModels(msg) {
   modelsMsg = msg;
   connectBusy = null;
-  renderPersonaVoice();
+  renderVoiceSection();
   const grid = $("provider-grid");
   grid.replaceChildren(
     ...providerCards().map((c, i) => {
@@ -1139,23 +1220,40 @@ function sendVoice(text) {
 
 // Local push-to-talk: the overlay (Electron has no speech service) and browsers without one.
 let stopRecording = null;
+let startingVoice = false;
 
 async function toggleLocalVoice() {
+  // Double-click / double hotkey while the first start is still awaiting: never run two recorders.
+  if (startingVoice) return;
   if (stopRecording) {
     const stop = stopRecording;
     stopRecording = null;
     setListening(false);
-    voiceStatus("Transcribing…");
-    send({ type: "voice", pcm: await stop() });
+    try {
+      voiceStatus("Transcribing…");
+      send({ type: "voice", pcm: await stop() });
+    } catch (err) {
+      voiceStatus("");
+      toast(`Couldn't finish recording: ${err.message}`, "error");
+    }
     return;
   }
+  startingVoice = true;
   try {
     window.speechSynthesis?.cancel();
-    stopRecording = await startRecording(() => toggleLocalVoice());
+    stopRecording = await startRecording(
+      // Auto-stop only when still recording; otherwise a late timer would start a fresh one.
+      () => {
+        if (stopRecording) toggleLocalVoice();
+      },
+      { deviceId: getMicId() || undefined },
+    );
     setListening(true);
     voiceStatus("Listening… press the mic (or your talk hotkey) again to send.");
   } catch (err) {
     toast(`Couldn't use the microphone: ${err.message}`, "error");
+  } finally {
+    startingVoice = false;
   }
 }
 

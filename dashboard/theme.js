@@ -43,6 +43,9 @@ export function applyTheme(theme) {
   root.setProperty("--font-display", stack(fonts.display));
   document.body.dataset.corner = theme.corner ?? "top-right";
   document.body.dataset.font = theme.font ?? "clean";
+  // The font mood doubles as the game's genre key for motion: animations follow
+  // the genre while colors keep coming from the theme. Fonts are never touched here.
+  document.body.dataset.genre = theme.font ?? "clean";
 }
 
 function loadFonts({ display, body }) {

@@ -441,7 +441,75 @@ textarea:focus { box-shadow: 3px 3px 0 var(--accent); }
 @media (prefers-reduced-motion: reduce) {
   .cursor, .spin { animation: none; }
   .provider-card, .connect-panel { animation: none; transition: none; }
+  .msg.fresh, .msg.fresh .bubble, .turn.active .text, .thinking summary,
+  .primary, .primary.launch, textarea:focus, .turn.active::after { animation: none !important; transition: none !important; }
 }
+
+/* ---------- chat motion: playful, theme-matched, genre-flavored ---------- */
+/* Only freshly arriving messages animate; replayed history stays still. */
+.msg.fresh { animation: msg-in .38s cubic-bezier(.2,.9,.25,1.15) both; }
+@keyframes msg-in { from { opacity: 0; transform: translateY(14px) scale(.985); } to { opacity: 1; transform: none; } }
+.msg.fresh .bubble { transform-origin: right center; animation: bubble-pop .34s cubic-bezier(.2,1.4,.4,1) both; }
+@keyframes bubble-pop { from { opacity: 0; transform: scale(.82) translateY(10px); } to { opacity: 1; transform: none; } }
+
+/* Streaming sheen sweeps the active answer in the theme's accent color. */
+.turn.active .text {
+  background: linear-gradient(100deg, transparent 42%, color-mix(in srgb, var(--accent) 13%, transparent) 50%, transparent 58%);
+  background-size: 220% 100%;
+  animation: stream-sheen 2.6s linear infinite;
+}
+@keyframes stream-sheen { from { background-position: 180% 0; } to { background-position: -80% 0; } }
+
+.thinking summary { animation: think-pulse 1.7s ease-in-out infinite; }
+@keyframes think-pulse { 50% { opacity: .4; } }
+
+/* Send button: lifts on hover, squashes on press, launches on send. */
+.primary { transition: transform .13s ease, background .13s ease, box-shadow .13s ease; }
+.primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 3px 5px 0 color-mix(in srgb, var(--accent) 65%, transparent); }
+.primary:active:not(:disabled) { transform: translateY(1px) scale(.96); box-shadow: 1px 1px 0 var(--accent); }
+.primary.launch { animation: launch .45s cubic-bezier(.2,1.2,.3,1); }
+@keyframes launch { 30% { transform: translateY(-7px) scale(1.05); } 60% { transform: translateY(2px) scale(.95); } }
+
+textarea:focus { animation: focus-glow 1.9s ease-in-out infinite; }
+@keyframes focus-glow {
+  from, to { box-shadow: 3px 3px 0 var(--accent); }
+  50% { box-shadow: 3px 3px 0 var(--accent), 0 0 20px color-mix(in srgb, var(--accent) 55%, transparent); }
+}
+
+/* Genre flavors: the entrance and the typing cursor change with the game's genre. */
+body[data-genre="fantasy"] .msg.fresh { animation: fantasy-in .6s ease-out both; }
+@keyframes fantasy-in {
+  from { opacity: 0; transform: translateY(24px); filter: drop-shadow(0 0 14px color-mix(in srgb, var(--accent) 70%, transparent)); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+body[data-genre="fantasy"] .turn.active::after { box-shadow: 0 -9px 14px color-mix(in srgb, var(--accent) 75%, transparent); }
+
+body[data-genre="scifi"] .msg.fresh { animation: scifi-in .4s steps(14) both; }
+@keyframes scifi-in { from { opacity: 0; clip-path: inset(0 100% 0 0); } to { opacity: 1; clip-path: inset(0 0 0 0); } }
+body[data-genre="scifi"] .turn.active::after { width: 13px; height: 4px; animation: beam .55s linear infinite; }
+@keyframes beam { 50% { opacity: .3; box-shadow: 0 0 12px var(--accent); } }
+
+body[data-genre="pixel"] .msg.fresh { animation: pixel-in .3s steps(4) both; }
+@keyframes pixel-in { from { opacity: 0; transform: scale(.88); } 55% { opacity: 1; transform: scale(1.04); } to { opacity: 1; transform: none; } }
+body[data-genre="pixel"] .turn.active::after { animation: pixel-jump .5s steps(2) infinite; }
+@keyframes pixel-jump { 50% { transform: translateY(-4px); } }
+
+body[data-genre="horror"] .msg.fresh { animation: horror-in .7s linear both; }
+@keyframes horror-in { 0% { opacity: 0; } 12% { opacity: .85; } 18% { opacity: .1; } 28% { opacity: .9; } 36% { opacity: .25; } 52%, 100% { opacity: 1; } }
+body[data-genre="horror"] .turn.active::after { animation: horror-blink 1.15s steps(3) infinite; }
+@keyframes horror-blink { 0%, 100% { opacity: 1; } 45% { opacity: .12; } 70% { opacity: .65; } }
+
+body[data-genre="western"] .msg.fresh { animation: western-in .55s cubic-bezier(.2,.7,.3,1) both; }
+@keyframes western-in { from { opacity: 0; transform: translateX(-36px); } to { opacity: 1; transform: none; } }
+
+body[data-genre="cartoon"] .msg.fresh { animation: cartoon-in .52s cubic-bezier(.3,1.55,.4,1) both; }
+@keyframes cartoon-in { from { opacity: 0; transform: scaleY(.35) scaleX(1.2); } 60% { opacity: 1; transform: scaleY(1.07) scaleX(.96); } to { opacity: 1; transform: none; } }
+body[data-genre="cartoon"] .primary:hover:not(:disabled) { transform: translateY(-2px) rotate(-1.6deg) scale(1.04); }
+
+body[data-genre="military"] .msg.fresh { animation: military-in .26s linear both; }
+@keyframes military-in { from { opacity: 0; transform: translateX(20px); clip-path: inset(0 0 0 100%); } to { opacity: 1; transform: none; clip-path: inset(0 0 0 0); } }
+body[data-genre="military"] .turn.active::after { animation: mil-blink .34s steps(2) infinite; }
+@keyframes mil-blink { 50% { opacity: .2; } }
 .sub-logo { width: 20px; height: 20px; vertical-align: -4px; margin-right: 2px; color: var(--text); }
 .subscription { border-top: 1px solid var(--line); padding-top: 12px; display: flex; flex-direction: column; gap: 6px; }
 .subscription h3 { margin: 0; font: 600 18px/1.1 var(--font-display); letter-spacing: -0.01em; }

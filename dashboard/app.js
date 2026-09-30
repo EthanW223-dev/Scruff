@@ -172,6 +172,7 @@ function renderAgentEvent(event, replay) {
     case "user": {
       currentTurn = null;
       const row = el("div", "msg user");
+      if (!replay) row.classList.add("fresh");
       row.append(el("div", "bubble", event.text));
       $("log").append(row);
       updateEmpty();
@@ -181,7 +182,7 @@ function renderAgentEvent(event, replay) {
     case "turn_start": {
       turnText = "";
       const turn = ensureTurn();
-      if (!replay) turn.root.classList.add("active");
+      if (!replay) turn.root.classList.add("active", "fresh");
       break;
     }
     case "thinking": {
@@ -1128,6 +1129,10 @@ function autosize() {
 function submit() {
   const text = $("input").value.trim();
   if (!text) return;
+  const btn = $("send");
+  btn.classList.remove("launch");
+  void btn.offsetWidth; // restart the animation if it's still playing
+  btn.classList.add("launch");
   send({ type: "chat", text });
   $("input").value = "";
   autosize();

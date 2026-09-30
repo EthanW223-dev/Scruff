@@ -1,8 +1,9 @@
-// The in-game HUD: one button (an abstract energy orb built from layered gradients), Telos's replies
+// The in-game HUD: one button (Telos's icon — a thinking-orbs canvas, see orb.js), Telos's replies
 // as little windows, and the values it's holding. Everything is click-through except the button;
 // the full panel opens with a hotkey or a click on it. The button is draggable (see below).
 
 import { SpeechStreamer } from "./audio.js";
+import { AgentOrb } from "./orb.js";
 
 const $ = (id) => document.getElementById(id);
 const MAX_TOASTS = 4;
@@ -12,6 +13,10 @@ export function startHud({ toolLabel }) {
   const hud = $("hud");
   const button = $("hud-button");
   hud.hidden = false;
+  // Telos's icon: a thinking-orbs canvas. Black & white ink by default; the
+  // "state" handler below tints it with the active game's accent color.
+  const orb = new AgentOrb($("hud-orb"), { size: 64, dark: true });
+  orb.setState("connecting");
   // Cursor-tracking glow (Aceternity GlowingEffect pattern): feed the cursor position
   // into --mx/--my so the orb's radial highlight follows it. Cheap: one style write.
   button.addEventListener("pointermove", (e) => {
@@ -30,6 +35,7 @@ export function startHud({ toolLabel }) {
   let reply = null;
   let replyText = "";
   let keys = "";
+  let shapeTimer = 0; // reverts the shaping flash after a mod lands
   // Spoken replies: which neural engine + voice, and whether they're on (from the hello/models message).
   let voiceEnabled = false;
   let voiceEngine = "edge";
@@ -42,8 +48,11 @@ export function startHud({ toolLabel }) {
   });
 
   // The button has no text: its state shows as a frame around it, the details in its tooltip.
-  function status(text, mode = "idle") {
+  // Each mode also melts the orb into its matching thinking-orbs animation.
+  const ORB_FOR_MODE = { idle: "breathing", listening: "listening", busy: "composing" };
+  function status(text, mode = "idle", orbState = null) {
     hud.dataset.mode = mode;
+    orb.setState(orbState ?? ORB_FOR_MODE[mode] ?? "breathing");
     button.title = [text, keys].filter(Boolean).join("\n");
     button.setAttribute("aria-label", text);
   }
@@ -133,13 +142,16 @@ export function startHud({ toolLabel }) {
       case "tool_call":
         busy = true;
         working = `${toolLabel(e.name, e.input)}…`;
-        idle();
+        // The orb matches the tool: searching, solving, or plain working.
+        status(working, "busy", /search/i.test(e.name) ? "searching" : /solve|plan/i.test(e.name) ? "solving" : "working");
         // Text before and after a tool call are separate thoughts.
         if (replyText && !/\s$/.test(replyText)) replyText += " ";
         break;
       case "text":
         if (!reply) {
           reply = toast("", "", 0);
+          // The reply is being woven together: melt into the weaving orb.
+          orb.setState("weaving");
           // Speak the reply as it streams: only the overlay plays here, never a browser tab.
           const speakChecked = document.getElementById("speak")?.checked !== false;
           if (overlayMode && voiceEnabled && speakChecked) {
@@ -204,12 +216,20 @@ export function startHud({ toolLabel }) {
       const attached = msg.game.attached;
       game = attached ? attached.title || attached.name.replace(/\.exe$/i, "") : null;
       renderMods(attached?.watch ?? []);
+      // The orb's ink: black & white on the default theme, the game's accent
+      // color once the game has a theme of its own. (The page's --accent is
+      // already handled by applyTheme in app.js; this is the canvas ink.)
+      if (msg.theme) orb.setColor(msg.theme.source === "default" ? null : msg.theme.accent);
       idle();
     } else if (msg.type === "voice_status") {
       voice = msg.text;
       idle();
     } else if (msg.type === "game_event") {
       toast(msg.event.text, "step", 5000);
+      // A mod just landed on the game: flash the shaping orb, then settle back.
+      orb.setState("shaping");
+      clearTimeout(shapeTimer);
+      shapeTimer = setTimeout(() => idle(), 2500);
     }
   });
   window.addEventListener("scruff:voice", (e) => {

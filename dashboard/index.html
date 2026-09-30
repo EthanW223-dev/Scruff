@@ -8,20 +8,19 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- In-game overlay only: one button (an abstract energy orb). Layers: aurora core,
-       a BorderBeam light traveler riding the rim (vanilla adaptation of the Magic UI
-       component published on 21st.dev), two orbiting particles, a cursor-tracking
-       glow (Aceternity GlowingEffect-style), and a listening pulse ring.
-       Every color comes from the active game theme (--accent / --accent-2). -->
+  <!-- In-game overlay only: one button — Telos's icon is a thinking-orbs canvas
+       (dashboard/orb.js wraps the vendored thinking-orbs engine). Nine
+       hand-tuned animations melt into each other as the agent's state changes:
+       breathing idle, listening mic, composing thinking, weaving reply,
+       working/searching/solving tools, shaping mods, connecting boot.
+       The ink is black & white by default and takes the active game's accent
+       color when one is attached. A soft halo and cursor-tracking glow sit
+       behind/above the canvas, both driven by the theme. -->
   <div id="hud" class="hud" hidden>
     <button id="hud-button" class="hud-button interactive" type="button" aria-label="Telos voice control" title="Telos">
       <span class="orb" aria-hidden="true">
         <span class="orb-halo"></span>
-        <span class="orb-core"></span>
-        <span class="hud-beam"></span>
-        <span class="orb-orbit o1"><span class="orb-particle"></span></span>
-        <span class="orb-orbit o2"><span class="orb-particle"></span></span>
-        <span class="orb-pulse"></span>
+        <canvas id="hud-orb" class="orb-canvas" width="64" height="64"></canvas>
         <span class="orb-glow"></span>
       </span>
     </button>

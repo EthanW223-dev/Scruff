@@ -112,9 +112,9 @@ Adapters have to be written per game or per engine. Good places to hook in:
 
 | Game or engine | How to get code running in it | Ideas for tools |
 | --- | --- | --- |
-| Unity games (Mono) | **Built in:** Scruff's Unity bridge ([bridge/](../bridge/README.md)), installed from the Game files panel | Find objects, read/set any field, call methods, recolor, resize, spawn, gravity, levels |
-| Unity games (IL2CPP) | A BepInEx 6 plugin (Il2CppInterop) with a WebSocket client | The same, once someone ports the bridge |
-| Unreal Engine 4/5 games | A [UE4SS](https://github.com/UE4SS-RE/RE-UE4SS) Lua mod | Read/write UObject properties, call UFunctions, summon actors |
+| Unity games (Mono) | **Built in:** Telos's Unity bridge ([bridge/](../bridge/README.md)), installed from the Game files panel — BepInEx 5 + `ScruffBridge.dll`. Working path, validated in real games | Find objects, read/set any field, call methods, recolor, resize, spawn, gravity, levels |
+| Unity games (IL2CPP) | **Built in:** Telos's IL2CPP bridge (`bridge/TelosBridge.IL2CPP.dll`), installed from the Game files panel — BepInEx 6 IL2CPP + `TelosBridge.IL2CPP.dll`. Compiles; not yet validated against a real IL2CPP game | The same tool set as Mono, once validated in a game |
+| Unreal Engine 4/5 games | **Built in (experimental):** Telos's Unreal bridge ([bridge-unreal/](../bridge-unreal/README.md)) — a native DLL the player injects with their own injector. Compile-validated and protocol-tested (`make test`); NOT yet validated against a real Unreal game — first use on any game is treated as unverified | Find objects, read/set reflected properties, UWorld time dilation |
 | Skyrim, Fallout (Creation Engine) | SKSE/F4SE plugin, or type into the built-in console | `player.additem`, `tgm`, `setav` |
 | Minecraft (Java) | A Fabric or Forge mod, or RCON on a local server | Give items, set time/weather, spawn mobs |
 | Source games (Half-Life 2, Portal) | Send console commands (`sv_cheats 1`) | `impulse 101`, `god`, `noclip` |

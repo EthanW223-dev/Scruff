@@ -13,6 +13,7 @@ import { ScreenBridge } from "./screen.ts";
 import { startServer } from "./server.ts";
 import { ThemeStore } from "./themes.ts";
 import { unityBridgeConnected, unityBridgeTools } from "./unitybridge.ts";
+import { unrealBridgeConnected, unrealBridgeTools } from "./unrealbridge.ts";
 import { visionFromBrain, type VisionClient } from "./vision.ts";
 
 export interface HubOptions {
@@ -32,6 +33,8 @@ export interface HubOptions {
 export async function createHub(opts: HubOptions) {
   const games = new GameManager();
   games.bridgeDll = path.join(opts.root, "bridge", "ScruffBridge.dll");
+  games.il2cppBridgeDll = path.join(opts.root, "bridge", "TelosBridge.IL2CPP.dll");
+  games.unrealBridgeDll = path.join(opts.root, "bridge-unreal", "TelosBridgeUE.dll");
   const adapters = new AdapterRegistry();
   const screen = new ScreenBridge();
   const dataDir = opts.dataDir ?? path.join(opts.root, ".scruff");
@@ -65,7 +68,7 @@ export async function createHub(opts: HubOptions) {
       attached ? (themes.hasSaved() ? "The overlay is already styled for this game." : "The overlay isn't styled for this game yet.") : "",
       adapters.describe(),
       attached && games.profile
-        ? `Mod support: ${engineModSupport(games.profile.engine, unityBridgeConnected(adapters)).note}`
+        ? `Mod support: ${engineModSupport(games.profile.engine, unityBridgeConnected(adapters), unrealBridgeConnected(adapters)).note}`
         : "",
     ]
       .filter(Boolean)
@@ -79,7 +82,15 @@ export async function createHub(opts: HubOptions) {
       adapters: adapters.describe(),
     })),
     ...gameFileTools(games, path.join(dataDir, "backups")),
-    ...unityBridgeTools(games, adapters, { bridgeDll: path.join(opts.root, "bridge", "ScruffBridge.dll"), port: opts.port }),
+    ...unityBridgeTools(games, adapters, {
+      bridgeDll: path.join(opts.root, "bridge", "ScruffBridge.dll"),
+      il2cppBridgeDll: path.join(opts.root, "bridge", "TelosBridge.IL2CPP.dll"),
+      port: opts.port,
+    }),
+    ...unrealBridgeTools(games, adapters, {
+      bridgeDll: path.join(opts.root, "bridge-unreal", "TelosBridgeUE.dll"),
+      port: opts.port,
+    }),
     ...screen.tools(vision),
     themes.tool(),
     adapters.dispatchTool(),

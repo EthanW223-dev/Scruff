@@ -1,208 +1,404 @@
-// Scruff Unreal bridge: WinHTTP WebSocket client + tool implementations.
+// Telos Unreal bridge: WinHTTP WebSocket client + tool implementations.
 //
 // Speaks the adapter protocol from docs/ADAPTERS.md:
 //   hello {name, game, description, tools[]} -> welcome {id, prefix}
 //   call {id, tool, input} -> result {id, ok, content|error}
-// Calls run on the worker thread; UE object access is read-mostly here. A production
-// bridge must marshal game-thread work (spawning, UFunction calls) onto the game thread
-// via the engine's task graph — marked TODO below.
-#define _WINSOCKAPI_
+//
+// Tools (all reads/writes go through the engine's own reflection, so they follow
+// renames and version drift; GObjects/GNames patterns are validated per game):
+//   find  - locate objects by name/class substring  -> [{id, name, class}]
+//   get   - read a property (float/int/bool/string) -> the value as JSON
+//   set   - write a property                        -> {before, after} as JSON
+//   world - read/set UWorld.TimeDilation (slow-mo)  -> {time_dilation}
+//
+// Honest limits, documented in the README:
+// - Data-property reads/writes are direct memory operations (same as the memory-
+//   editing path Telos already uses); they do not need the game thread.
+// - UFunction invocation (calling game code, SpawnActor) is NOT implemented: there
+//   is no stable cross-version way to call ProcessEvent without engine headers.
+//   `spawn` is therefore not advertised. When it lands, it will need game-thread
+//   marshaling; the worker thread below is where that queue would drain.
 #include <windows.h>
 #include <winhttp.h>
+
+#include <cctype>
+#include <cstdio>
+#include <map>
 #include <string>
 #include <vector>
-#include <map>
-#include "ue.h"
 
-#pragma comment(lib, "winhttp.lib")
+#include "ue.h"
+#include "json.h"
+
+#pragma comment(lib, "winhttp.lib")  // MSVC only; mingw links -lwinhttp via the Makefile
 
 namespace adapter {
 
-static HINTERNET g_ws = nullptr;
-static volatile bool g_running = false;
+// --------------------------------------------------------------- websocket ----
 
-// --- tiny JSON writer (enough for the protocol) ---
-static std::string JsonEscape(const std::string& s) {
-  std::string o;
-  for (char c : s) {
-    if (c == '"') o += "\\\"";
-    else if (c == '\\') o += "\\\\";
-    else if (c == '\n') o += "\\n";
-    else o += c;
+class WsClient {
+ public:
+  WsClient() = default;
+  ~WsClient() { Close(); }
+
+  bool Connect(const std::string& url) {
+    // url: ws://host:port/path
+    std::string u = url;
+    if (u.rfind("ws://", 0) == 0) u = u.substr(5);
+    size_t slash = u.find('/');
+    std::string hostport = slash == std::string::npos ? u : u.substr(0, slash);
+    std::string path = slash == std::string::npos ? "/" : u.substr(slash);
+    size_t colon = hostport.find(':');
+    std::wstring host(hostport.begin(), hostport.begin() + (colon == std::string::npos ? hostport.size() : colon));
+    INTERNET_PORT port = colon == std::string::npos
+                            ? 80
+                            : (INTERNET_PORT)atoi(hostport.c_str() + colon + 1);
+    std::wstring wpath(path.begin(), path.end());
+
+    session_ = WinHttpOpen(L"TelosUnrealBridge/1.0", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+                          nullptr, nullptr, 0);
+    if (!session_) return false;
+    conn_ = WinHttpConnect(session_, host.c_str(), port, 0);
+    if (!conn_) return false;
+    req_ = WinHttpOpenRequest(conn_, L"GET", wpath.c_str(), nullptr, nullptr, nullptr,
+                              WINHTTP_FLAG_SECURE * 0);
+    if (!req_) return false;
+    if (!WinHttpSetOption(req_, WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, nullptr, 0))
+      return false;
+    if (!WinHttpSendRequest(req_, WINHTTP_NO_ADDITIONAL_HEADERS, 0, nullptr, 0, 0, 0))
+      return false;
+    if (!WinHttpReceiveResponse(req_, nullptr)) return false;
+    ws_ = WinHttpWebSocketCompleteUpgrade(req_, 0);
+    req_ = nullptr;  // ownership transferred
+    return ws_ != nullptr;
   }
-  return o;
-}
 
-// --- tools this bridge exposes (mirrors the Unity bridge's surface) ---
-static const char* kToolsJson = R"([
- {"name":"find","description":"Find live objects by part of their name or class. Returns ids for the other tools.","input_schema":{"name":"string?","class":"string?","limit":"integer?"}},
- {"name":"get","description":"Read a property (e.g. Health) on an object id.","input_schema":{"id":"integer","property":"string"}},
- {"name":"set","description":"Write a property (numbers, true/false) on an object id. Returns before/after.","input_schema":{"id":"integer","property":"string","value":"any"}},
- {"name":"world","description":"Game-wide: time_dilation (1 normal, 0.5 slow-mo, 2 fast), gravity scale.","input_schema":{"time_dilation":"number?","gravity":"number?"}},
- {"name":"spawn","description":"Spawn copies of an actor near the player. NOT YET IMPLEMENTED: needs game-thread marshaling.","input_schema":{"id":"integer","count":"integer?"}}
-])";
-
-// id -> UObject* for this session. GObjects entries are stable pointers while live;
-// the map is rebuilt on "find" (level changes invalidate old ids).
-static std::map<int, UE::UObject*> g_known;
-static int g_nextId = 1;
-
-static std::string Find(const std::string& name, const std::string& cls, int limit) {
-  g_known.clear();
-  std::string out = "[";
-  int n = 0;
-  UE::ForEachObject([&](UE::UObject* o) {
-    std::string full = o->GetFullName();
-    std::string low = full;
-    for (auto& c : low) c = tolower(c);
-    std::string wn = name, wc = cls;
-    for (auto& c : wn) c = tolower(c);
-    for (auto& c : wc) c = tolower(c);
-    if (!wn.empty() && low.find(wn) == std::string::npos) return true;
-    if (!wc.empty()) {
-      std::string cn = o->GetClass()->GetName();
-      for (auto& c : cn) c = tolower(c);
-      if (cn.find(wc) == std::string::npos) return true;
-    }
-    int id = g_nextId++;
-    g_known[id] = o;
-    if (n++) out += ",";
-    out += "{\"id\":" + std::to_string(id) + ",\"name\":\"" + JsonEscape(full) + "\"}";
-    return n < limit;
-  });
-  return out + "]";
-}
-
-// Minimal flat-JSON field grabber for the call envelope: {"type":"call","id":"7","tool":"get","input":{...}}
-static std::string Field(const std::string& json, const std::string& key) {
-  std::string k = "\"" + key + "\"";
-  size_t i = json.find(k);
-  if (i == std::string::npos) return "";
-  i = json.find(':', i + k.size());
-  if (i == std::string::npos) return "";
-  i++;
-  while (i < json.size() && (json[i] == ' ' || json[i] == '"')) i++;
-  size_t j = i;
-  while (j < json.size() && json[j] != '"' && json[j] != ',' && json[j] != '}') j++;
-  return json.substr(i, j - i);
-}
-
-static void Send(const std::string& text) {
-  if (!g_ws) return;
-  WinHttpWebSocketSend(g_ws, WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE,
-                       (void*)text.data(), (DWORD)text.size());
-}
-
-static void SendResult(const std::string& id, bool ok, const std::string& content) {
-  std::string msg = "{\"type\":\"result\",\"id\":\"" + JsonEscape(id) + "\",\"ok\":" +
-                    (ok ? "true" : "false") + "," + (ok ? "\"content\":" : "\"error\":") + "\"" +
-                    JsonEscape(content) + "\"}";
-  Send(msg);
-}
-
-static void HandleCall(const std::string& msg) {
-  std::string id = Field(msg, "id");
-  std::string tool = Field(msg, "tool");
-  std::string input = msg.substr(msg.find("\"input\""));
-  if (tool == "find") {
-    SendResult(id, true, Find(Field(input, "name"), Field(input, "class"), 30));
-    return;
+  bool Send(const std::string& msg) {
+    if (!ws_) return false;
+    return WinHttpWebSocketSend(ws_, WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE,
+                                (void*)msg.data(), (DWORD)msg.size()) == ERROR_SUCCESS;
   }
-  int objId = atoi(Field(input, "id").c_str());
-  auto it = g_known.find(objId);
-  if (tool != "world" && it == g_known.end()) {
-    SendResult(id, false, "Unknown object id. Call find first (ids reset on level change).");
-    return;
-  }
-  UE::UObject* obj = tool == "world" ? nullptr : it->second;
-  if (tool == "get") {
-    float f; UE::int32 n; bool b;
-    std::string prop = Field(input, "property");
-    if (UE::GetPropertyFloat(obj, prop, f)) SendResult(id, true, std::to_string(f));
-    else if (UE::GetPropertyInt(obj, prop, n)) SendResult(id, true, std::to_string(n));
-    else if (UE::GetPropertyBool(obj, prop, b)) SendResult(id, true, b ? "true" : "false");
-    else SendResult(id, false, "No readable float/int/bool property '" + prop + "'.");
-  } else if (tool == "set") {
-    std::string prop = Field(input, "property"), val = Field(input, "value");
-    float f; UE::int32 n;
-    bool done = false, ok = false;
-    if (UE::GetPropertyFloat(obj, prop, f)) {
-      done = true; ok = UE::SetPropertyFloat(obj, prop, (float)atof(val.c_str()));
-    } else if (UE::GetPropertyInt(obj, prop, n)) {
-      done = true; ok = UE::SetPropertyInt(obj, prop, atoi(val.c_str()));
-    } else if (UE::GetPropertyBool(obj, prop, f > 0)) {
-      done = true; ok = UE::SetPropertyBool(obj, prop, val == "true" || val == "1");
+
+  // Blocking receive of one whole message. Empty string = closed/error.
+  std::string Receive() {
+    if (!ws_) return "";
+    std::string out;
+    while (true) {
+      BYTE buf[8192];
+      DWORD read = 0;
+      WINHTTP_WEB_SOCKET_BUFFER_TYPE type;
+      DWORD status = WinHttpWebSocketReceive(ws_, buf, sizeof(buf), &read, &type);
+      if (status != ERROR_SUCCESS) return "";
+      out.append((char*)buf, read);
+      if (type == WINHTTP_WEB_SOCKET_CLOSE_BUFFER_TYPE) return "";
+      if (type == WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE) return out;
+      // Fragments (binary/fragment types): keep accumulating.
     }
-    SendResult(id, ok && done, done ? (ok ? "Set." : "Write failed.") : "No writable property '" + prop + "'.");
-  } else if (tool == "world") {
-    // TODO: resolve UWorld/GameState and set TimeDilation via the game thread.
-    SendResult(id, false, "world: not yet implemented (needs game-thread marshaling).");
-  } else if (tool == "spawn") {
-    SendResult(id, false, "spawn: not yet implemented (needs game-thread marshaling).");
-  } else {
-    SendResult(id, false, "Unknown tool '" + tool + "'.");
   }
+
+  void Close() {
+    if (ws_) {
+      WinHttpWebSocketClose(ws_, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS, nullptr, 0);
+      WinHttpCloseHandle(ws_);
+      ws_ = nullptr;
+    }
+    if (req_) { WinHttpCloseHandle(req_); req_ = nullptr; }
+    if (conn_) { WinHttpCloseHandle(conn_); conn_ = nullptr; }
+    if (session_) { WinHttpCloseHandle(session_); session_ = nullptr; }
+  }
+
+ private:
+  HINTERNET session_ = nullptr, conn_ = nullptr, req_ = nullptr, ws_ = nullptr;
+};
+
+// ----------------------------------------------------------------- helpers ----
+
+static std::string GameName() {
+  char path[MAX_PATH];
+  DWORD n = GetModuleFileNameA(nullptr, path, MAX_PATH);
+  std::string exe = n ? std::string(path, n) : std::string();
+  size_t slash = exe.find_last_of("\\/");
+  std::string base = slash == std::string::npos ? exe : exe.substr(slash + 1);
+  // Foo-Win64-Shipping.exe -> Foo
+  size_t dash = base.find('-');
+  if (dash != std::string::npos) base = base.substr(0, dash);
+  size_t dot = base.rfind('.');
+  if (dot != std::string::npos) base = base.substr(0, dot);
+  return base.empty() ? "Unreal game" : base;
 }
 
-static std::wstring ToWide(const std::string& s) {
-  std::wstring o(s.size(), 0);
-  MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, o.data(), (int)o.size());
-  return o;
-}
-
-static DWORD WINAPI Worker(void*) {
-  const std::string url = "ws://127.0.0.1:7777/ws/adapter";
-  while (g_running) {
-    HINTERNET sess = WinHttpOpen(L"ScruffUnrealBridge", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-                                 WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-    HINTERNET conn = sess ? WinHttpConnect(sess, L"127.0.0.1", 7777, 0) : nullptr;
-    HINTERNET req = nullptr;
-    if (conn) {
-      req = WinHttpOpenRequest(conn, L"GET", L"/ws/adapter", nullptr, WINHTTP_NO_REFERER,
-                               WINHTTP_DEFAULT_ACCEPT_TYPES, 0);
-    }
-    bool up = false;
-    if (req && WinHttpSetOption(req, WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, nullptr, 0) &&
-        WinHttpSendRequest(req, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
-        WinHttpReceiveResponse(req, nullptr)) {
-      g_ws = WinHttpWebSocketCompleteUpgrade(req, 0);
-      up = g_ws != nullptr;
-    }
-    if (up) {
-      std::string hello = std::string("{\"type\":\"hello\",\"name\":\"Scruff Unreal bridge\",") +
-                          "\"game\":\"Unreal game\",\"description\":\"Live UObject access (experimental).\","
-                          "\"tools\":" + kToolsJson + "}";
-      Send(hello);
-      char buf[65536];
-      while (g_running) {
-        DWORD read = 0;
-        WINHTTP_WEB_SOCKET_BUFFER_TYPE type;
-        DWORD err = WinHttpWebSocketReceive(g_ws, buf, sizeof(buf) - 1, &read, &type);
-        if (err != ERROR_SUCCESS || read == 0) break;
-        buf[read] = 0;
-        std::string msg(buf);
-        if (msg.find("\"type\":\"call\"") != std::string::npos ||
-            msg.find("\"type\": \"call\"") != std::string::npos) {
-          HandleCall(msg);
+// Hub URL: TelosBridgeUE/hub.txt next to this DLL (written by the Telos installer),
+// else the hub default.
+static std::string HubUrl() {
+  char dllPath[MAX_PATH];
+  std::string def = "ws://127.0.0.1:7777/ws/adapter";
+  HMODULE self = nullptr;
+  GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCSTR)&HubUrl, &self);
+  if (self && GetModuleFileNameA(self, dllPath, MAX_PATH)) {
+    std::string dir(dllPath);
+    size_t slash = dir.find_last_of("\\/");
+    std::string hubFile =
+        (slash == std::string::npos ? dir : dir.substr(0, slash)) + "\\hub.txt";
+    FILE* f = fopen(hubFile.c_str(), "r");
+    if (f) {
+      char line[512];
+      if (fgets(line, sizeof(line), f)) {
+        std::string u = line;
+        while (!u.empty() && (u.back() == '\n' || u.back() == '\r' || u.back() == ' '))
+          u.pop_back();
+        if (u.rfind("ws://", 0) == 0) {
+          fclose(f);
+          return u;
         }
       }
-      WinHttpWebSocketClose(g_ws, 1000, nullptr, 0);
-      g_ws = nullptr;
+      fclose(f);
     }
-    if (req) WinHttpCloseHandle(req);
-    if (conn) WinHttpCloseHandle(conn);
-    if (sess) WinHttpCloseHandle(sess);
-    for (int i = 0; i < 20 && g_running; i++) Sleep(100);
   }
-  return 0;
+  return def;
 }
 
-void Start(const char* /*hubUrl*/) {
-  if (g_running) return;
-  g_running = true;
-  CreateThread(nullptr, 0, Worker, nullptr, 0, nullptr);
+// Object ids: stable per session, hex pointer string.
+static std::string ObjId(UE::UObject* o) {
+  char buf[24];
+  snprintf(buf, sizeof(buf), "%p", (void*)o);
+  return buf;
 }
 
-void Stop() { g_running = false; }
+static UE::UObject* ObjById(const std::string& id) {
+  if (id.empty()) return nullptr;
+  char* end = nullptr;
+  unsigned long long addr = strtoull(id.c_str(), &end, 16);  // %p prints hex
+  if (end == id.c_str()) return nullptr;
+  auto* o = reinterpret_cast<UE::UObject*>((uintptr_t)addr);
+  return UE::CanRead(o, sizeof(UE::UObject)) ? o : nullptr;
+}
+
+// ------------------------------------------------------------------- tools ----
+
+static Json ToolFind(const Json& input) {
+  std::string name = input.at("name").strOr("");
+  std::string cls = input.at("class").strOr("");
+  int limit = (int)input.at("limit").numOr(25);
+  if (limit < 1) limit = 1;
+  if (limit > 200) limit = 200;
+  Json out;
+  out.type = Json::Type::Arr;
+  if (!UE::GObjects()) return out;  // caller reports the degraded-mode error
+  UE::ForEachObject([&](UE::UObject* o) {
+    if ((int)out.arr.size() >= limit) return false;
+    std::string full = o->GetFullName();
+    if (full.empty()) return true;
+    std::string lf = full, ln = name, lc = cls;
+    for (auto& c : lf) c = (char)tolower((unsigned char)c);
+    for (auto& c : ln) c = (char)tolower((unsigned char)c);
+    for (auto& c : lc) c = (char)tolower((unsigned char)c);
+    if (!ln.empty() && lf.find(ln) == std::string::npos) return true;
+    if (!lc.empty() && lf.find(lc) == std::string::npos) return true;
+    Json e;
+    e.type = Json::Type::Obj;
+    e.obj["id"] = Json::string(ObjId(o));
+    e.obj["name"] = Json::string(full);
+    out.arr.push_back(e);
+    return true;
+  });
+  return out;
+}
+
+static Json PropValueJson(UE::UObject* obj, const std::string& prop) {
+  float f;
+  if (UE::GetPropertyFloat(obj, prop, f)) return Json::number(f);
+  UE::int32 i;
+  if (UE::GetPropertyInt(obj, prop, i)) return Json::number(i);
+  bool b;
+  if (UE::GetPropertyBool(obj, prop, b)) return Json::boolean(b);
+  std::string s;
+  if (UE::GetPropertyString(obj, prop, s)) return Json::string(s);
+  return Json();
+}
+
+static Json ToolGet(const Json& input, std::string& err) {
+  UE::UObject* obj = ObjById(input.at("id").strOr(""));
+  if (!obj) { err = "object id not found (ids change when the level reloads)"; return {}; }
+  std::string prop = input.at("property").strOr("");
+  Json v = PropValueJson(obj, prop);
+  if (v.isNull()) { err = "property '" + prop + "' not found or unreadable on that object"; }
+  return v;
+}
+
+static Json ToolSet(const Json& input, std::string& err) {
+  UE::UObject* obj = ObjById(input.at("id").strOr(""));
+  if (!obj) { err = "object id not found (ids change when the level reloads)"; return {}; }
+  std::string prop = input.at("property").strOr("");
+  Json v = input.at("value");
+  Json before = PropValueJson(obj, prop);
+  bool ok = false;
+  // Coerce by the incoming JSON type; fall back to the property's own type.
+  if (v.type == Json::Type::Bool) {
+    ok = UE::SetPropertyBool(obj, prop, v.b);
+  } else if (v.type == Json::Type::Num) {
+    float f;
+    if (UE::GetPropertyFloat(obj, prop, f))
+      ok = UE::SetPropertyFloat(obj, prop, (float)v.num);
+    else {
+      UE::int32 i;
+      if (UE::GetPropertyInt(obj, prop, i)) ok = UE::SetPropertyInt(obj, prop, (UE::int32)v.num);
+    }
+  } else if (v.type == Json::Type::Str) {
+    float f;
+    bool b;
+    UE::int32 i;
+    if (UE::GetPropertyBool(obj, prop, b)) ok = UE::SetPropertyBool(obj, prop, v.boolOr(b));
+    else if (UE::GetPropertyFloat(obj, prop, f))
+      ok = UE::SetPropertyFloat(obj, prop, (float)v.numOr(f));
+    else if (UE::GetPropertyInt(obj, prop, i))
+      ok = UE::SetPropertyInt(obj, prop, (UE::int32)v.numOr(i));
+    else
+      err = "string properties are read-only in this bridge";
+  } else {
+    err = "value must be a number, boolean, or numeric string";
+  }
+  if (!ok && err.empty()) err = "property '" + prop + "' not found or not writable";
+  Json out;
+  out.type = Json::Type::Obj;
+  out.obj["before"] = before;
+  out.obj["after"] = PropValueJson(obj, prop);
+  return out;
+}
+
+static Json ToolWorld(const Json& input, std::string& err) {
+  UE::UObject* world = UE::FindWorld();
+  if (!world) { err = "no UWorld found (GObjects not resolved or game not in a level)"; return {}; }
+  Json v = input.at("time_dilation");
+  Json out;
+  out.type = Json::Type::Obj;
+  if (!v.isNull()) {
+    float want = (float)v.numOr(1.0);
+    if (want < 0.01) want = 0.01f;
+    if (want > 10) want = 10;
+    float before = 1;
+    UE::GetPropertyFloat(world, "TimeDilation", before);
+    if (!UE::SetPropertyFloat(world, "TimeDilation", want)) {
+      err = "UWorld has no writable TimeDilation property on this version";
+      return {};
+    }
+    out.obj["before"] = Json::number(before);
+    out.obj["after"] = Json::number(want);
+  } else {
+    float cur = 1;
+    if (!UE::GetPropertyFloat(world, "TimeDilation", cur)) {
+      err = "UWorld has no readable TimeDilation property on this version";
+      return {};
+    }
+    out.obj["time_dilation"] = Json::number(cur);
+  }
+  return out;
+}
+
+// ------------------------------------------------------------------ runner ----
+
+static volatile bool g_stop = false;
+
+static std::string ToolDefs() {
+  // Valid JSON Schema input_schemas (the hub forwards them to the model).
+  return R"json([
+{"name":"find","description":"Find Unreal objects by name/class substring. Returns [{id,name}]. Ids are session-local; re-find after level changes.","input_schema":{"type":"object","properties":{"name":{"type":"string","description":"substring of the object's full name case-insensitive"},"class":{"type":"string","description":"optional substring of the class/outer path"},"limit":{"type":"integer","description":"max results, default 25"}},"required":["name"]}},
+{"name":"get","description":"Read a property (float/int/bool/name/string) from an object found by find.","input_schema":{"type":"object","properties":{"id":{"type":"string","description":"object id from find"},"property":{"type":"string","description":"property name, e.g. Health"}},"required":["id","property"]}},
+{"name":"set","description":"Write a property on an object found by find. Returns {before,after}.","input_schema":{"type":"object","properties":{"id":{"type":"string","description":"object id from find"},"property":{"type":"string","description":"property name"},"value":{"description":"new value: number or boolean"}},"required":["id","property","value"]}},
+{"name":"world","description":"Read or set world time dilation (slow-mo). Omit time_dilation to read.","input_schema":{"type":"object","properties":{"time_dilation":{"type":"number","description":"0.01-10, 1 is normal speed"}}}}
+])json";
+}
+
+static void Run(const char* hubUrl) {
+  while (!g_stop) {
+    WsClient ws;
+    if (!ws.Connect(hubUrl ? hubUrl : HubUrl().c_str())) {
+      Sleep(5000);
+      continue;
+    }
+    std::string hello = std::string("{\"type\":\"hello\",\"name\":") +
+                        Dump(Json::string(std::string("Unreal bridge: ") + GameName())) +
+                        ",\"game\":\"unreal\"," +
+                        "\"description\":\"Unreal Engine 4.25+/5.x adapter: object "
+                        "search and property read/write through engine reflection. "
+                        "Untested against real games; patterns validated per game.\"," +
+                        "\"tools\":" + ToolDefs() + "}";
+    if (!ws.Send(hello)) {
+      Sleep(5000);
+      continue;
+    }
+    // Wait for welcome (ignore anything else until it arrives).
+    std::string prefix;
+    for (;;) {
+      std::string msg = ws.Receive();
+      if (msg.empty()) break;
+      bool ok = false;
+      Json m = ParseJson(msg, ok);
+      if (ok && m.at("type").strOr("") == "welcome") {
+        prefix = m.at("prefix").strOr("");
+        break;
+      }
+    }
+    if (prefix.empty()) {
+      Sleep(5000);
+      continue;
+    }
+    // Serve calls until the socket dies.
+    for (;;) {
+      std::string msg = ws.Receive();
+      if (msg.empty()) break;
+      bool ok = false;
+      Json m = ParseJson(msg, ok);
+      if (!ok || m.at("type").strOr("") != "call") continue;
+      std::string id = m.at("id").strOr("");
+      std::string tool = m.at("tool").strOr("");
+      Json input = m.at("input");
+      std::string err;
+      Json result;
+      if (tool == "find") {
+        if (!UE::GObjects())
+          err = "GObjects not resolved in this game build (pattern mismatch); "
+                "structural tools unavailable, memory editing still works";
+        else
+          result = ToolFind(input);
+      } else if (tool == "get") {
+        result = ToolGet(input, err);
+      } else if (tool == "set") {
+        result = ToolSet(input, err);
+      } else if (tool == "world") {
+        result = ToolWorld(input, err);
+      } else {
+        err = std::string("unknown tool: ") + tool;
+      }
+      Json resp;
+      resp.type = Json::Type::Obj;
+      resp.obj["type"] = Json::string("result");
+      resp.obj["id"] = Json::string(id);
+      resp.obj["ok"] = Json::boolean(err.empty());
+      if (err.empty())
+        resp.obj["content"] = result;
+      else
+        resp.obj["error"] = Json::string(err);
+      if (!ws.Send(Dump(resp))) break;
+    }
+    Sleep(5000);
+  }
+}
+
+void Start(const char* hubUrl) {
+  static bool started = false;
+  if (started) return;
+  started = true;
+  std::string* url = new std::string(hubUrl ? hubUrl : HubUrl());
+  CreateThread(nullptr, 0,
+               [](void* p) -> DWORD {
+                 std::string* u = static_cast<std::string*>(p);
+                 Run(u->c_str());
+                 delete u;
+                 return 0;
+               },
+               url, 0, nullptr);
+}
+
+void Stop() { g_stop = true; }
 
 }  // namespace adapter

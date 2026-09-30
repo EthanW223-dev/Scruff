@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { bridgeState, installBridge } from "../games/bepinex.ts";
+import { installUnrealBridge, unrealBridgeState } from "../games/unreal.ts";
 import { buildProfile, type GameProfile } from "../games/profile.ts";
 import { z } from "zod";
 import { listProcesses, memorySupported, openBackend } from "../memory/platform.ts";
@@ -31,8 +32,12 @@ export class GameManager extends EventEmitter {
   session: GameSession | null = null;
   /** What Telos learned from the attached game's files. */
   profile: GameProfile | null = null;
-  /** The Unity bridge Telos ships, to spot an older one installed in the game. */
+  /** The Unity (Mono) bridge Telos ships, to spot an older one installed in the game. */
   bridgeDll: string | null = null;
+  /** The Unity (IL2CPP) bridge Telos ships. */
+  il2cppBridgeDll: string | null = null;
+  /** The Unreal bridge Telos ships. */
+  unrealBridgeDll: string | null = null;
   scanProgress: number | null = null;
 
   async listGames(search?: string): Promise<ProcessInfo[]> {
@@ -81,17 +86,31 @@ export class GameManager extends EventEmitter {
   }
 
   /**
-   * The game just quit, so its bridge file is free: if the installed Unity bridge is older than the
-   * one Telos ships, put the new one in now, ready for the next start. Emits "notice" with the outcome.
+   * The game just quit, so its bridge files are free: if the installed bridge is older than
+   * the one Telos ships, put the new one in now, ready for the next start. Emits "notice"
+   * with the outcome. Covers Unity (Mono/IL2CPP) and the staged Unreal DLL.
    */
   async updateBridge(tries = 4): Promise<boolean> {
     const profile = this.profile;
-    if (!profile || !this.bridgeDll || !bridgeState(profile, this.bridgeDll).outdated) return false;
+    if (!profile) return false;
+    if (profile.engine === "Unreal Engine") {
+      if (!this.unrealBridgeDll || !unrealBridgeState(profile, this.unrealBridgeDll).outdated) return false;
+      try {
+        installUnrealBridge(profile, { bridgeDll: this.unrealBridgeDll });
+        this.emit("notice", "Updated the staged Telos Unreal bridge; inject the new DLL next time you start the game.");
+        return true;
+      } catch (err) {
+        this.emit("notice", `Couldn't update the staged Unreal bridge: ${(err as Error).message}`);
+        return false;
+      }
+    }
+    const bundled = profile.engine === "Unity (IL2CPP)" ? this.il2cppBridgeDll : this.bridgeDll;
+    if (!bundled || !bridgeState(profile, bundled).outdated) return false;
     for (let attempt = 1; attempt <= tries; attempt++) {
       // Windows can take a moment to let go of a closed game's files.
       await new Promise((r) => setTimeout(r, 1500));
       try {
-        await installBridge(profile, { bridgeDll: this.bridgeDll });
+        await installBridge(profile, { bridgeDll: bundled });
         this.emit("notice", "Updated the Telos bridge in the game; it loads the next time you start it.");
         return true;
       } catch (err) {
@@ -116,16 +135,23 @@ export class GameManager extends EventEmitter {
   }
 
   state() {
+    const p = this.profile;
+    const bridge =
+      p && p.engine === "Unreal Engine"
+        ? unrealBridgeState(p, this.unrealBridgeDll ?? undefined)
+        : p
+          ? bridgeState(p, (p.engine === "Unity (IL2CPP)" ? this.il2cppBridgeDll : this.bridgeDll) ?? undefined)
+          : null;
     return {
       supported: memorySupported(),
       attached: this.session && !this.session.isClosed ? this.session.snapshot() : null,
-      profile: this.profile && {
-        name: this.profile.name,
-        engine: this.profile.engine,
-        installDir: this.profile.installDir,
-        saveDirs: this.profile.saveDirs,
-        code: this.profile.codeKind,
-        bridge: bridgeState(this.profile, this.bridgeDll ?? undefined),
+      profile: p && {
+        name: p.name,
+        engine: p.engine,
+        installDir: p.installDir,
+        saveDirs: p.saveDirs,
+        code: p.codeKind,
+        bridge,
       },
       scanProgress: this.scanProgress,
     };

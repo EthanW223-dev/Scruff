@@ -160,8 +160,75 @@ test("downloads the newest stable BepInEx 5 for the game's bitness", async () =>
   assert.deepEqual(asked.slice(1), ["https://x/x86.zip"]);
 });
 
-test("refuses IL2CPP games, non-BepInEx downloads and zips that reach outside the game folder", async () => {
-  assert.match(bridgeState(fakeGame({ il2cpp: true }).profile).reason!, /IL2CPP/);
+test("IL2CPP games are supported: BepInEx 6 IL2CPP zip installs the IL2CPP bridge", async () => {
+  const { install, profile } = fakeGame({ il2cpp: true });
+  const state = bridgeState(profile);
+  assert.equal(state.supported, true);
+  assert.equal(state.installed, false);
+
+  const il2cppZip = writeZip({
+    "winhttp.dll": "doorstop",
+    "BepInEx/core/BepInEx.Unity.IL2CPP.dll": "core6",
+    "BepInEx/core/Il2CppInterop.Runtime.dll": "interop",
+  });
+  const zipFile = path.join(install, "..", "bepinex6.zip");
+  fs.writeFileSync(zipFile, il2cppZip);
+  const IL2CPP_BRIDGE = path.resolve(import.meta.dirname, "..", "bridge", "TelosBridge.IL2CPP.dll");
+
+  const report = await installBridge(profile, { bridgeDll: IL2CPP_BRIDGE, bepinexZip: zipFile });
+  assert.equal(report.installedBepInEx, true);
+  assert.match(report.next, /bindings/);
+  const plugin = path.join(install, "BepInEx", "plugins", "ScruffBridge", "TelosBridge.IL2CPP.dll");
+  assert.ok(fs.existsSync(plugin), "IL2CPP bridge plugin installed");
+  assert.ok(fs.existsSync(path.join(install, "BepInEx", "core", "BepInEx.Unity.IL2CPP.dll")));
+  assert.equal(bridgeState(profile, IL2CPP_BRIDGE).installed, true);
+  assert.equal(bridgeState(profile, IL2CPP_BRIDGE).outdated, undefined);
+
+  const removed = removeBridge(profile);
+  assert.equal(removed.keptBepInEx, false);
+  assert.ok(!fs.existsSync(path.join(install, "BepInEx")));
+});
+
+test("IL2CPP picks the BepInEx 6 IL2CPP pre-release from the release list", async () => {
+  const { profile } = fakeGame({ il2cpp: true });
+  const asked: string[] = [];
+  const fakeFetch = (async (url: string) => {
+    asked.push(url);
+    if (url.includes("api.github.com")) {
+      return Response.json([
+        { tag_name: "v5.4.23.3", prerelease: false, assets: [{ name: "BepInEx_win_x64_5.4.23.3.zip", browser_download_url: "https://x/5.zip" }] },
+        { tag_name: "v6.0.0-pre.2", prerelease: true, assets: [{ name: "BepInEx-Unity.IL2CPP-win-x64-6.0.0-pre.2.zip", browser_download_url: "https://x/6il2cpp.zip" }] },
+      ]);
+    }
+    return new Response(
+      new Uint8Array(
+        writeZip({
+          "winhttp.dll": "doorstop",
+          "BepInEx/core/BepInEx.Unity.IL2CPP.dll": "core6",
+        }),
+      ),
+    );
+  }) as unknown as typeof fetch;
+  const IL2CPP_BRIDGE = path.resolve(import.meta.dirname, "..", "bridge", "TelosBridge.IL2CPP.dll");
+  const report = await installBridge(profile, { bridgeDll: IL2CPP_BRIDGE, fetch: fakeFetch });
+  assert.equal(report.bepinexSource, "https://x/6il2cpp.zip");
+});
+
+test("a BepInEx 5 zip is refused for IL2CPP games, and the wrong installed core fails loudly", async () => {
+  const { install, profile } = fakeGame({ il2cpp: true });
+  const five = path.join(install, "..", "bepinex5.zip");
+  fs.writeFileSync(five, bepinexZip());
+  const IL2CPP_BRIDGE = path.resolve(import.meta.dirname, "..", "bridge", "TelosBridge.IL2CPP.dll");
+  await assert.rejects(installBridge(profile, { bridgeDll: IL2CPP_BRIDGE, bepinexZip: five }), /BepInEx 6 IL2CPP/);
+
+  // BepInEx 5 already in the game folder: don't install 6 alongside it.
+  const { profile: p2 } = fakeGame({ il2cpp: true });
+  fs.mkdirSync(path.join(p2.installDir, "BepInEx", "core"), { recursive: true });
+  fs.writeFileSync(path.join(p2.installDir, "BepInEx", "core", "BepInEx.dll"), "v5 core");
+  await assert.rejects(installBridge(p2, { bridgeDll: IL2CPP_BRIDGE, bepinexZip: five }), /already has BepInEx 5/);
+});
+
+test("refuses non-BepInEx downloads and zips that reach outside the game folder", async () => {
   const { install, profile } = fakeGame();
   const bogus = path.join(install, "..", "bogus.zip");
   fs.writeFileSync(bogus, writeZip({ "readme.txt": "not bepinex" }));

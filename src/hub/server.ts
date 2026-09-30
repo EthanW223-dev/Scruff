@@ -13,7 +13,8 @@ import type { ScreenBridge } from "./screen.ts";
 import { transcribe } from "./speech.ts";
 import { ThemeInput, type ThemeStore } from "./themes.ts";
 import { parseAddress } from "../memory/types.ts";
-import { installBridge, removeBridge } from "../games/bepinex.ts";
+import { installBridge, removeBridge, unityFlavor } from "../games/bepinex.ts";
+import { installUnrealBridge, removeUnrealBridge } from "../games/unreal.ts";
 
 export interface ServerOptions {
   port: number;
@@ -205,10 +206,28 @@ export function startServer(opts: ServerOptions): Promise<http.Server> {
       }
       case "install_bridge": {
         if (!games.profile) throw new Error("Attach to the game first.");
-        const updating = fs.existsSync(path.join(games.profile.installDir, "BepInEx", "plugins", "ScruffBridge", "ScruffBridge.dll"));
+        const port = (server.address() as AddressInfo).port;
+        const engine = games.profile.engine;
+        if (engine === "Unreal Engine") {
+          const report = installUnrealBridge(games.profile, {
+            bridgeDll: path.join(opts.root, "bridge-unreal", "TelosBridgeUE.dll"),
+            port,
+          });
+          games.emit("update");
+          toast(ws, `Staged the Telos Unreal bridge (${report.arch}). ${report.next}`, "info");
+          break;
+        }
+        const flavor = unityFlavor(games.profile);
+        if (!flavor) {
+          throw new Error(
+            `This game runs on ${engine}, which has no universal bridge — Telos can still read and change its numbers through memory editing.`,
+          );
+        }
+        const dllName = flavor === "il2cpp" ? "TelosBridge.IL2CPP.dll" : "ScruffBridge.dll";
+        const updating = fs.existsSync(path.join(games.profile.installDir, "BepInEx", "plugins", "ScruffBridge", dllName));
         const report = await installBridge(games.profile, {
-          bridgeDll: path.join(opts.root, "bridge", "ScruffBridge.dll"),
-          port: (server.address() as AddressInfo).port,
+          bridgeDll: path.join(opts.root, "bridge", flavor === "il2cpp" ? "TelosBridge.IL2CPP.dll" : "ScruffBridge.dll"),
+          port,
           onProgress: (text) => toast(ws, text, "info"),
         });
         games.emit("update");
@@ -223,6 +242,12 @@ export function startServer(opts: ServerOptions): Promise<http.Server> {
       }
       case "remove_bridge": {
         if (!games.profile) throw new Error("Attach to the game first.");
+        if (games.profile.engine === "Unreal Engine") {
+          removeUnrealBridge(games.profile);
+          games.emit("update");
+          toast(ws, "Removed the staged Telos Unreal bridge.", "info");
+          break;
+        }
         const report = removeBridge(games.profile);
         games.emit("update");
         toast(ws, `Removed the Telos bridge${report.keptBepInEx ? "" : " and BepInEx"}. Restart the game to finish.`, "info");

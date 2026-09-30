@@ -1,17 +1,20 @@
 import { z } from "zod";
-import { bridgeState, installBridge, removeBridge } from "../games/bepinex.ts";
+import { bridgeState, unityFlavor, installBridge, removeBridge } from "../games/bepinex.ts";
 import type { AdapterRegistry } from "./adapters.ts";
 import type { GameManager } from "./game.ts";
 import { defineTool, json, type HubTool } from "./tools.ts";
 
 /**
- * Tools that put Telos's Unity bridge into the attached game. Once the game restarts with it,
- * the bridge connects as the "unity" game adapter: find any object, change any field, call the
- * game's methods, recolor, resize, spawn, change gravity and time, load levels.
+ * Tools that put Telos's Unity bridge into the attached game. Mono games get BepInEx 5 +
+ * ScruffBridge.dll; IL2CPP games get BepInEx 6 + TelosBridge.IL2CPP.dll. Once the game
+ * restarts with it, the bridge connects as the "unity" game adapter either way: find any
+ * object, change any field, call the game's methods, recolor, resize, spawn, change
+ * gravity and time, load levels.
  */
 
 export interface UnityBridgeOptions {
   bridgeDll: string;
+  il2cppBridgeDll: string;
   port: number;
 }
 
@@ -36,7 +39,9 @@ export function unityBridgeTools(games: GameManager, adapters: AdapterRegistry, 
       input: z.object({}),
       run() {
         const p = profile();
-        const state = bridgeState(p, opts.bridgeDll);
+        const backend = unityFlavor(p);
+        const dll = backend === "il2cpp" ? opts.il2cppBridgeDll : opts.bridgeDll;
+        const state = bridgeState(p, dll);
         const connected = unityBridgeConnected(adapters);
         return json({
           ...state,
@@ -50,7 +55,9 @@ export function unityBridgeTools(games: GameManager, adapters: AdapterRegistry, 
               ? "Connected: use use_game_adapter with the unity__ tools."
               : state.installed
                 ? "Installed but not connected: the player needs to restart the game (quit fully, start again)."
-                : "Not installed: ask the player if they'd like it (it adds the BepInEx mod loader to the game folder and needs a game restart), then install_unity_bridge.",
+                : backend === "il2cpp"
+                  ? "Not installed: ask the player if they'd like it (it adds the BepInEx 6 IL2CPP mod loader to the game folder and needs a game restart; first launch takes a while generating bindings), then install_unity_bridge."
+                  : "Not installed: ask the player if they'd like it (it adds the BepInEx mod loader to the game folder and needs a game restart), then install_unity_bridge.",
         });
       },
     }),
@@ -64,7 +71,9 @@ export function unityBridgeTools(games: GameManager, adapters: AdapterRegistry, 
       input: z.object({}),
       async run(_input, ctx) {
         games.requireSession();
-        const report = await installBridge(profile(), { bridgeDll: opts.bridgeDll, port: opts.port, onProgress: ctx.progress });
+        const p = profile();
+        const dll = unityFlavor(p) === "il2cpp" ? opts.il2cppBridgeDll : opts.bridgeDll;
+        const report = await installBridge(p, { bridgeDll: dll, port: opts.port, onProgress: ctx.progress });
         games.emit("update");
         return json(report);
       },

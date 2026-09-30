@@ -3,3 +3,8 @@ node_modules/
 .scruff/
 bridge/.refs/
 bridge/.build/
+bridge/il2cpp/.refs/
+bridge/il2cpp/.build/
+bridge/il2cpp/obj/
+bridge/il2cpp/stubs/*/obj/
+bridge-unreal/test/test_json

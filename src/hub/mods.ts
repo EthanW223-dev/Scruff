@@ -2,16 +2,19 @@
  * Telos's full mod layer: what "change anything in the game" means on each engine, how a
  * player's plain-English mod request maps to bridge tools, and honest limits.
  *
- * Engines fall into three tiers:
- * - full (Unity, via the BepInEx bridge): recolor, move/resize, hide/remove, spawn, time
- *   scale, gravity, calling the game's own methods, reading/writing any field.
- * - planned (Unreal Engine): the adapter protocol is defined and a bridge is scaffolded in
- *   bridge-unreal/, but it is not tested against real games yet. Numbers work via memory.
+ * Engines fall into tiers:
+ * - full (Unity Mono and IL2CPP, via the BepInEx bridge): recolor, move/resize,
+ *   hide/remove, spawn, time scale, gravity, calling the game's own methods,
+ *   reading/writing any field.
+ * - unreal (Unreal Engine): a bridge is staged and injected by the player; it offers
+ *   object search and property read/write through engine reflection. It compiles and its
+ *   protocol layer is tested, but it has NOT been verified against a real game — first
+ *   use on any game is unverified. Numbers work via memory regardless.
  * - numbers-only (Godot, GameMaker, RPG Maker, Ren'Py, Source, unknown): memory editing.
  *   Structural mods there need per-game reverse engineering, which Telos doesn't do.
  */
 
-export type ModTier = "full" | "planned" | "numbers";
+export type ModTier = "full" | "unreal" | "numbers";
 
 export interface EngineModSupport {
   tier: ModTier;
@@ -28,21 +31,28 @@ const BRIDGE_MISSING =
   "meanwhile only number changes via memory work. ";
 const BRIDGE_READY = "The bridge is connected: prefer it over memory editing for anything beyond numbers. ";
 
-const PLANNED_NOTE =
-  "Unreal Engine: number changes work via memory editing. Structural mods (colors, spawning, " +
-  "removing objects) need the Unreal bridge, which is scaffolded but untested — say so plainly " +
-  "and don't pretend they work. ";
+const UNREAL_NOTE =
+  "Unreal Engine: number changes work via memory editing. Structural mods (finding objects, " +
+  "reading/writing properties, slow-mo) need the Unreal bridge: offer unreal_bridge_status in " +
+  "one line. The bridge compiles and its protocol is tested, but it is UNVERIFIED against real " +
+  "games — say so plainly on first use with a game, and confirm one harmless change on screen " +
+  "before promising anything. ";
+const UNREAL_READY =
+  "The Unreal bridge is connected: prefer the unreal__ tools over memory editing for object " +
+  "and property work, but it is still unverified on this game — confirm on screen. ";
 
 const NUMBERS_NOTE =
   "Only number changes work on this engine (memory editing). Colors, models, spawning and " +
   "removing things need per-game reverse engineering, which Telos doesn't do — say so plainly. ";
 
 /** Engine strings come from src/games/profile.ts. */
-export function engineModSupport(engine: string, bridgeConnected: boolean): EngineModSupport {
+export function engineModSupport(engine: string, bridgeConnected: boolean, unrealConnected = false): EngineModSupport {
   if (engine.startsWith("Unity")) {
     return { tier: "full", note: FULL_NOTE + (bridgeConnected ? BRIDGE_READY : BRIDGE_MISSING) };
   }
-  if (engine === "Unreal Engine") return { tier: "planned", note: PLANNED_NOTE };
+  if (engine === "Unreal Engine") {
+    return { tier: "unreal", note: UNREAL_NOTE + (unrealConnected ? UNREAL_READY : "") };
+  }
   return { tier: "numbers", note: NUMBERS_NOTE };
 }
 

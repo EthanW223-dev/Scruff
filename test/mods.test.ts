@@ -15,10 +15,14 @@ test("Unity gets full mod support, gated on the bridge connection", () => {
   assert.match(off.note, /install_unity_bridge/);
 });
 
-test("Unreal is planned: numbers now, structural mods honestly unavailable", () => {
+test("Unreal has its own tier: bridge installable, unverified on real games", () => {
   const s = engineModSupport("Unreal Engine", false);
-  assert.equal(s.tier, "planned");
-  assert.match(s.note, /scaffolded but untested/);
+  assert.equal(s.tier, "unreal");
+  assert.match(s.note, /UNVERIFIED/);
+  assert.match(s.note, /unreal_bridge_status/);
+  const on = engineModSupport("Unreal Engine", false, true);
+  assert.equal(on.tier, "unreal");
+  assert.match(on.note, /unreal__ tools/);
 });
 
 test("other engines are numbers-only", () => {

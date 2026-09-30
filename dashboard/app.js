@@ -636,7 +636,7 @@ function renderVoice(voice, enabled) {
   });
   const body = el("div", "voice-acc-body");
   const inner = el("div", "voice-acc-body-inner");
-  inner.append(inner);
+  body.append(inner);
   wrap.append(head, body);
   row.append(wrap);
 

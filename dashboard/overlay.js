@@ -364,11 +364,13 @@ function startHudWindow({ bridge, toolLabel, speak }) {
     bridge.setPanel(true);
   });
   // First run in the separate window: honor the spot he dragged the orb to
-  // back when it lived inside the game overlay, then retire that key.
+  // back when it lived inside the game overlay, then retire that key. The old
+  // spot is the unit's position; the window's top-left sits ~8px above-left
+  // of the unit (page padding), and the main process clamps it on-screen.
   try {
     const s = JSON.parse(localStorage.getItem(HUD_POS_KEY) ?? "null");
     if (s && Number.isFinite(s.x) && Number.isFinite(s.y)) {
-      bridge.moveHud?.(Math.round(s.x), Math.round(s.y));
+      bridge.moveHud?.(Math.round(s.x) - 8, Math.round(s.y) - 8);
     }
     localStorage.removeItem(HUD_POS_KEY);
     localStorage.removeItem("telos-hud-pos");

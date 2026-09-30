@@ -171,16 +171,29 @@ function saveHudPos(p) {
  * holding just the orb unit. It never follows the game window and never docks
  * to a game corner — it stays exactly where he drags it.
  */
+const HUD_W = 520;
+const HUD_H = 300;
+/** Keep the whole HUD window on the primary display — it must never end up
+ *  half off-screen (a migrated pre-window orb spot is a unit position, not a
+ *  window corner, and would otherwise shove the window off the edge). */
+function clampHudPos(x, y) {
+  const { bounds } = screen.getPrimaryDisplay();
+  return {
+    x: Math.round(Math.min(Math.max(x, bounds.x), bounds.x + bounds.width - HUD_W)),
+    y: Math.round(Math.min(Math.max(y, bounds.y), bounds.y + bounds.height - HUD_H)),
+  };
+}
 function createHudWindow() {
   const { bounds } = screen.getPrimaryDisplay();
   const saved = loadHudPos();
-  const w = 520;
-  const h = 300;
+  const w = HUD_W;
+  const h = HUD_H;
+  const pos = clampHudPos(saved?.x ?? bounds.x + bounds.width - w - 40, saved?.y ?? bounds.y + 110);
   hudWin = new BrowserWindow({
     width: w,
     height: h,
-    x: saved?.x ?? Math.round(bounds.x + bounds.width - w - 40),
-    y: saved?.y ?? Math.round(bounds.y + 110),
+    x: pos.x,
+    y: pos.y,
     transparent: true,
     backgroundColor: "#00000000",
     frame: false,
@@ -311,8 +324,7 @@ ipcMain.on("listening", (_e, on) => {
 // Dragging the orb unit moves the standalone HUD window; the spot is saved.
 ipcMain.on("hud-move", (_e, p) => {
   if (hudWin && !hudWin.isDestroyed() && Number.isFinite(p?.x) && Number.isFinite(p?.y)) {
-    const x = Math.round(p.x);
-    const y = Math.round(p.y);
+    const { x, y } = clampHudPos(p.x, p.y);
     hudWin.setPosition(x, y);
     saveHudPos({ x, y });
   }

@@ -81,6 +81,8 @@ export class AgentOrb {
     this.state = "breathing";
     this.running = false;
     this.raf = 0;
+    this.hoverTarget = 0; // 1 while the cursor is over the orb
+    this.energy = 0; // lerped toward hoverTarget; brightens + quickens the orb itself
     this.reduced = typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
     canvas.setAttribute("aria-label", LABELS[this.state]);
 
@@ -114,6 +116,16 @@ export class AgentOrb {
     if (this.reduced) this.paint(0.6);
   }
 
+  /** Hovering the HUD button wakes the orb itself: it brightens and quickens
+      while the cursor is over it, then settles back. No external glow. */
+  setHover(hovering) {
+    this.hoverTarget = hovering ? 1 : 0;
+    if (this.reduced) {
+      this.energy = this.hoverTarget;
+      this.paint(performance.now() / 1000);
+    }
+  }
+
   /** Tint the ink with a CSS color, or null/undefined for black & white. */
   setColor(cssColor) {
     this.tint = parseTint(cssColor);
@@ -126,24 +138,34 @@ export class AgentOrb {
   paint(tSec) {
     const { ctx, size, dpr } = this;
     if (!ctx) return;
+    // Ease the hover energy toward its target: the orb wakes up under the
+    // cursor and settles when it leaves. Reduced motion skips the effect.
+    if (!this.reduced) this.energy += (this.hoverTarget - this.energy) * 0.14;
+    else this.energy = this.hoverTarget;
+    const boost = this.energy;
+    const speedK = 1 + 0.55 * boost;
+    const filter = boost > 0.01 ? `brightness(${(1 + 0.32 * boost).toFixed(3)}) saturate(${(1 + 0.3 * boost).toFixed(3)})` : "none";
+    const layer = (resolved, alpha) => {
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.filter = filter;
+      paintFrame(ctx, resolved.frameFn(size, tSec * resolved.effSpeed * this.speedMul * speedK, resolved.opts), this.dark, this.tint);
+      ctx.filter = "none";
+      ctx.restore();
+    };
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, size, size);
-    let k = 1;
     if (this.prev) {
-      k = Math.min(1, (performance.now() - this.xfadeStart) / XFADE_MS);
+      const k = Math.min(1, (performance.now() - this.xfadeStart) / XFADE_MS);
       if (k >= 1) {
         this.prev = null;
       } else {
-        ctx.save();
-        ctx.globalAlpha = 1 - k;
-        paintFrame(ctx, this.prev.frameFn(size, tSec * this.prev.effSpeed * this.speedMul, this.prev.opts), this.dark, this.tint);
-        ctx.restore();
+        layer(this.prev, 1 - k);
+        layer(this.cur, k);
+        return;
       }
     }
-    ctx.save();
-    if (this.prev) ctx.globalAlpha = k;
-    paintFrame(ctx, this.cur.frameFn(size, tSec * this.cur.effSpeed * this.speedMul, this.cur.opts), this.dark, this.tint);
-    ctx.restore();
+    layer(this.cur, 1);
   }
 
   start() {

@@ -16,7 +16,6 @@ import { parseAddress } from "../memory/types.ts";
 import { installBridge, removeBridge, unityFlavor } from "../games/bepinex.ts";
 import { installUnrealBridge, removeUnrealBridge } from "../games/unreal.ts";
 import {
-  DEFAULT_VOICE,
   probeVoiceEngine,
   probeVoiceEngineNow,
   sanitizeVoiceText,

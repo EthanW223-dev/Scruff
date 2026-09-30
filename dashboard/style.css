@@ -426,14 +426,9 @@ textarea:focus { box-shadow: 3px 3px 0 var(--accent); }
 .voice-names { display: flex; flex-direction: column; gap: 1px; }
 .voice-name { font-weight: 600; font-size: 14px; }
 .voice-desc { font-size: 12px; color: var(--muted); }
+.voice-tag { font: 10px/1.5 var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; width: fit-content; margin-top: 2px; }
 .voice-play { position: relative; z-index: 1; margin-left: auto; width: 34px; height: 34px; flex: none; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: inherit; font-size: 13px; cursor: pointer; transition: border-color .16s ease, color .16s ease, box-shadow .16s ease, transform .16s ease; }
 .voice-play:hover { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 45%, transparent); transform: scale(1.06); }
-.voice-engines { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.voice-engine { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--line); background: var(--bg); color: inherit; font: inherit; cursor: pointer; border-radius: 8px; text-align: left; transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease, background .16s ease; }
-.voice-engine:hover { border-color: var(--accent); transform: translate(-2px, -2px); box-shadow: 4px 4px 0 var(--text); }
-.voice-engine.sel { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--bg)); box-shadow: 3px 3px 0 var(--accent); }
-.voice-engine-name { font-weight: 700; font-size: 14px; }
-.voice-engine-desc { font-size: 12px; color: var(--muted); }
 .device-rows { display: flex; flex-direction: column; gap: 8px; padding-top: 4px; border-top: 1px dashed var(--line); }
 .device-row { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
 .device-row > span { flex: none; width: 88px; }
@@ -475,7 +470,7 @@ textarea:focus { box-shadow: 3px 3px 0 var(--accent); }
 @media (prefers-reduced-motion: reduce) {
   .cursor, .spin { animation: none; }
   .provider-card, .connect-panel { animation: none; transition: none; }
-  .hud-button, .orb, .orb-canvas, .orb-halo, .orb-glow { animation: none !important; }
+  .hud-button, .orb, .orb-canvas { animation: none !important; }
   .msg.fresh, .msg.fresh .bubble, .turn.active .text, .thinking summary,
   .primary, .primary.launch, textarea:focus, .turn.active::after { animation: none !important; transition: none !important; }
 }
@@ -590,10 +585,10 @@ body[data-corner^="top"] .hud { top: 16px; }
 body[data-corner^="bottom"] .hud { bottom: 16px; flex-direction: column-reverse; }
 
 /* Telos's HUD icon: a thinking-orbs canvas (see dashboard/orb.js). The canvas paints
-   nine hand-tuned dot animations that crossfade as the agent's state changes; a
-   soft halo sits behind it and a cursor-tracking glow (Aceternity GlowingEffect
-   pattern) above, both driven by the theme accent — monochrome by default, the
-   game's color when one is attached. Draggable in overlay.js. */
+   nine hand-tuned dot animations that crossfade as the agent's state changes.
+   Black & white ink by default; the game's accent when one is attached.
+   Hovering wakes the orb itself (brighter, quicker) — no halo, no cursor glow.
+   Draggable in overlay.js. */
 .hud-button {
   position: relative;
   pointer-events: auto;
@@ -609,29 +604,6 @@ body[data-corner^="bottom"] .hud { bottom: 16px; flex-direction: column-reverse;
 .hud-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
 .orb { position: relative; display: block; width: 100%; height: 100%; }
 .orb-canvas { display: block; width: 100%; height: 100%; border-radius: 50%; }
-.orb-halo {
-  position: absolute;
-  inset: -8px;
-  border-radius: 50%;
-  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 55%, transparent) 0%, transparent 70%);
-  filter: blur(4px);
-  opacity: 0.55;
-  transition: opacity 0.25s ease;
-  pointer-events: none;
-}
-.hud-button:hover .orb-halo { opacity: 0.95; }
-/* Cursor-tracking glow: JS feeds --mx/--my on pointermove (see overlay.js). */
-.orb-glow {
-  position: absolute;
-  inset: -4px;
-  border-radius: 50%;
-  background: radial-gradient(48px circle at var(--mx, 50%) var(--my, 50%),
-    color-mix(in srgb, var(--accent) 55%, transparent), transparent 70%);
-  opacity: 0;
-  transition: opacity 0.25s ease;
-  pointer-events: none;
-}
-.hud-button:hover .orb-glow, .hud-button:focus-visible .orb-glow { opacity: 1; }
 
 /* Reply arrival: JS re-triggers this on the canvas so each chunk lands with a pulse. */
 .hud-button.pop .orb-canvas { animation: hud-pop 0.45s ease; }

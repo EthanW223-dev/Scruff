@@ -17,13 +17,10 @@ export function startHud({ toolLabel }) {
   // "state" handler below tints it with the active game's accent color.
   const orb = new AgentOrb($("hud-orb"), { size: 64, dark: true });
   orb.setState("connecting");
-  // Cursor-tracking glow (Aceternity GlowingEffect pattern): feed the cursor position
-  // into --mx/--my so the orb's radial highlight follows it. Cheap: one style write.
-  button.addEventListener("pointermove", (e) => {
-    const r = button.getBoundingClientRect();
-    button.style.setProperty("--mx", `${e.clientX - r.left}px`);
-    button.style.setProperty("--my", `${e.clientY - r.top}px`);
-  });
+  // Hovering wakes the orb itself (it brightens and quickens) instead of
+  // putting a shiny glow around it.
+  button.addEventListener("mouseenter", () => orb.setHover(true));
+  button.addEventListener("mouseleave", () => orb.setHover(false));
   // Only true when this page runs inside the Electron overlay (not a browser tab).
   const overlayMode = document.body.classList.contains("overlay");
 

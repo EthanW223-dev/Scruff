@@ -43,6 +43,40 @@ export const KOKORO_VOICE_LABELS: Record<KokoroVoiceId, string> = {
   bf_emma: "Emma — British female",
 };
 
+/**
+ * Every voice Telos offers, ranked most-human-first. The engine is an
+ * implementation detail now — the dashboard shows one list, best at the top,
+ * instead of asking Ethan to choose "local vs cloud". The order is judgment,
+ * not measurement: Kokoro's af_heart and Edge's Ava/Andrew are the consensus
+ * most-natural voices in each engine, and Ethan picked this ranking.
+ */
+export interface RankedVoice {
+  id: string;
+  engine: TtsEngine;
+  name: string;
+  desc: string;
+}
+export const RANKED_VOICES: RankedVoice[] = [
+  { id: "af_heart", engine: "kokoro", name: "Heart", desc: "Most human — local AI" },
+  { id: "en-US-AvaNeural", engine: "edge", name: "Ava", desc: "Warm, expressive" },
+  { id: "af_bella", engine: "kokoro", name: "Bella", desc: "Bright female — local AI" },
+  { id: "en-US-AndrewNeural", engine: "edge", name: "Andrew", desc: "Natural conversational" },
+  { id: "af_sarah", engine: "kokoro", name: "Sarah", desc: "Smooth female — local AI" },
+  { id: "en-US-AriaNeural", engine: "edge", name: "Aria", desc: "Friendly" },
+  { id: "am_adam", engine: "kokoro", name: "Adam", desc: "Deep male — local AI" },
+  { id: "en-GB-SoniaNeural", engine: "edge", name: "Sonia", desc: "British, crisp" },
+  { id: "am_michael", engine: "kokoro", name: "Michael", desc: "Steady male — local AI" },
+  { id: "en-US-BrianNeural", engine: "edge", name: "Brian", desc: "Steady narrator" },
+  { id: "bf_emma", engine: "kokoro", name: "Emma", desc: "British female — local AI" },
+  { id: "en-GB-RyanNeural", engine: "edge", name: "Ryan", desc: "British, calm" },
+];
+/** The voice Telos uses out of the box: the top of the ranking. */
+export const BEST_VOICE: RankedVoice = RANKED_VOICES[0];
+/** Which engine renders a voice id; unknown ids fall back to the best engine. */
+export function engineForVoice(id: string): TtsEngine {
+  return RANKED_VOICES.find((v) => v.id === id)?.engine ?? BEST_VOICE.engine;
+}
+
 export function voicesFor(engine: TtsEngine): readonly string[] {
   return engine === "kokoro" ? KOKORO_VOICES : EDGE_VOICES;
 }

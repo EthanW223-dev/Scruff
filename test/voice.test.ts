@@ -5,10 +5,13 @@ import path from "node:path";
 import { test } from "node:test";
 import { ModelRouter } from "../src/hub/models.ts";
 import {
+  BEST_VOICE,
   DEFAULT_VOICE,
   defaultVoiceFor,
+  engineForVoice,
   isVoiceFor,
   probeVoiceEngineNow,
+  RANKED_VOICES,
   sanitizeVoiceText,
   synthesizeVoice,
   voicesFor,
@@ -74,12 +77,12 @@ test("engine voice helpers route voices to the right engine", () => {
   assert.ok(!isVoiceFor("kokoro", "en-US-AndrewNeural"));
 });
 
-test("the router defaults to Andrew with voice off, and setVoice validates engine + voice and persists", async () => {
+test("the router defaults to the best-ranked voice (Heart) with voice off, and setVoice validates engine + voice and persists", async () => {
   const settings = tmpSettings();
   const router = new ModelRouter({}, settings, "medium");
   await router.init({});
-  assert.equal(router.voice, DEFAULT_VOICE);
-  assert.equal(router.voiceEngine, "edge");
+  assert.equal(router.voice, BEST_VOICE.id);
+  assert.equal(router.voiceEngine, BEST_VOICE.engine);
   assert.equal(router.voiceEnabled, false);
 
   assert.throws(() => router.setVoice("en-US-NotARealVoice", true), /Unknown voice/);
@@ -107,13 +110,27 @@ test("the router defaults to Andrew with voice off, and setVoice validates engin
   assert.equal(again.voiceEnabled, true);
 });
 
-test("a voice saved under a retired list falls back to the engine default", async () => {
+test("a voice saved under a retired list falls back to the best voice", async () => {
   const settings = tmpSettings();
   fs.writeFileSync(settings, JSON.stringify({ provider: "claude", model: "x", voice: "en-US-JennyNeural", voiceEnabled: true }));
   const router = new ModelRouter({}, settings, "medium");
   await router.init({});
-  assert.equal(router.voice, DEFAULT_VOICE);
-  assert.equal(router.voiceEngine, "edge");
+  assert.equal(router.voice, BEST_VOICE.id);
+  assert.equal(router.voiceEngine, BEST_VOICE.engine);
+});
+
+test("voices are ranked most-human-first with the engine attached, and engineForVoice resolves each id", () => {
+  assert.ok(RANKED_VOICES.length >= 12, "all voices are in the ranking");
+  assert.equal(RANKED_VOICES[0].id, BEST_VOICE.id);
+  assert.equal(BEST_VOICE.id, "af_heart");
+  assert.equal(BEST_VOICE.engine, "kokoro");
+  const ids = RANKED_VOICES.map((v) => v.id);
+  assert.equal(new Set(ids).size, ids.length, "no duplicate voices");
+  for (const v of RANKED_VOICES) {
+    assert.equal(engineForVoice(v.id), v.engine, `${v.id} resolves to its engine`);
+    assert.ok(isVoiceFor(v.engine, v.id), `${v.id} is a real voice for ${v.engine}`);
+  }
+  assert.equal(engineForVoice("not-a-voice"), BEST_VOICE.engine, "unknown ids fall back to the best engine");
 });
 
 test("every allowlisted voice is a plausible neural voice id", () => {

@@ -5,7 +5,7 @@ import OpenAI from "openai";
 import type { Brain } from "./agent.ts";
 import { CLAUDE_MODELS, claudeStreamFactory, listClaudeModels, type Effort } from "./providers/anthropic.ts";
 import { openAICompatibleStreamFactory } from "./providers/openai.ts";
-import { DEFAULT_VOICE, defaultVoiceFor, isVoiceFor, selectedEngineReady, TTS_ENGINES, voiceEnginesReady, type TtsEngine } from "./voice.ts";
+import { BEST_VOICE, defaultVoiceFor, isVoiceFor, selectedEngineReady, TTS_ENGINES, voiceEnginesReady, type TtsEngine } from "./voice.ts";
 
 export const PROVIDER_IDS = ["claude", "ollama", "lmstudio", "openai"] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];
@@ -85,9 +85,10 @@ export class ModelRouter {
   private keysFile: string;
   private savedKeys: Record<string, string> = {};
   selection: Selection = { provider: "claude", model: "claude-opus-5" };
-  /** Neural voice for spoken replies, and whether the overlay speaks them. */
-  voice: string = DEFAULT_VOICE;
-  voiceEngine: TtsEngine = "edge";
+  /** Neural voice for spoken replies, and whether the overlay speaks them. Out of
+      the box this is the best-ranked voice (Heart on Kokoro). */
+  voice: string = BEST_VOICE.id;
+  voiceEngine: TtsEngine = BEST_VOICE.engine;
   voiceEnabled = false;
 
   constructor(
@@ -315,7 +316,7 @@ export class ModelRouter {
     try {
       const saved = JSON.parse(fs.readFileSync(this.settingsFile, "utf8")) as SavedSettings;
       if (!(PROVIDER_IDS.includes(saved.provider) && typeof saved.model === "string" && saved.model)) return null;
-      const engine: TtsEngine = TTS_ENGINES.includes(saved.voiceEngine as TtsEngine) ? (saved.voiceEngine as TtsEngine) : "edge";
+      const engine: TtsEngine = TTS_ENGINES.includes(saved.voiceEngine as TtsEngine) ? (saved.voiceEngine as TtsEngine) : BEST_VOICE.engine;
       // A voice saved under an older list falls back to that engine's default.
       const voice = isVoiceFor(engine, saved.voice ?? "") ? (saved.voice as string) : defaultVoiceFor(engine);
       return {

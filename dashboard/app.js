@@ -507,44 +507,41 @@ const PROVIDER_META = {
 };
 const JEV_LOGO = "logos/typesafe.svg";
 
-const VOICE_ENGINES = [
-  { id: "edge", name: "Edge", desc: "Microsoft neural · instant" },
-  { id: "kokoro", name: "Kokoro", desc: "Local AI · most human" },
+// Every voice, ranked most-human-first. The engine is an implementation detail —
+// one list, best at the top, no "local vs cloud" choice. Mirrors RANKED_VOICES
+// in src/hub/voice.ts; keep the order in sync.
+const VOICES = [
+  { id: "af_heart", engine: "kokoro", name: "Heart", desc: "Most human — local AI" },
+  { id: "en-US-AvaNeural", engine: "edge", name: "Ava", desc: "Warm, expressive" },
+  { id: "af_bella", engine: "kokoro", name: "Bella", desc: "Bright female — local AI" },
+  { id: "en-US-AndrewNeural", engine: "edge", name: "Andrew", desc: "Natural conversational" },
+  { id: "af_sarah", engine: "kokoro", name: "Sarah", desc: "Smooth female — local AI" },
+  { id: "en-US-AriaNeural", engine: "edge", name: "Aria", desc: "Friendly" },
+  { id: "am_adam", engine: "kokoro", name: "Adam", desc: "Deep male — local AI" },
+  { id: "en-GB-SoniaNeural", engine: "edge", name: "Sonia", desc: "British, crisp" },
+  { id: "am_michael", engine: "kokoro", name: "Michael", desc: "Steady male — local AI" },
+  { id: "en-US-BrianNeural", engine: "edge", name: "Brian", desc: "Steady narrator" },
+  { id: "bf_emma", engine: "kokoro", name: "Emma", desc: "British female — local AI" },
+  { id: "en-GB-RyanNeural", engine: "edge", name: "Ryan", desc: "British, calm" },
 ];
-// Per-engine voices. Edge's Andrew/Ava are the newest conversational voices;
-// Kokoro is a local 82M model — the most human free option, runs on the PC.
-const VOICE_OPTIONS = {
-  edge: [
-    { id: "en-US-AndrewNeural", name: "Andrew", desc: "Most natural conversational" },
-    { id: "en-US-AvaNeural", name: "Ava", desc: "Warm, expressive" },
-    { id: "en-US-AriaNeural", name: "Aria", desc: "Friendly" },
-    { id: "en-US-BrianNeural", name: "Brian", desc: "Steady narrator" },
-    { id: "en-GB-RyanNeural", name: "Ryan", desc: "British, calm" },
-    { id: "en-GB-SoniaNeural", name: "Sonia", desc: "British, crisp" },
-  ],
-  kokoro: [
-    { id: "af_heart", name: "Heart", desc: "Warm female" },
-    { id: "af_bella", name: "Bella", desc: "Bright female" },
-    { id: "af_sarah", name: "Sarah", desc: "Smooth female" },
-    { id: "am_adam", name: "Adam", desc: "Deep male" },
-    { id: "am_michael", name: "Michael", desc: "Steady male" },
-    { id: "bf_emma", name: "Emma", desc: "British female" },
-  ],
-};
+const engineForVoice = (id) => VOICES.find((v) => v.id === id)?.engine ?? VOICES[0].engine;
 const voiceSample = (name) => `Hey Ethan, I'm ${name}, and this is how I sound.`;
 
 // Neural-voice spoken-reply state, from the hub. Single source of truth for
 // "should Telos talk back with the human voice". The composer checkbox mirrors it.
-const voiceState = { engine: "edge", name: VOICE_OPTIONS.edge[0].id, enabled: false, ready: true, engines: { edge: true, kokoro: false } };
+const voiceState = { engine: VOICES[0].engine, name: VOICES[0].id, enabled: false, ready: true, engines: { edge: true, kokoro: false } };
 function engineReady(id) {
   return id === "kokoro" ? voiceState.engines.kokoro : voiceState.ready;
 }
 function syncVoiceState(ai) {
   if (!ai) return;
-  if (ai.voiceEngine === "kokoro" || ai.voiceEngine === "edge") voiceState.engine = ai.voiceEngine;
-  const options = VOICE_OPTIONS[voiceState.engine];
-  if (ai.voice && options.some((v) => v.id === ai.voice)) voiceState.name = ai.voice;
-  else if (!options.some((v) => v.id === voiceState.name)) voiceState.name = options[0].id;
+  if (ai.voice && VOICES.some((v) => v.id === ai.voice)) {
+    voiceState.name = ai.voice;
+    voiceState.engine = engineForVoice(ai.voice);
+  } else if (!VOICES.some((v) => v.id === voiceState.name)) {
+    voiceState.name = VOICES[0].id;
+    voiceState.engine = VOICES[0].engine;
+  }
   voiceState.enabled = Boolean(ai.voiceEnabled);
   // Older hubs don't send voiceReady; assume the engine is there rather than
   // flashing a bogus warning.
@@ -608,36 +605,21 @@ function renderVoiceSection() {
 function renderVoice(voice, enabled) {
   const row = $("voice-row");
   row.replaceChildren();
-  const engine = voiceState.engine;
-  const options = VOICE_OPTIONS[engine];
 
-  // Which engine renders the speech. Kokoro is local and the most human;
-  // Edge is instant and needs no install beyond edge-tts.
-  const engineRow = el("div", "voice-engines");
-  engineRow.setAttribute("role", "radiogroup");
-  engineRow.setAttribute("aria-label", "Voice engine");
-  VOICE_ENGINES.forEach((e) => {
-    const b = el("button", `voice-engine${e.id === engine ? " sel" : ""}`);
-    b.type = "button";
-    b.setAttribute("role", "radio");
-    b.setAttribute("aria-checked", String(e.id === engine));
-    b.title = e.id === "kokoro" && !voiceState.engines.kokoro ? "Not installed yet — pick it and press play to get the install hint" : e.desc;
-    b.append(el("span", "voice-engine-name", e.name), el("span", "voice-engine-desc", e.id === "kokoro" && !voiceState.engines.kokoro ? `${e.desc} · needs install` : e.desc));
-    b.addEventListener("click", () => {
-      send({ type: "set_voice", engine: e.id, voice: VOICE_OPTIONS[e.id][0].id, enabled: cb.checked });
-    });
-    engineRow.append(b);
-  });
-  row.append(engineRow);
+  // One ranked list, best voice first — no "local vs cloud" choice. The engine
+  // is an implementation detail: each row carries a small tag, and picking a
+  // voice sends its engine along. Ranked most-human-first in VOICES above.
+  const selEngine = engineForVoice(voice);
 
-  // The voice engine lives on the PC. Say so plainly when the selected one is
-  // missing — picking a voice still works, samples and replies just can't play.
-  if (!engineReady(engine)) {
+  // The voice engine lives on the PC. Say so plainly when the selected voice's
+  // engine is missing — picking a voice still works, samples and replies just
+  // can't play until it's installed.
+  if (!engineReady(selEngine)) {
     row.append(
       el(
         "p",
         "voice-warn",
-        engine === "kokoro"
+        selEngine === "kokoro"
           ? "Kokoro isn't installed on the PC yet — run: python -m pip install kokoro-onnx espeakng_loader (SCRUFF_PYTHON's python), then restart Telos"
           : "Voice engine not found — run: python -m pip install edge-tts, or set SCRUFF_PYTHON in .env to the python that has it",
       ),
@@ -658,33 +640,37 @@ function renderVoice(voice, enabled) {
   list.setAttribute("aria-label", "Voice");
   /** Play a sample and say plainly why it failed (engine missing) instead of going silent. */
   const sample = (v) => {
-    if (!engineReady(engine)) {
+    if (!engineReady(v.engine)) {
       toast(
-        engine === "kokoro"
+        v.engine === "kokoro"
           ? "Kokoro isn't installed on the PC yet — run: python -m pip install kokoro-onnx espeakng_loader, then restart Telos"
           : "Voice engine not found — run: python -m pip install edge-tts, or set SCRUFF_PYTHON in .env to the python that has it",
         "error",
       );
       return;
     }
-    const audio = playVoiceSample(engine, v.id, voiceSample(v.name));
+    const audio = playVoiceSample(v.engine, v.id, voiceSample(v.name));
     audio.addEventListener("error", () => {
       toast(
-        engine === "kokoro"
+        v.engine === "kokoro"
           ? "Couldn't play the sample — Kokoro isn't installed (python -m pip install kokoro-onnx espeakng_loader)"
           : "Couldn't play the sample — the hub can't find edge-tts (set SCRUFF_PYTHON in .env to the right python)",
         "error",
       );
     });
   };
-  options.forEach((v, i) => {
-    const b = el("div", "voice-option");
+  VOICES.forEach((v, i) => {
+    const b = el("div", `voice-option${v.id === voice ? " sel" : ""}`);
     b.setAttribute("role", "radio");
     b.setAttribute("tabindex", "0");
     b.setAttribute("aria-checked", String(v.id === voice));
     b.style.animationDelay = `${Math.min(i * 45, 270)}ms`;
     const names = el("span", "voice-names");
-    names.append(el("span", "voice-name", v.name), el("span", "voice-desc", v.desc));
+    names.append(
+      el("span", "voice-name", v.name),
+      el("span", "voice-desc", v.desc),
+      el("span", "voice-tag", v.engine === "kokoro" ? "local" : "cloud"),
+    );
     const play = el("button", "voice-play");
     play.type = "button";
     play.textContent = "▶";
@@ -696,7 +682,7 @@ function renderVoice(voice, enabled) {
     });
     b.append(names, play);
     const choose = () => {
-      send({ type: "set_voice", engine, voice: v.id, enabled: cb.checked });
+      send({ type: "set_voice", engine: v.engine, voice: v.id, enabled: cb.checked });
       sample(v);
     };
     b.addEventListener("click", choose);
@@ -715,7 +701,7 @@ function renderVoice(voice, enabled) {
     list.append(b);
   });
   row.append(list);
-  cb.addEventListener("change", () => send({ type: "set_voice", engine, voice, enabled: cb.checked }));
+  cb.addEventListener("change", () => send({ type: "set_voice", engine: engineForVoice(voice), voice, enabled: cb.checked }));
 
   // Local audio devices: which mic push-to-talk uses, which speaker replies play on.
   const audioRow = el("div", "device-rows");

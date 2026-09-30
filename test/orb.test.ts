@@ -8,6 +8,13 @@ const { ORB_STATES, parseTint } = (await import("../dashboard/orb.js")) as {
   ORB_STATES: string[];
   parseTint: (c: string | null | undefined) => { r: number; g: number; b: number } | undefined;
 };
+// @ts-ignore: AgentOrb needs a canvas; the stub below absorbs all 2d calls
+const { AgentOrb } = (await import("../dashboard/orb.js")) as {
+  AgentOrb: new (
+    canvas: any,
+    opts?: { size?: number; speed?: number; dark?: boolean },
+  ) => { setHover: (h: boolean) => void; destroy: () => void; paint: (t: number) => void; energy: number };
+};
 
 // The HUD icon: nine thinking-orbs animations, one per agent state.
 
@@ -34,4 +41,31 @@ test("parseTint reads hex and rgb, and yields grayscale (undefined) otherwise", 
   assert.equal(parseTint("not a color"), undefined);
   assert.equal(parseTint(null), undefined);
   assert.equal(parseTint(undefined), undefined);
+});
+
+test("hover wakes the orb itself: energy rises under the cursor and settles after", () => {
+  // Node has no canvas or rAF; stub both. The 2d-context proxy absorbs every
+  // draw call so the real engine paint path still runs.
+  (globalThis as any).requestAnimationFrame = () => 0;
+  (globalThis as any).cancelAnimationFrame = () => {};
+  const ctx = new Proxy(
+    {},
+    {
+      get: (_t, p) => (typeof p === "string" ? (..._a: unknown[]) => {} : undefined),
+      set: () => true,
+    },
+  );
+  const canvas = { width: 0, height: 0, getContext: () => ctx, setAttribute: () => {} };
+  const orb = new AgentOrb(canvas, { size: 64 });
+  try {
+    assert.equal(orb.energy, 0);
+    orb.setHover(true);
+    for (let i = 0; i < 40; i++) orb.paint(i / 60);
+    assert.ok(orb.energy > 0.9, `energy rises on hover, got ${orb.energy}`);
+    orb.setHover(false);
+    for (let i = 0; i < 80; i++) orb.paint(i / 60);
+    assert.ok(orb.energy < 0.05, `energy settles after hover, got ${orb.energy}`);
+  } finally {
+    orb.destroy();
+  }
 });

@@ -6,9 +6,12 @@ import { test } from "node:test";
 import { ModelRouter } from "../src/hub/models.ts";
 import {
   DEFAULT_VOICE,
+  defaultVoiceFor,
+  isVoiceFor,
   probeVoiceEngineNow,
   sanitizeVoiceText,
   synthesizeVoice,
+  voicesFor,
   VOICE_ALLOWLIST,
   voiceCacheKey,
   voiceEngineReady,
@@ -43,33 +46,74 @@ test("a cached mp3 is served without touching python", async () => {
   const text = "cached reply";
   const file = path.join(cacheDir, `${voiceCacheKey(text, DEFAULT_VOICE)}.mp3`);
   fs.writeFileSync(file, Buffer.from("fake-mp3"));
-  const { file: got, cached } = await synthesizeVoice({ text, voice: DEFAULT_VOICE, cacheDir });
+  const { file: got, cached, mime } = await synthesizeVoice({ text, voice: DEFAULT_VOICE, engine: "edge", cacheDir });
   assert.equal(got, file);
   assert.equal(cached, true);
+  assert.equal(mime, "audio/mpeg");
 });
 
-test("the router defaults to Aria with voice off, and setVoice validates and persists", async () => {
+test("a cached kokoro wav is served without spawning the daemon", async () => {
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "scruff-voice-cache-"));
+  const text = "cached kokoro reply";
+  const file = path.join(cacheDir, `${voiceCacheKey(text, "kokoro:af_heart")}.wav`);
+  fs.writeFileSync(file, Buffer.from("fake-wav"));
+  const { file: got, cached, mime } = await synthesizeVoice({ text, voice: "af_heart", engine: "kokoro", cacheDir });
+  assert.equal(got, file);
+  assert.equal(cached, true);
+  assert.equal(mime, "audio/wav");
+});
+
+test("engine voice helpers route voices to the right engine", () => {
+  assert.ok(voicesFor("edge").includes("en-US-AndrewNeural"));
+  assert.ok(voicesFor("kokoro").includes("af_heart"));
+  assert.ok(!voicesFor("edge").includes("af_heart"));
+  assert.ok(!voicesFor("kokoro").includes("en-US-AndrewNeural"));
+  assert.equal(defaultVoiceFor("edge"), DEFAULT_VOICE);
+  assert.equal(defaultVoiceFor("kokoro"), "af_heart");
+  assert.ok(isVoiceFor("kokoro", "af_heart"));
+  assert.ok(!isVoiceFor("kokoro", "en-US-AndrewNeural"));
+});
+
+test("the router defaults to Andrew with voice off, and setVoice validates engine + voice and persists", async () => {
   const settings = tmpSettings();
   const router = new ModelRouter({}, settings, "medium");
   await router.init({});
   assert.equal(router.voice, DEFAULT_VOICE);
+  assert.equal(router.voiceEngine, "edge");
   assert.equal(router.voiceEnabled, false);
 
   assert.throws(() => router.setVoice("en-US-NotARealVoice", true), /Unknown voice/);
-  router.setVoice("en-US-JennyNeural", true);
-  assert.equal(router.voice, "en-US-JennyNeural");
+  assert.throws(() => router.setVoice("af_heart", true, "edge"), /Unknown voice/);
+  assert.throws(() => router.setVoice("en-US-AndrewNeural", true, "kokoro"), /Unknown voice/);
+  router.setVoice("af_heart", true, "kokoro");
+  assert.equal(router.voice, "af_heart");
+  assert.equal(router.voiceEngine, "kokoro");
   assert.equal(router.voiceEnabled, true);
   const d = router.describe();
-  assert.equal(d.voice, "en-US-JennyNeural");
+  assert.equal(d.voice, "af_heart");
+  assert.equal(d.voiceEngine, "kokoro");
   assert.equal(d.voiceEnabled, true);
+  assert.equal(typeof d.voiceEngines.edge, "boolean");
+  assert.equal(typeof d.voiceEngines.kokoro, "boolean");
   const saved = JSON.parse(fs.readFileSync(settings, "utf8"));
-  assert.equal(saved.voice, "en-US-JennyNeural");
+  assert.equal(saved.voice, "af_heart");
+  assert.equal(saved.voiceEngine, "kokoro");
   assert.equal(saved.voiceEnabled, true);
 
   const again = new ModelRouter({}, settings, "medium");
   await again.init({});
-  assert.equal(again.voice, "en-US-JennyNeural");
+  assert.equal(again.voice, "af_heart");
+  assert.equal(again.voiceEngine, "kokoro");
   assert.equal(again.voiceEnabled, true);
+});
+
+test("a voice saved under a retired list falls back to the engine default", async () => {
+  const settings = tmpSettings();
+  fs.writeFileSync(settings, JSON.stringify({ provider: "claude", model: "x", voice: "en-US-JennyNeural", voiceEnabled: true }));
+  const router = new ModelRouter({}, settings, "medium");
+  await router.init({});
+  assert.equal(router.voice, DEFAULT_VOICE);
+  assert.equal(router.voiceEngine, "edge");
 });
 
 test("every allowlisted voice is a plausible neural voice id", () => {

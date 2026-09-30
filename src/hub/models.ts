@@ -5,7 +5,7 @@ import OpenAI from "openai";
 import type { Brain } from "./agent.ts";
 import { CLAUDE_MODELS, claudeStreamFactory, listClaudeModels, type Effort } from "./providers/anthropic.ts";
 import { openAICompatibleStreamFactory } from "./providers/openai.ts";
-import { DEFAULT_VOICE, VOICE_ALLOWLIST, voiceEngineReady, type VoiceId } from "./voice.ts";
+import { DEFAULT_VOICE, defaultVoiceFor, isVoiceFor, selectedEngineReady, TTS_ENGINES, voiceEnginesReady, type TtsEngine } from "./voice.ts";
 
 export const PROVIDER_IDS = ["claude", "ollama", "lmstudio", "openai"] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];
@@ -19,6 +19,7 @@ export interface Selection {
 export interface SavedSettings extends Selection {
   voice?: string;
   voiceEnabled?: boolean;
+  voiceEngine?: TtsEngine;
 }
 
 export interface ProviderStatus {
@@ -85,7 +86,8 @@ export class ModelRouter {
   private savedKeys: Record<string, string> = {};
   selection: Selection = { provider: "claude", model: "claude-opus-5" };
   /** Neural voice for spoken replies, and whether the overlay speaks them. */
-  voice: VoiceId = DEFAULT_VOICE;
+  voice: string = DEFAULT_VOICE;
+  voiceEngine: TtsEngine = "edge";
   voiceEnabled = false;
 
   constructor(
@@ -135,6 +137,7 @@ export class ModelRouter {
     if (saved) {
       this.selection = saved.selection;
       this.voice = saved.voice;
+      this.voiceEngine = saved.voiceEngine;
       this.voiceEnabled = saved.voiceEnabled;
       return;
     }
@@ -183,15 +186,19 @@ export class ModelRouter {
       ready: !def.missing,
       problem: def.missing,
       voice: this.voice,
+      voiceEngine: this.voiceEngine,
       voiceEnabled: this.voiceEnabled,
-      voiceReady: voiceEngineReady(),
+      voiceReady: selectedEngineReady(this.voiceEngine),
+      voiceEngines: voiceEnginesReady(),
     };
   }
 
-  /** Sets the spoken-reply voice and whether the overlay speaks replies. */
-  setVoice(voice: string, enabled: boolean): void {
-    if (!VOICE_ALLOWLIST.includes(voice as VoiceId)) throw new Error(`Unknown voice ${voice}.`);
-    this.voice = voice as VoiceId;
+  /** Sets the spoken-reply engine + voice and whether the overlay speaks replies. */
+  setVoice(voice: string, enabled: boolean, engine?: TtsEngine): void {
+    const eng: TtsEngine = engine && TTS_ENGINES.includes(engine) ? engine : this.voiceEngine;
+    if (!isVoiceFor(eng, voice)) throw new Error(`Unknown voice ${voice} for ${eng}.`);
+    this.voiceEngine = eng;
+    this.voice = voice;
     this.voiceEnabled = enabled;
     this.save();
   }
@@ -304,14 +311,17 @@ export class ModelRouter {
     }
   }
 
-  private loadSaved(): { selection: Selection; voice: VoiceId; voiceEnabled: boolean } | null {
+  private loadSaved(): { selection: Selection; voice: string; voiceEngine: TtsEngine; voiceEnabled: boolean } | null {
     try {
       const saved = JSON.parse(fs.readFileSync(this.settingsFile, "utf8")) as SavedSettings;
       if (!(PROVIDER_IDS.includes(saved.provider) && typeof saved.model === "string" && saved.model)) return null;
-      const voice = VOICE_ALLOWLIST.includes(saved.voice as VoiceId) ? (saved.voice as VoiceId) : DEFAULT_VOICE;
+      const engine: TtsEngine = TTS_ENGINES.includes(saved.voiceEngine as TtsEngine) ? (saved.voiceEngine as TtsEngine) : "edge";
+      // A voice saved under an older list falls back to that engine's default.
+      const voice = isVoiceFor(engine, saved.voice ?? "") ? (saved.voice as string) : defaultVoiceFor(engine);
       return {
         selection: { provider: saved.provider, model: saved.model },
         voice,
+        voiceEngine: engine,
         voiceEnabled: saved.voiceEnabled === true,
       };
     } catch {
@@ -323,7 +333,7 @@ export class ModelRouter {
   private save(): void {
     try {
       fs.mkdirSync(path.dirname(this.settingsFile), { recursive: true });
-      const settings: SavedSettings = { ...this.selection, voice: this.voice, voiceEnabled: this.voiceEnabled };
+      const settings: SavedSettings = { ...this.selection, voice: this.voice, voiceEnabled: this.voiceEnabled, voiceEngine: this.voiceEngine };
       fs.writeFileSync(this.settingsFile, JSON.stringify(settings, null, 2));
     } catch {
       // not fatal: the choice just won't survive a restart

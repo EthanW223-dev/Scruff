@@ -20,10 +20,12 @@ import {
   probeVoiceEngine,
   probeVoiceEngineNow,
   sanitizeVoiceText,
+  stopKokoroDaemon,
   synthesizeVoice,
-  VOICE_ALLOWLIST,
+  defaultVoiceFor,
+  isVoiceFor,
   VoiceError,
-  type VoiceId,
+  type TtsEngine,
 } from "./voice.ts";
 
 export interface ServerOptions {
@@ -225,7 +227,8 @@ export async function startServer(opts: ServerOptions): Promise<http.Server> {
         if (!router) throw new Error("This Telos can't change voices.");
         const voice = String(msg.voice ?? "");
         const enabled = msg.enabled !== false;
-        router.setVoice(voice, enabled);
+        const engine = msg.engine === "kokoro" ? "kokoro" : "edge";
+        router.setVoice(voice, enabled, engine);
         toast(
           ws,
           enabled ? `Voice replies on (${voice}).` : "Voice replies off.",
@@ -393,17 +396,19 @@ export async function startServer(opts: ServerOptions): Promise<http.Server> {
       return;
     }
     if (url.pathname === "/voice/say") {
-      // Spoken replies: text in, mp3 out (cached). The overlay plays these on turn_end.
+      // Spoken replies: text in, audio out (cached). The dashboard streams
+      // these sentence-by-sentence while the reply is still arriving.
       const clean = sanitizeVoiceText(url.searchParams.get("text") ?? "");
       if (!clean) {
         res.writeHead(400, { "content-type": "text/plain; charset=utf-8" }).end("Nothing to say.");
         return;
       }
-      const wanted = url.searchParams.get("voice") ?? router?.voice ?? process.env.SCRUFF_VOICE ?? DEFAULT_VOICE;
-      const voice: VoiceId = VOICE_ALLOWLIST.includes(wanted as VoiceId) ? (wanted as VoiceId) : DEFAULT_VOICE;
-      synthesizeVoice({ text: clean, voice, cacheDir: path.join(opts.dataDir, "voice") })
-        .then(({ file }) => {
-          res.writeHead(200, { "content-type": "audio/mpeg", "cache-control": "public, max-age=86400" });
+      const engine: TtsEngine = url.searchParams.get("engine") === "kokoro" ? "kokoro" : "edge";
+      const wanted = url.searchParams.get("voice") ?? (engine === router?.voiceEngine ? router?.voice : undefined) ?? process.env.SCRUFF_VOICE ?? defaultVoiceFor(engine);
+      const voice = isVoiceFor(engine, wanted) ? wanted : defaultVoiceFor(engine);
+      synthesizeVoice({ text: clean, voice, engine, cacheDir: path.join(opts.dataDir, "voice") })
+        .then(({ file, mime }) => {
+          res.writeHead(200, { "content-type": mime, "cache-control": "public, max-age=86400" });
           fs.createReadStream(file).pipe(res);
         })
         .catch((err) => {
@@ -463,6 +468,10 @@ export async function startServer(opts: ServerOptions): Promise<http.Server> {
 
   return new Promise((resolve, reject) => {
     server.once("error", reject);
+    server.once("close", () => {
+      clearInterval(probeTimer);
+      stopKokoroDaemon();
+    });
     server.listen(opts.port, opts.host, () => resolve(server));
   });
 }

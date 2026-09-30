@@ -12,7 +12,7 @@ import {
   resolveDeviceId,
   setMicId,
   setSpeakerId,
-  shouldSpeakReply,
+  SpeechStreamer,
   supportsSpeakerSelect,
   unlockDeviceLabels,
 } from "./audio.js";
@@ -202,6 +202,14 @@ function renderAgentEvent(event, replay) {
       turnText = "";
       const turn = ensureTurn();
       if (!replay) turn.root.classList.add("active", "fresh");
+      // Start streaming speech alongside the typing when voice replies are on.
+      // The overlay owns playback in overlay mode, so the tab stays silent there.
+      if (willSpeakReply(replay)) {
+        warnEngineIfMissing();
+        streamer.start();
+      } else {
+        streamer.stop();
+      }
       break;
     }
     case "thinking": {
@@ -226,6 +234,9 @@ function renderAgentEvent(event, replay) {
       turnText += event.text;
       renderMarkdown(turn.text, turn.text.dataset.raw);
       scrollToEnd();
+      // Speak this delta's finished sentences now — the voice runs in parallel
+      // with the typing instead of waiting for turn_end.
+      streamer.push(event.text);
       break;
     }
     case "tool_call": {
@@ -269,10 +280,9 @@ function renderAgentEvent(event, replay) {
         settleThinking(currentTurn);
         currentTurn.root.classList.remove("active");
       }
-      // Spoken replies need the neural voice enabled in the AI menu. In the
-      // in-game overlay the HUD owns playback (overlay.js) so we stay silent here.
-      if (shouldSpeakReply({ replay, voiceEnabled: voiceState.enabled, speakChecked: $("speak").checked, overlayMode: Boolean(overlay), text: turnText }))
-        speakNeural(turnText);
+      // Flush the last partial sentence; the streamer has been speaking the
+      // reply in parallel since the first sentences arrived.
+      streamer.finish();
       currentTurn = null;
       break;
   }
@@ -497,24 +507,49 @@ const PROVIDER_META = {
 };
 const JEV_LOGO = "logos/typesafe.svg";
 
-const VOICE_OPTIONS = [
-  { id: "en-US-AriaNeural", name: "Aria", desc: "Warm and natural" },
-  { id: "en-US-JennyNeural", name: "Jenny", desc: "Friendly and upbeat" },
-  { id: "en-US-GuyNeural", name: "Guy", desc: "Deep and calm" },
-  { id: "en-GB-SoniaNeural", name: "Sonia", desc: "British, crisp" },
+const VOICE_ENGINES = [
+  { id: "edge", name: "Edge", desc: "Microsoft neural · instant" },
+  { id: "kokoro", name: "Kokoro", desc: "Local AI · most human" },
 ];
+// Per-engine voices. Edge's Andrew/Ava are the newest conversational voices;
+// Kokoro is a local 82M model — the most human free option, runs on the PC.
+const VOICE_OPTIONS = {
+  edge: [
+    { id: "en-US-AndrewNeural", name: "Andrew", desc: "Most natural conversational" },
+    { id: "en-US-AvaNeural", name: "Ava", desc: "Warm, expressive" },
+    { id: "en-US-AriaNeural", name: "Aria", desc: "Friendly" },
+    { id: "en-US-BrianNeural", name: "Brian", desc: "Steady narrator" },
+    { id: "en-GB-RyanNeural", name: "Ryan", desc: "British, calm" },
+    { id: "en-GB-SoniaNeural", name: "Sonia", desc: "British, crisp" },
+  ],
+  kokoro: [
+    { id: "af_heart", name: "Heart", desc: "Warm female" },
+    { id: "af_bella", name: "Bella", desc: "Bright female" },
+    { id: "af_sarah", name: "Sarah", desc: "Smooth female" },
+    { id: "am_adam", name: "Adam", desc: "Deep male" },
+    { id: "am_michael", name: "Michael", desc: "Steady male" },
+    { id: "bf_emma", name: "Emma", desc: "British female" },
+  ],
+};
 const voiceSample = (name) => `Hey Ethan, I'm ${name}, and this is how I sound.`;
 
 // Neural-voice spoken-reply state, from the hub. Single source of truth for
 // "should Telos talk back with the human voice". The composer checkbox mirrors it.
-const voiceState = { name: VOICE_OPTIONS[0].id, enabled: false, ready: true };
+const voiceState = { engine: "edge", name: VOICE_OPTIONS.edge[0].id, enabled: false, ready: true, engines: { edge: true, kokoro: false } };
+function engineReady(id) {
+  return id === "kokoro" ? voiceState.engines.kokoro : voiceState.ready;
+}
 function syncVoiceState(ai) {
   if (!ai) return;
-  if (ai.voice) voiceState.name = ai.voice;
+  if (ai.voiceEngine === "kokoro" || ai.voiceEngine === "edge") voiceState.engine = ai.voiceEngine;
+  const options = VOICE_OPTIONS[voiceState.engine];
+  if (ai.voice && options.some((v) => v.id === ai.voice)) voiceState.name = ai.voice;
+  else if (!options.some((v) => v.id === voiceState.name)) voiceState.name = options[0].id;
   voiceState.enabled = Boolean(ai.voiceEnabled);
   // Older hubs don't send voiceReady; assume the engine is there rather than
   // flashing a bogus warning.
   voiceState.ready = ai.voiceReady !== false;
+  if (ai.voiceEngines) voiceState.engines = { edge: ai.voiceEngines.edge !== false, kokoro: ai.voiceEngines.kokoro === true };
   const speak = $("speak");
   if (speak) speak.checked = voiceState.enabled;
 }
@@ -573,11 +608,40 @@ function renderVoiceSection() {
 function renderVoice(voice, enabled) {
   const row = $("voice-row");
   row.replaceChildren();
+  const engine = voiceState.engine;
+  const options = VOICE_OPTIONS[engine];
 
-  // The voice engine lives on the PC (edge-tts). Say so plainly when it's
+  // Which engine renders the speech. Kokoro is local and the most human;
+  // Edge is instant and needs no install beyond edge-tts.
+  const engineRow = el("div", "voice-engines");
+  engineRow.setAttribute("role", "radiogroup");
+  engineRow.setAttribute("aria-label", "Voice engine");
+  VOICE_ENGINES.forEach((e) => {
+    const b = el("button", `voice-engine${e.id === engine ? " sel" : ""}`);
+    b.type = "button";
+    b.setAttribute("role", "radio");
+    b.setAttribute("aria-checked", String(e.id === engine));
+    b.title = e.id === "kokoro" && !voiceState.engines.kokoro ? "Not installed yet — pick it and press play to get the install hint" : e.desc;
+    b.append(el("span", "voice-engine-name", e.name), el("span", "voice-engine-desc", e.id === "kokoro" && !voiceState.engines.kokoro ? `${e.desc} · needs install` : e.desc));
+    b.addEventListener("click", () => {
+      send({ type: "set_voice", engine: e.id, voice: VOICE_OPTIONS[e.id][0].id, enabled: cb.checked });
+    });
+    engineRow.append(b);
+  });
+  row.append(engineRow);
+
+  // The voice engine lives on the PC. Say so plainly when the selected one is
   // missing — picking a voice still works, samples and replies just can't play.
-  if (!voiceState.ready) {
-    row.append(el("p", "voice-warn", "Voice engine not found — run: python -m pip install edge-tts, or set SCRUFF_PYTHON in .env to the python that has it"));
+  if (!engineReady(engine)) {
+    row.append(
+      el(
+        "p",
+        "voice-warn",
+        engine === "kokoro"
+          ? "Kokoro isn't installed on the PC yet — run: python -m pip install kokoro-onnx espeakng_loader (SCRUFF_PYTHON's python), then restart Telos"
+          : "Voice engine not found — run: python -m pip install edge-tts, or set SCRUFF_PYTHON in .env to the python that has it",
+      ),
+    );
   }
 
   const label = el("label", "voice-toggle");
@@ -594,16 +658,26 @@ function renderVoice(voice, enabled) {
   list.setAttribute("aria-label", "Voice");
   /** Play a sample and say plainly why it failed (engine missing) instead of going silent. */
   const sample = (v) => {
-    if (!voiceState.ready) {
-      toast("Voice engine not found — run: python -m pip install edge-tts, or set SCRUFF_PYTHON in .env to the python that has it", "error");
+    if (!engineReady(engine)) {
+      toast(
+        engine === "kokoro"
+          ? "Kokoro isn't installed on the PC yet — run: python -m pip install kokoro-onnx espeakng_loader, then restart Telos"
+          : "Voice engine not found — run: python -m pip install edge-tts, or set SCRUFF_PYTHON in .env to the python that has it",
+        "error",
+      );
       return;
     }
-    const audio = playVoiceSample(v.id, voiceSample(v.name));
+    const audio = playVoiceSample(engine, v.id, voiceSample(v.name));
     audio.addEventListener("error", () => {
-      toast("Couldn't play the sample — the hub can't find edge-tts (set SCRUFF_PYTHON in .env to the right python)", "error");
+      toast(
+        engine === "kokoro"
+          ? "Couldn't play the sample — Kokoro isn't installed (python -m pip install kokoro-onnx espeakng_loader)"
+          : "Couldn't play the sample — the hub can't find edge-tts (set SCRUFF_PYTHON in .env to the right python)",
+        "error",
+      );
     });
   };
-  VOICE_OPTIONS.forEach((v, i) => {
+  options.forEach((v, i) => {
     const b = el("div", "voice-option");
     b.setAttribute("role", "radio");
     b.setAttribute("tabindex", "0");
@@ -622,7 +696,7 @@ function renderVoice(voice, enabled) {
     });
     b.append(names, play);
     const choose = () => {
-      send({ type: "set_voice", voice: v.id, enabled: cb.checked });
+      send({ type: "set_voice", engine, voice: v.id, enabled: cb.checked });
       sample(v);
     };
     b.addEventListener("click", choose);
@@ -641,7 +715,7 @@ function renderVoice(voice, enabled) {
     list.append(b);
   });
   row.append(list);
-  cb.addEventListener("change", () => send({ type: "set_voice", voice, enabled: cb.checked }));
+  cb.addEventListener("change", () => send({ type: "set_voice", engine, voice, enabled: cb.checked }));
 
   // Local audio devices: which mic push-to-talk uses, which speaker replies play on.
   const audioRow = el("div", "device-rows");
@@ -1372,34 +1446,39 @@ if (localVoice) {
 }
 
 // Spoken replies, neural-voice edition: the hub's /voice/say endpoint with the
-// chosen voice, routed to the selected speaker. This is the human voice the
-// AI menu configures — no more robot speechSynthesis.
-let replyAudio = null;
+// chosen engine + voice, routed to the selected speaker. This is the human
+// voice the AI menu configures — no more robot speechSynthesis.
+//
+// Replies stream sentence-by-sentence: the voice starts while the text is still
+// arriving instead of waiting for the whole reply, so speech keeps pace with
+// the typing.
+const streamer = new SpeechStreamer({
+  makeUrl: (sentence) =>
+    `/voice/say?engine=${encodeURIComponent(voiceState.engine)}&voice=${encodeURIComponent(voiceState.name)}&text=${encodeURIComponent(sentence.slice(0, 600))}`,
+});
 
 /** Stop whatever reply audio is currently playing (mic is about to open, etc.). */
 function stopSpokenReply() {
-  if (replyAudio) {
-    replyAudio.pause();
-    replyAudio = null;
-  }
+  streamer.stop();
 }
 
-async function speakNeural(text) {
-  stopSpokenReply();
-  if (!voiceState.ready) {
-    toast("Voice engine not found — run: python -m pip install edge-tts, or set SCRUFF_PYTHON in .env to the python that has it", "error");
-    return;
+/** True when this turn's reply should be spoken as it streams in. */
+function willSpeakReply(replay) {
+  return !replay && voiceState.enabled && $("speak")?.checked !== false && !overlay;
+}
+
+/** Warn once per turn if the selected engine is missing, instead of failing silently. */
+let warnedEngine = "";
+function warnEngineIfMissing() {
+  if (!engineReady(voiceState.engine) && warnedEngine !== voiceState.engine) {
+    warnedEngine = voiceState.engine;
+    toast(
+      voiceState.engine === "kokoro"
+        ? "Kokoro isn't installed on the PC yet — run: python -m pip install kokoro-onnx espeakng_loader, then restart Telos"
+        : "Voice engine not found — run: python -m pip install edge-tts, or set SCRUFF_PYTHON in .env to the python that has it",
+      "error",
+    );
   }
-  const audio = new Audio(`/voice/say?voice=${encodeURIComponent(voiceState.name)}&text=${encodeURIComponent(text.slice(0, 600))}`);
-  replyAudio = audio;
-  audio.addEventListener("error", () => {
-    toast("Couldn't play the voice reply — the hub can't find edge-tts (set SCRUFF_PYTHON in .env to the right python)", "error");
-  });
-  audio.addEventListener("ended", () => {
-    if (replyAudio === audio) replyAudio = null;
-  });
-  await applySpeaker(audio, getSpeakerId());
-  audio.play().catch(() => {});
 }
 
 // ---------- composer ----------
@@ -1441,8 +1520,14 @@ document.addEventListener("keydown", (e) => {
     else togglePushToTalk();
   }
 });
-$("stop").addEventListener("click", () => send({ type: "stop" }));
-$("new-chat").addEventListener("click", () => send({ type: "reset" }));
+$("stop").addEventListener("click", () => {
+  streamer.stop();
+  send({ type: "stop" });
+});
+$("new-chat").addEventListener("click", () => {
+  streamer.stop();
+  send({ type: "reset" });
+});
 $("revert-all").addEventListener("click", () => send({ type: "revert_all" }));
 $("game-chip").addEventListener("click", openPicker);
 $("screen-chip").addEventListener("click", toggleScreen);

@@ -117,10 +117,142 @@ export async function applySpeaker(audio, speakerId) {
 }
 
 /** Plays a neural-voice sample through /voice/say on the chosen speaker. */
-export function playVoiceSample(voiceId, text) {
-  const audio = new Audio(`/voice/say?voice=${encodeURIComponent(voiceId)}&text=${encodeURIComponent(text)}`);
+export function playVoiceSample(engine, voiceId, text) {
+  const audio = new Audio(
+    `/voice/say?engine=${encodeURIComponent(engine)}&voice=${encodeURIComponent(voiceId)}&text=${encodeURIComponent(text)}`,
+  );
   applySpeaker(audio, getSpeakerId()).finally(() => audio.play().catch(() => {}));
   return audio;
+}
+
+/**
+ * Speaks a streaming reply sentence-by-sentence so the voice starts while the
+ * text is still arriving, instead of waiting for the whole reply. Text deltas
+ * go in via push(); finish() flushes the tail; stop() cancels everything.
+ *
+ * Each finished sentence becomes one /voice/say request; playback is strictly
+ * sequential, and the next sentence is fetched while the current one plays, so
+ * the voice keeps pace with the typing instead of lagging a full reply behind.
+ */
+export class SpeechStreamer {
+  constructor({ makeUrl, onSpeaking }) {
+    this.makeUrl = makeUrl; // (sentence) => /voice/say url
+    this.onSpeaking = onSpeaking ?? (() => {}); // (bool) HUD "Speaking…" indicator
+    this.buf = "";
+    this.inCode = false; // inside a ``` fence: don't read code out loud
+    this.queue = [];
+    this.current = null;
+    this.finished = false;
+    this.active = false;
+  }
+  reset() {
+    this.stop();
+    this.buf = "";
+    this.inCode = false;
+    this.queue = [];
+    this.current = null;
+    this.finished = false;
+  }
+  start() {
+    this.reset();
+    this.active = true;
+  }
+  /** Feed a streamed text delta. Emits newly completed sentences into the queue. */
+  push(delta) {
+    if (!this.active) return;
+    for (const sentence of SpeechStreamer.extract(this, String(delta ?? ""))) this.enqueue(sentence);
+  }
+  /** The reply is done: speak whatever is left, then go quiet. */
+  finish() {
+    if (!this.active) return;
+    this.finished = true;
+    const tail = this.buf.trim();
+    this.buf = "";
+    if (tail.length >= 2) this.enqueue(tail);
+    this.pump();
+  }
+  stop() {
+    this.active = false;
+    this.finished = false;
+    this.queue.length = 0;
+    if (this.current) {
+      this.current.pause();
+      this.current = null;
+    }
+    this.onSpeaking(false);
+  }
+  get speaking() {
+    return this.active && (this.current !== null || this.queue.length > 0 || !this.finished);
+  }
+  enqueue(sentence) {
+    const text = sentence.trim();
+    if (text.length < 2) return;
+    this.queue.push(text);
+    this.pump();
+  }
+  pump() {
+    if (!this.active || this.current || !this.queue.length) {
+      if (this.active && this.finished && !this.current && !this.queue.length) this.active = false;
+      return;
+    }
+    const text = this.queue.shift();
+    const audio = new Audio(this.makeUrl(text));
+    this.current = audio;
+    this.onSpeaking(true);
+    // Prefetch the following sentence while this one plays, hiding TTS latency.
+    if (this.queue.length) {
+      const next = new Audio(this.makeUrl(this.queue[0]));
+      next.preload = "auto";
+      try {
+        next.load();
+      } catch {
+        /* preload is best-effort */
+      }
+    }
+    const done = () => {
+      if (this.current === audio) {
+        this.current = null;
+        this.pump();
+        if (!this.speaking) this.onSpeaking(false);
+      }
+    };
+    audio.addEventListener("ended", done);
+    audio.addEventListener("error", done); // a failed sentence shouldn't stall the rest
+    applySpeaker(audio, getSpeakerId()).finally(() => audio.play().catch(done));
+  }
+  /**
+   * Stateful sentence splitter. Tracks ``` fences on the streamer so code is
+   * never spoken; returns the newly completed sentences for this delta.
+   */
+  static extract(st, delta) {
+    st.buf += delta;
+    const out = [];
+    for (;;) {
+      if (st.inCode) {
+        const end = st.buf.indexOf("```");
+        if (end < 0) {
+          st.buf = ""; // swallow code until the fence closes
+          return out;
+        }
+        st.buf = st.buf.slice(end + 3);
+        st.inCode = false;
+        continue;
+      }
+      const fence = st.buf.indexOf("```");
+      const m = /[.!?…]["'”)]?\s+/.exec(st.buf);
+      const cut = m ? m.index + m[0].length : -1;
+      if (fence >= 0 && (cut < 0 || fence < cut)) {
+        const head = st.buf.slice(0, fence).trim();
+        if (head.length >= 2) out.push(head);
+        st.buf = st.buf.slice(fence + 3);
+        st.inCode = true;
+        continue;
+      }
+      if (cut < 0) return out;
+      out.push(st.buf.slice(0, cut).trim());
+      st.buf = st.buf.slice(cut);
+    }
+  }
 }
 
 export function onDeviceChange(cb) {

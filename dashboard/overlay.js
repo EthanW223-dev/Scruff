@@ -2,7 +2,7 @@
 // as little windows, and the values it's holding. Everything is click-through except the button;
 // the full panel opens with a hotkey or a click on it. The button is draggable (see below).
 
-import { applySpeaker, getSpeakerId } from "./audio.js";
+import { SpeechStreamer } from "./audio.js";
 
 const $ = (id) => document.getElementById(id);
 const MAX_TOASTS = 4;
@@ -30,11 +30,11 @@ export function startHud({ toolLabel }) {
   let reply = null;
   let replyText = "";
   let keys = "";
-  // Spoken replies: which neural voice, and whether they're on (from the hello/models message).
+  // Spoken replies: which neural engine + voice, and whether they're on (from the hello/models message).
   let voiceEnabled = false;
-  let voiceName = "en-US-AriaNeural";
+  let voiceEngine = "edge";
+  let voiceName = "en-US-AndrewNeural";
   let voiceReady = true; // older hubs don't send it; don't nag when it's absent
-  let ttsAudio = null;
 
   bridge.hotkeys().then(({ panel, talk }) => {
     keys = `Open: ${pretty(panel)}  ·  Talk: ${pretty(talk)}`;
@@ -84,30 +84,26 @@ export function startHud({ toolLabel }) {
     window.dispatchEvent(new CustomEvent("scruff", { detail: { type: "voice_status", text: on ? "Speaking…" : "" } }));
   }
 
-  /** Plays a spoken reply through the hub's /voice/say TTS route. Never called for errors/notices. */
-  async function speakReply(text) {
-    if (ttsAudio) ttsAudio.pause();
-    if (!voiceReady) {
-      toast("Voice engine not installed — run: python -m pip install edge-tts", "error");
-      return;
+  // Sentence-by-sentence speech: the voice starts while the reply is still
+  // streaming in, keeping pace with the text instead of lagging a full reply.
+  const streamer = new SpeechStreamer({
+    makeUrl: (sentence) =>
+      `/voice/say?engine=${encodeURIComponent(voiceEngine)}&voice=${encodeURIComponent(voiceName)}&text=${encodeURIComponent(sentence.slice(0, 600))}`,
+    onSpeaking: setSpeaking,
+  });
+
+  /** Warn once per turn when the selected engine is missing. */
+  let warnedEngine = "";
+  function warnEngineIfMissing() {
+    if (!voiceReady && warnedEngine !== voiceEngine) {
+      warnedEngine = voiceEngine;
+      toast(
+        voiceEngine === "kokoro"
+          ? "Kokoro isn't installed on the PC yet — run: python -m pip install kokoro-onnx espeakng_loader, then restart Telos"
+          : "Voice engine not installed — run: python -m pip install edge-tts",
+        "error",
+      );
     }
-    const audio = new Audio(`/voice/say?voice=${encodeURIComponent(voiceName)}&text=${encodeURIComponent(text.slice(0, 600))}`);
-    ttsAudio = audio;
-    setSpeaking(true);
-    const done = () => {
-      if (ttsAudio === audio) {
-        ttsAudio = null;
-        setSpeaking(false);
-      }
-    };
-    audio.addEventListener("ended", done);
-    audio.addEventListener("error", () => {
-      toast("Couldn't play the voice reply — run: python -m pip install edge-tts", "error");
-      done();
-    });
-    // Honor the chosen speaker (no-op where the browser lacks setSinkId).
-    await applySpeaker(audio, getSpeakerId());
-    audio.play().catch(done);
   }
 
   /** Little pop on the orb each time a batch of reply text lands (throttled). */
@@ -127,6 +123,7 @@ export function startHud({ toolLabel }) {
         toast(e.text, "you", 6000);
         reply = null;
         replyText = "";
+        streamer.stop();
         break;
       case "turn_start":
         busy = true;
@@ -141,9 +138,18 @@ export function startHud({ toolLabel }) {
         if (replyText && !/\s$/.test(replyText)) replyText += " ";
         break;
       case "text":
-        if (!reply) reply = toast("", "", 0);
+        if (!reply) {
+          reply = toast("", "", 0);
+          // Speak the reply as it streams: only the overlay plays here, never a browser tab.
+          const speakChecked = document.getElementById("speak")?.checked !== false;
+          if (overlayMode && voiceEnabled && speakChecked) {
+            warnEngineIfMissing();
+            streamer.start();
+          }
+        }
         replyText += e.text;
         reply.querySelector(".body").textContent = replyText.replace(/\*\*|`/g, "");
+        streamer.push(e.text);
         pop();
         break;
       case "error":
@@ -156,16 +162,13 @@ export function startHud({ toolLabel }) {
         busy = false;
         working = "";
         {
-          const said = replyText.trim();
           if (reply) fadeOut(reply, 8000 + Math.min(12000, replyText.length * 40));
           reply = null;
           replyText = "";
           idle();
-          // Spoken replies, overlay mode only: a browser dashboard tab must never double-play.
-          // Errors and notices never reach here; only the assistant's reply text does.
-          // The composer checkbox is a second surface for the same setting; respect it.
-          const speakChecked = document.getElementById("speak")?.checked !== false;
-          if (overlayMode && voiceEnabled && speakChecked && said) speakReply(said);
+          // The streamer has been speaking the reply sentence-by-sentence as
+          // it arrived; flush the tail. Errors and notices never reach here.
+          streamer.finish();
         }
         break;
     }
@@ -193,6 +196,7 @@ export function startHud({ toolLabel }) {
       const ai = msg.type === "hello" ? msg.ai : msg.current;
       if (ai) {
         voiceEnabled = Boolean(ai.voiceEnabled);
+        voiceEngine = ai.voiceEngine === "kokoro" ? "kokoro" : "edge";
         voiceName = ai.voice || voiceName;
         voiceReady = ai.voiceReady !== false;
       }
@@ -211,7 +215,7 @@ export function startHud({ toolLabel }) {
   window.addEventListener("scruff:voice", (e) => {
     listening = e.detail === "listening";
     // Don't let a spoken reply bleed into the new recording.
-    if (listening && ttsAudio) ttsAudio.pause();
+    if (listening) streamer.stop();
     idle();
   });
   window.addEventListener("scruff:toast", (e) => toast(e.detail.text, e.detail.level === "error" ? "error" : "step", 5000));

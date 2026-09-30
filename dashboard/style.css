@@ -471,6 +471,8 @@ textarea:focus { box-shadow: 3px 3px 0 var(--accent); }
   .cursor, .spin { animation: none; }
   .provider-card, .connect-panel { animation: none; transition: none; }
   .hud-button, .orb, .orb-canvas { animation: none !important; }
+  .hud-toast.from-orb { animation: none !important; }
+  .hud-button.morph .orb-canvas { animation: none !important; }
   .msg.fresh, .msg.fresh .bubble, .turn.active .text, .thinking summary,
   .primary, .primary.launch, textarea:focus, .turn.active::after { animation: none !important; transition: none !important; }
 }
@@ -612,13 +614,34 @@ body[data-corner^="bottom"] .hud { bottom: 16px; flex-direction: column-reverse;
   35% { transform: scale(1.2); }
   100% { transform: scale(1); }
 }
+/* The orb pours itself into the reply text: a quick dip as the card blooms. */
+.hud-button.morph .orb-canvas { animation: orb-pour 0.6s ease; }
+@keyframes orb-pour {
+  0% { transform: scale(1); }
+  35% { transform: scale(0.55); }
+  70% { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
 .hud-mods { display: flex; flex-wrap: wrap; gap: 6px; }
 body[data-corner$="right"] .hud-mods { justify-content: flex-end; }
 .hud-mod { padding: 3px 8px; background: var(--bar); color: var(--bar-ink); font: 12px var(--mono); box-shadow: 2px 2px 0 var(--shadow); }
 .hud-mod b { margin-left: 2px; padding: 0 4px; background: var(--accent); color: var(--accent-ink); font-weight: 600; }
 .hud-toasts { display: flex; flex-direction: column; gap: 8px; }
 body[data-corner^="bottom"] .hud-toasts { flex-direction: column-reverse; }
-.hud-toast { width: min(380px, calc(100vw - 32px)); background: var(--bg); color: var(--text); border: 1px solid var(--line); box-shadow: 4px 4px 0 var(--shadow); transition: opacity 0.5s steps(4); }
+.hud-toast { position: relative; width: min(380px, calc(100vw - 32px)); background: var(--bg); color: var(--text); border: 1px solid var(--line); box-shadow: 4px 4px 0 var(--shadow); transition: opacity 0.5s steps(4); }
+/* The reply card blooms out of the orb (JS sets transform-origin toward it). */
+.hud-toast.from-orb { animation: toast-emerge 0.45s cubic-bezier(.2,.9,.25,1.15); }
+@keyframes toast-emerge {
+  0% { transform: scale(0.6) translateY(10px); opacity: 0; }
+  100% { transform: scale(1) translateY(0); opacity: 1; }
+}
+/* The orb becomes the text but stays: a small live orb rides the reply card's
+   corner, mirroring the HUD orb so mic state is always readable. */
+.hud-toast .mini-orb {
+  position: absolute; top: -15px; left: -15px; z-index: 2;
+  width: 30px; height: 30px; border-radius: 50%;
+  background: var(--bg); border: 1px solid var(--line);
+}
 .hud-toast .win-bar { height: 20px; font-size: 17px; padding: 0 8px; }
 .hud-toast .body { padding: 7px 10px; font-size: 14.5px; line-height: 1.45; }
 .hud-toast.you .win-bar { background: var(--surface-2); color: var(--muted); }

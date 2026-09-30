@@ -27,10 +27,15 @@ export function startHud({ toolLabel }) {
   let game = null;
   let busy = false;
   let working = "";
+  let toolOrb = null; // the tool-driven orb animation (searching/solving/working),
+  // kept while background work runs so game state ticks don't stomp it
   let listening = false;
   let voice = "";
   let reply = null;
   let replyText = "";
+  let miniOrb = null; // small live orb riding on the reply card: the orb becomes
+  // the text but stays visible, so mic state is always readable
+  let orbTint = null; // current ink tint, mirrored onto the mini orb
   let keys = "";
   let shapeTimer = 0; // reverts the shaping flash after a mod lands
   // Spoken replies: which neural engine + voice, and whether they're on (from the hello/models message).
@@ -46,17 +51,26 @@ export function startHud({ toolLabel }) {
 
   // The button has no text: its state shows as a frame around it, the details in its tooltip.
   // Each mode also melts the orb into its matching thinking-orbs animation.
+  // setOrb drives the HUD orb and the reply card's mini orb together, so the
+  // mini one always mirrors the live state (notably: listening while he talks).
   const ORB_FOR_MODE = { idle: "breathing", listening: "listening", busy: "composing" };
+  function setOrb(state) {
+    orb.setState(state);
+    miniOrb?.setState(state);
+  }
   function status(text, mode = "idle", orbState = null) {
     hud.dataset.mode = mode;
-    orb.setState(orbState ?? ORB_FOR_MODE[mode] ?? "breathing");
+    setOrb(orbState ?? ORB_FOR_MODE[mode] ?? "breathing");
     button.title = [text, keys].filter(Boolean).join("\n");
     button.setAttribute("aria-label", text);
   }
   function idle() {
     if (listening) return status("Listening…", "listening");
     if (voice) return status(voice, "busy");
-    if (busy) return status(working || "Thinking…", "busy");
+    // Busy with background work: keep the tool's own animation (searching /
+    // solving / working) instead of falling back to composing, and keep the
+    // weaving melt while reply text is streaming in.
+    if (busy) return status(working || "Thinking…", "busy", reply ? "weaving" : toolOrb);
     status(game ? `Telos · ${game}` : "Telos");
   }
 
@@ -78,10 +92,13 @@ export function startHud({ toolLabel }) {
     if (ms) fadeOut(t, ms);
     return t;
   }
-  function fadeOut(t, ms) {
+  function fadeOut(t, ms, onRemove) {
     setTimeout(() => {
       t.classList.add("fade");
-      setTimeout(() => t.remove(), 700);
+      setTimeout(() => {
+        t.remove();
+        onRemove?.();
+      }, 700);
     }, ms);
   }
 
@@ -139,16 +156,38 @@ export function startHud({ toolLabel }) {
       case "tool_call":
         busy = true;
         working = `${toolLabel(e.name, e.input)}…`;
-        // The orb matches the tool: searching, solving, or plain working.
-        status(working, "busy", /search/i.test(e.name) ? "searching" : /solve|plan/i.test(e.name) ? "solving" : "working");
+        // The orb matches the tool: searching, solving, or plain working. This
+        // is remembered in toolOrb so the animation survives game state ticks
+        // until the turn ends.
+        toolOrb = /search/i.test(e.name) ? "searching" : /solve|plan/i.test(e.name) ? "solving" : "working";
+        status(working, "busy", toolOrb);
         // Text before and after a tool call are separate thoughts.
         if (replyText && !/\s$/.test(replyText)) replyText += " ";
         break;
       case "text":
         if (!reply) {
           reply = toast("", "", 0);
+          // The orb transforms into the text: the card blooms out of the
+          // button's spot, the button orb pours itself into it — but the orb
+          // stays right there, live, so it's always clear when he's speaking.
+          reply.classList.add("from-orb");
+          try {
+            const r = button.getBoundingClientRect();
+            reply.style.transformOrigin = `${r.left + r.width / 2 < window.innerWidth / 2 ? "left" : "right"} center`;
+          } catch {}
+          button.classList.remove("morph");
+          void button.offsetWidth; // restart the animation
+          button.classList.add("morph");
+          button.addEventListener("animationend", () => button.classList.remove("morph"), { once: true });
+          // A small live orb rides on the reply card, mirroring the HUD orb.
+          const mini = document.createElement("canvas");
+          mini.className = "mini-orb";
+          mini.setAttribute("aria-hidden", "true");
+          reply.prepend(mini);
+          miniOrb = new AgentOrb(mini, { size: 32, dark: true });
+          miniOrb.setColor(orbTint);
           // The reply is being woven together: melt into the weaving orb.
-          orb.setState("weaving");
+          setOrb("weaving");
           // Speak the reply as it streams: only the overlay plays here, never a browser tab.
           const speakChecked = document.getElementById("speak")?.checked !== false;
           if (overlayMode && voiceEnabled && speakChecked) {
@@ -170,8 +209,15 @@ export function startHud({ toolLabel }) {
       case "turn_end":
         busy = false;
         working = "";
+        toolOrb = null;
         {
-          if (reply) fadeOut(reply, 8000 + Math.min(12000, replyText.length * 40));
+          const card = reply;
+          const cardOrb = miniOrb;
+          if (card)
+            fadeOut(card, 8000 + Math.min(12000, replyText.length * 40), () => {
+              cardOrb?.destroy();
+              if (miniOrb === cardOrb) miniOrb = null;
+            });
           reply = null;
           replyText = "";
           idle();
@@ -216,7 +262,11 @@ export function startHud({ toolLabel }) {
       // The orb's ink: black & white on the default theme, the game's accent
       // color once the game has a theme of its own. (The page's --accent is
       // already handled by applyTheme in app.js; this is the canvas ink.)
-      if (msg.theme) orb.setColor(msg.theme.source === "default" ? null : msg.theme.accent);
+      if (msg.theme) {
+        orbTint = msg.theme.source === "default" ? null : msg.theme.accent;
+        orb.setColor(orbTint);
+        miniOrb?.setColor(orbTint);
+      }
       idle();
     } else if (msg.type === "voice_status") {
       voice = msg.text;
@@ -224,7 +274,7 @@ export function startHud({ toolLabel }) {
     } else if (msg.type === "game_event") {
       toast(msg.event.text, "step", 5000);
       // A mod just landed on the game: flash the shaping orb, then settle back.
-      orb.setState("shaping");
+      setOrb("shaping");
       clearTimeout(shapeTimer);
       shapeTimer = setTimeout(() => idle(), 2500);
     }

@@ -577,7 +577,7 @@ function renderVoice(voice, enabled) {
   // The voice engine lives on the PC (edge-tts). Say so plainly when it's
   // missing — picking a voice still works, samples and replies just can't play.
   if (!voiceState.ready) {
-    row.append(el("p", "voice-warn", "Voice engine not installed on this PC — run: python -m pip install edge-tts"));
+    row.append(el("p", "voice-warn", "Voice engine not found — run: python -m pip install edge-tts, or set SCRUFF_PYTHON in .env to the python that has it"));
   }
 
   const label = el("label", "voice-toggle");
@@ -595,12 +595,12 @@ function renderVoice(voice, enabled) {
   /** Play a sample and say plainly why it failed (engine missing) instead of going silent. */
   const sample = (v) => {
     if (!voiceState.ready) {
-      toast("Voice engine not installed on this PC — run: python -m pip install edge-tts", "error");
+      toast("Voice engine not found — run: python -m pip install edge-tts, or set SCRUFF_PYTHON in .env to the python that has it", "error");
       return;
     }
     const audio = playVoiceSample(v.id, voiceSample(v.name));
     audio.addEventListener("error", () => {
-      toast("Couldn't play the sample — run: python -m pip install edge-tts", "error");
+      toast("Couldn't play the sample — the hub can't find edge-tts (set SCRUFF_PYTHON in .env to the right python)", "error");
     });
   };
   VOICE_OPTIONS.forEach((v, i) => {
@@ -1387,13 +1387,13 @@ function stopSpokenReply() {
 async function speakNeural(text) {
   stopSpokenReply();
   if (!voiceState.ready) {
-    toast("Voice engine not installed on this PC — run: python -m pip install edge-tts", "error");
+    toast("Voice engine not found — run: python -m pip install edge-tts, or set SCRUFF_PYTHON in .env to the python that has it", "error");
     return;
   }
   const audio = new Audio(`/voice/say?voice=${encodeURIComponent(voiceState.name)}&text=${encodeURIComponent(text.slice(0, 600))}`);
   replyAudio = audio;
   audio.addEventListener("error", () => {
-    toast("Couldn't play the voice reply — run: python -m pip install edge-tts", "error");
+    toast("Couldn't play the voice reply — the hub can't find edge-tts (set SCRUFF_PYTHON in .env to the right python)", "error");
   });
   audio.addEventListener("ended", () => {
     if (replyAudio === audio) replyAudio = null;

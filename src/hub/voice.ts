@@ -50,8 +50,8 @@ export function voiceCacheKey(text: string, voice: string): string {
   return createHash("sha1").update(`${voice}\n${text}`).digest("hex");
 }
 
-/** undefined = not probed yet, null = probed and missing. */
-let pythonWithTts: string | null | undefined;
+/** undefined = not probed yet, null = probed and missing. Otherwise the argv that imports edge_tts. */
+let pythonWithTts: string[] | null | undefined;
 
 /** Last background probe of the edge-tts engine; null until the first probe finishes. */
 let engineReady: boolean | null = null;
@@ -87,22 +87,41 @@ export function voiceEngineReady(): boolean {
   return engineReady === true;
 }
 
-async function findPython(): Promise<string> {
+/** Remembers which interpreters were probed so the error names them. */
+const triedBins: string[] = [];
+
+async function findPython(): Promise<string[]> {
   if (pythonWithTts !== undefined) {
-    if (pythonWithTts === null) throw new VoiceError("The edge-tts module isn't installed.", "pip install edge-tts");
+    if (pythonWithTts === null) throw voiceMissingError(triedBins);
     return pythonWithTts;
   }
-  for (const bin of ["python", "python3"]) {
+  // Candidates as argv arrays: explicit SCRUFF_PYTHON override first (for when
+  // `python` on PATH isn't the interpreter edge-tts was installed into), then
+  // the usual names, then the Windows `py` launcher.
+  const candidates: string[][] = [];
+  if (process.env.SCRUFF_PYTHON) candidates.push([process.env.SCRUFF_PYTHON]);
+  candidates.push(["python"], ["python3"]);
+  if (process.platform === "win32") candidates.push(["py", "-3"]);
+  for (const argv of candidates) {
+    triedBins.push(argv.join(" "));
     try {
-      await execFileAsync(bin, ["-c", "import edge_tts"], { timeout: 15000 });
-      pythonWithTts = bin;
-      return bin;
+      await execFileAsync(argv[0], [...argv.slice(1), "-c", "import edge_tts"], { timeout: 15000 });
+      pythonWithTts = argv;
+      return argv;
     } catch {
-      // try the next binary
+      // try the next candidate
     }
   }
   pythonWithTts = null;
-  throw new VoiceError("The edge-tts module isn't installed.", "pip install edge-tts");
+  throw voiceMissingError(triedBins);
+}
+
+function voiceMissingError(tried: string[]): VoiceError {
+  const where = tried.length ? ` (tried: ${tried.join(", ")})` : "";
+  const fix = process.env.SCRUFF_PYTHON
+    ? `SCRUFF_PYTHON is set but that python lacks edge-tts — run: "${process.env.SCRUFF_PYTHON}" -m pip install edge-tts`
+    : `Run: python -m pip install edge-tts — or set SCRUFF_PYTHON to the python that has it`;
+  return new VoiceError(`The edge-tts module isn't installed${where}.`, fix);
 }
 
 /**
@@ -116,7 +135,7 @@ export async function synthesizeVoice(opts: { text: string; voice: string; cache
   if (fs.existsSync(file)) return { file, cached: true };
   const bin = await findPython();
   try {
-    await execFileAsync(bin, ["-m", "edge_tts", "--voice", voice, "--text", text, "--write-media", file], { timeout: 60000 });
+    await execFileAsync(bin[0], [...bin.slice(1), "-m", "edge_tts", "--voice", voice, "--text", text, "--write-media", file], { timeout: 60000 });
   } catch (err) {
     fs.rmSync(file, { force: true });
     throw new VoiceError(`edge-tts failed: ${(err as Error).message}`, "pip install edge-tts");

@@ -104,36 +104,15 @@
   <dialog id="ai-dialog" class="picker ai-dialog">
     <form method="dialog" class="picker-inner">
       <div class="picker-head">
-        <h2>Choose the AI</h2>
+        <h2><span class="term-prompt">&gt;&nbsp;connect-ai</span><span class="cursor" aria-hidden="true"></span></h2>
         <button value="close" class="icon-btn" aria-label="Close">✕</button>
       </div>
-      <p class="muted small">Chat right here with Claude, or with a model running on your own PC.</p>
-      <ul id="provider-list" class="providers"></ul>
-      <div class="model-row">
-        <label for="model-input">Model</label>
-        <input id="model-input" list="model-options" autocomplete="off" spellcheck="false" placeholder="e.g. qwen3:8b">
-        <datalist id="model-options"></datalist>
-      </div>
-      <div class="picker-foot">
-        <span class="muted small">Switching starts a new chat.</span>
-        <button type="button" id="ai-apply" class="primary">Use this model</button>
-      </div>
-
-      <section class="subscription jev">
-        <h3>Jev by TypeSafe <span id="jev-status" class="tag">off</span></h3>
-        <p class="muted small">Jev reads each message in a fraction of a second, and when it's a quick command Scruff does it right away instead of waiting on the chat AI: undo, setting or locking values it found, picking your game, "I have 5 cans, give me 99" then "now it's 4.75", and "give me max health" then "it went down". Everything else still goes to the AI above. Get a key at <a href="https://console.typesafe.ai/keys" target="_blank" rel="noreferrer">console.typesafe.ai</a>.</p>
-        <div class="model-row" id="jev-key-row">
-          <label for="jev-key">API key</label>
-          <input id="jev-key" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your TypeSafe key">
-          <button type="button" id="jev-save" class="primary">Save</button>
-        </div>
-        <p id="jev-problem" class="small jev-problem" hidden></p>
-        <p id="jev-env" class="muted small" hidden>Using TYPESAFE_API_KEY from .env. A key you paste here replaces it.</p>
-        <button type="button" id="jev-remove" class="link" hidden>Turn Jev off (forget the key)</button>
-      </section>
+      <p class="muted small">Pick a brain. Local models connect with one click; cloud ones walk you through it.</p>
+      <div id="provider-grid" class="provider-grid" role="listbox" aria-label="AI providers"></div>
+      <div id="connect-panel" class="connect-panel" hidden></div>
 
       <section class="subscription">
-        <h3>Use your Claude subscription</h3>
+        <h3><img class="sub-logo" src="logos/anthropic.svg" alt="" aria-hidden="true"> Use your Claude subscription <span class="tag">no key</span></h3>
         <p class="muted small">Let Claude Desktop or Claude Code be the brain instead. They run on your Pro/Max plan, call Scruff's tools, and every change still shows up in this dashboard.</p>
         <details>
           <summary>Claude Code</summary>

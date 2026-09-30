@@ -187,6 +187,22 @@ export function startServer(opts: ServerOptions): Promise<http.Server> {
         toast(ws, key ? "Jev is on: quick commands now run instantly." : "Jev is off.", "info");
         break;
       }
+      case "set_provider_key": {
+        if (!router) throw new Error("This Scruff can't switch models.");
+        const id = String(msg.provider ?? "");
+        const key = typeof msg.key === "string" ? msg.key : null;
+        await router.setProviderKey(id, key);
+        toast(ws, key ? "Connected. Key saved on this PC." : "Key forgotten.", "info");
+        ws.send(
+          JSON.stringify({
+            type: "models",
+            current: aiInfo(),
+            providers: await router.status(),
+            connect: connectInfo(opts.root, (server.address() as AddressInfo).port),
+          }),
+        );
+        break;
+      }
       case "install_bridge": {
         if (!games.profile) throw new Error("Attach to the game first.");
         const updating = fs.existsSync(path.join(games.profile.installDir, "BepInEx", "plugins", "ScruffBridge", "ScruffBridge.dll"));

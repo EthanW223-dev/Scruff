@@ -79,7 +79,8 @@ function handle(msg) {
       addSys(`${msg.event.adapter}: ${msg.event.text}`, "event");
       break;
     case "toast":
-      toast(msg.text, msg.level);
+      if (connectBusy && msg.level === "error") showConnectError(msg.text);
+      else toast(msg.text, msg.level);
       break;
     case "capture":
       captureFrame(msg.id);
@@ -463,100 +464,337 @@ function renderAi() {
   }
 }
 
+// ---------- AI menu: provider cards + guided connect ----------
+
+const PROVIDER_META = {
+  claude: { logo: "logos/anthropic.svg", keyUrl: "https://console.anthropic.com/settings/keys", keyKind: "Anthropic" },
+  ollama: { logo: "logos/ollama.svg" },
+  lmstudio: { logo: "logos/lmstudio.svg" },
+  openai: { logo: "logos/openai.svg", keyUrl: "https://platform.openai.com/api-keys", keyKind: "OpenAI" },
+};
+const JEV_LOGO = "logos/typesafe.svg";
+
 let modelsMsg = null;
+let connectId = null; // provider id (or "jev") with the connect panel open
+let connectBusy = null; // provider id while a key check is in flight; error toasts go inline
 
 // Jev (TypeSafe) fast path: on when a key is set; the key itself never comes back from the hub.
-function renderJev() {
+function jevPill() {
   const jev = state?.jev;
-  if (!jev) return;
-  const tag = $("jev-status");
-  tag.textContent = {
-    working: `on · ${jev.model}`,
-    checking: "checking the key…",
-    rejected: "key rejected",
-    unreachable: "can't reach TypeSafe",
-    off: "off",
-  }[jev.status] ?? jev.status;
-  tag.classList.toggle("on", jev.status === "working");
-  tag.classList.toggle("bad", jev.status === "rejected" || jev.status === "unreachable");
-  $("jev-problem").hidden = !jev.problem;
-  $("jev-problem").textContent = jev.problem ?? "";
-  $("jev-key-row").hidden = jev.source === "test";
-  $("jev-key").placeholder = jev.source ? "Paste a new key to replace it" : "Paste your TypeSafe key";
-  $("jev-env").hidden = jev.source !== "env";
-  $("jev-remove").hidden = jev.source !== "saved";
+  if (!jev) return ["…", ""];
+  return (
+    {
+      working: ["on", "on"],
+      checking: ["checking…", ""],
+      rejected: ["key rejected", "warn"],
+      unreachable: ["unreachable", "warn"],
+      off: ["off", ""],
+    }[jev.status] ?? [jev.status, ""]
+  );
+}
+
+function renderJev() {
+  if (connectBusy === "jev" && state?.jev?.status !== "checking") connectBusy = null;
+  if (!$("ai-dialog").open || !modelsMsg) return;
+  if (connectId === "jev") {
+    openConnect("jev", true);
+    return;
+  }
+  const pill = $("provider-grid").querySelector('[data-id="jev"] .pill');
+  if (pill) {
+    const [text, cls] = jevPill();
+    pill.className = `pill ${cls}`;
+    pill.textContent = text;
+  }
   if (aiInfo) renderAi();
 }
-function saveJevKey() {
-  const key = $("jev-key").value.trim();
-  if (!key) return $("jev-key").focus();
-  send({ type: "set_jev_key", key });
-  $("jev-key").value = "";
-}
-$("jev-save").addEventListener("click", saveJevKey);
-$("jev-key").addEventListener("keydown", (e) => {
-  // The dialog is a form: Enter would close it instead of saving.
-  if (e.key === "Enter") {
-    e.preventDefault();
-    saveJevKey();
-  }
-});
-$("jev-remove").addEventListener("click", () => send({ type: "set_jev_key", key: null }));
 
 function openAiMenu() {
-  $("provider-list").replaceChildren(el("li", "muted small", "Checking what's available…"));
+  connectId = null;
+  connectBusy = null;
+  $("connect-panel").hidden = true;
+  $("provider-grid").replaceChildren(el("div", "muted small", "Probing providers…"));
   $("ai-dialog").showModal();
   send({ type: "list_models" });
 }
 
+function providerCards() {
+  const cards = modelsMsg.providers.map((p) => {
+    const meta = PROVIDER_META[p.id] ?? {};
+    return {
+      id: p.id,
+      name: p.label,
+      logo: meta.logo,
+      pill: p.ready
+        ? ["ready", "on"]
+        : p.id === "ollama" || p.id === "lmstudio"
+          ? ["not running", "warn"]
+          : ["needs key", "warn"],
+      detail: p.ready ? `${p.detail} · ${p.models.length} model${p.models.length === 1 ? "" : "s"}` : p.detail,
+      selected: modelsMsg.current.provider === p.id,
+    };
+  });
+  const [jt, jc] = jevPill();
+  cards.push({
+    id: "jev",
+    name: "Jev",
+    logo: JEV_LOGO,
+    pill: [jt, jc],
+    detail: "by TypeSafe · instant quick commands",
+    selected: false,
+  });
+  return cards;
+}
+
 function renderModels(msg) {
   modelsMsg = msg;
-  $("provider-list").replaceChildren(
-    ...msg.providers.map((p) => {
-      const li = el("li");
-      const label = el("label");
-      const radio = el("input");
-      radio.type = "radio";
-      radio.name = "provider";
-      radio.value = p.id;
-      radio.checked = p.id === msg.current.provider;
-      radio.addEventListener("change", () => pickProvider(p.id));
-      const name = el("span", "name");
-      name.append(el("span", `dot ${p.ready ? "on" : ""}`), p.label);
-      label.append(radio, name, el("span", "detail", p.ready ? `${p.detail} · ${p.models.length} model${p.models.length === 1 ? "" : "s"}` : p.detail));
-      li.append(label);
-      return li;
+  connectBusy = null;
+  const grid = $("provider-grid");
+  grid.replaceChildren(
+    ...providerCards().map((c, i) => {
+      const b = el("button", "provider-card");
+      b.type = "button";
+      b.dataset.id = c.id;
+      b.setAttribute("role", "option");
+      b.setAttribute("aria-selected", String(c.selected));
+      b.style.animationDelay = `${Math.min(i * 55, 330)}ms`;
+      const logo = el("span", "provider-logo");
+      const img = el("img");
+      img.src = c.logo;
+      img.alt = "";
+      logo.append(img);
+      b.append(
+        logo,
+        el("span", "provider-name", c.name),
+        el("span", `pill ${c.pill[1]}`, c.pill[0]),
+        el("span", "provider-detail", c.detail),
+      );
+      b.addEventListener("click", () => openConnect(c.id));
+      // Spotlight hover, 21st.dev spotlight-card pattern.
+      b.addEventListener("pointermove", (e) => {
+        const r = b.getBoundingClientRect();
+        b.style.setProperty("--mx", `${e.clientX - r.left}px`);
+        b.style.setProperty("--my", `${e.clientY - r.top}px`);
+      });
+      return b;
     }),
   );
-  $("model-input").value = msg.current.model;
-  fillModelOptions(msg.current.provider);
   $("cc-cmd").textContent = msg.connect.claudeCode;
   $("desktop-json").textContent = msg.connect.desktopConfig;
   $("desktop-path").textContent = msg.connect.desktopConfigPath;
+  if (connectId) openConnect(connectId, true);
+  if (aiInfo) renderAi();
 }
 
-function fillModelOptions(providerId) {
-  const provider = modelsMsg.providers.find((p) => p.id === providerId);
-  $("model-options").replaceChildren(...(provider?.models ?? []).map((m) => Object.assign(el("option"), { value: m })));
-  return provider;
+function connectHead(name, logo, pill) {
+  const head = el("div", "connect-head");
+  const lg = el("span", "provider-logo");
+  const img = el("img");
+  img.src = logo;
+  img.alt = "";
+  lg.append(img);
+  head.append(lg, el("h4", null, name), el("span", `pill ${pill[1]}`, pill[0]));
+  return head;
 }
 
-function pickProvider(providerId) {
-  const provider = fillModelOptions(providerId);
-  const input = $("model-input");
-  if (providerId === modelsMsg.current.provider) input.value = modelsMsg.current.model;
-  else if (!provider.models.includes(input.value)) input.value = provider.models[0] ?? "";
-  input.focus();
+function showConnectError(text) {
+  connectBusy = null;
+  const panel = $("connect-panel");
+  const errLine = panel.querySelector(".connect-error");
+  if (errLine) {
+    errLine.hidden = false;
+    errLine.textContent = text;
+  }
+  const btn = panel.querySelector("[data-connect]");
+  if (btn) {
+    btn.disabled = false;
+    btn.textContent = "Connect";
+  }
+}
+
+function keyInputRow(placeholder) {
+  const row = el("div", "key-row");
+  const input = el("input");
+  input.type = "password";
+  input.placeholder = placeholder;
+  input.autocomplete = "off";
+  input.spellcheck = false;
+  const reveal = el("button", "reveal", "show");
+  reveal.type = "button";
+  reveal.title = "Show the key";
+  reveal.addEventListener("click", () => {
+    const show = input.type === "password";
+    input.type = show ? "text" : "password";
+    reveal.textContent = show ? "hide" : "show";
+  });
+  row.append(input, reveal);
+  return [row, input];
+}
+
+function openConnect(id, soft) {
+  connectId = id;
+  const panel = $("connect-panel");
+  for (const cardEl of $("provider-grid").children) cardEl.setAttribute("aria-selected", String(cardEl.dataset.id === id));
+  panel.hidden = false;
+  panel.replaceChildren();
+  if (id === "jev") buildJevPanel(panel);
+  else buildProviderPanel(panel, modelsMsg.providers.find((p) => p.id === id));
+  if (!soft) panel.querySelector("input, select")?.focus({ preventScroll: true });
+}
+
+function buildProviderPanel(panel, p) {
+  const meta = PROVIDER_META[p.id] ?? {};
+  panel.append(connectHead(p.label, meta.logo, p.ready ? ["ready", "on"] : ["not ready", "warn"]));
+
+  if (p.ready) {
+    const row = el("div", "model-row");
+    row.append(el("label", null, "Model"));
+    const sel = el("select");
+    for (const m of p.models) {
+      const o = el("option", null, m);
+      o.value = m;
+      sel.append(o);
+    }
+    const current = p.id === modelsMsg.current.provider ? modelsMsg.current.model : p.models[0];
+    sel.value = [...sel.options].some((o) => o.value === current) ? current : (p.models[0] ?? "");
+    row.append(sel);
+    const actions = el("div", "connect-actions");
+    const use = el("button", "primary", "Use this model");
+    use.type = "button";
+    use.addEventListener("click", () => {
+      if (!sel.value) return toast("Pick a model first.", "error");
+      send({ type: "set_model", provider: p.id, model: sel.value });
+      $("ai-dialog").close();
+    });
+    actions.append(use, el("span", "connect-note", "Switching starts a new chat."));
+    if (p.keySource === "saved") {
+      const forget = el("button", "link", "Forget the saved key");
+      forget.type = "button";
+      forget.addEventListener("click", () => send({ type: "set_provider_key", provider: p.id, key: null }));
+      actions.append(forget);
+    }
+    panel.append(row, actions);
+    return;
+  }
+
+  if (p.id === "ollama" || p.id === "lmstudio") {
+    const steps = el("ol", "connect-steps");
+    const li = el("li");
+    li.append(el("span", null, `${p.detail}. `));
+    const retry = el("button", "primary", "Check again");
+    retry.type = "button";
+    retry.addEventListener("click", () => {
+      retry.disabled = true;
+      retry.innerHTML = `<span class="spin"></span> Checking…`;
+      send({ type: "list_models" });
+    });
+    li.append(retry);
+    steps.append(li);
+    panel.append(steps);
+    return;
+  }
+
+  // Cloud provider without a key: guided connect instead of a bare key field.
+  const steps = el("ol", "connect-steps");
+  const s1 = el("li");
+  const a = el("a");
+  a.href = meta.keyUrl;
+  a.target = "_blank";
+  a.rel = "noreferrer";
+  a.textContent = `Get an API key from ${meta.keyKind}`;
+  s1.append(a);
+  const s2 = el("li");
+  const [keyRow, input] = keyInputRow("Paste the key here");
+  s2.append(keyRow);
+  steps.append(s1, s2);
+  const errLine = el("p", "connect-error");
+  errLine.hidden = true;
+  const actions = el("div", "connect-actions");
+  const connectBtn = el("button", "primary", "Connect");
+  connectBtn.type = "button";
+  connectBtn.dataset.connect = "1";
+  const go = () => {
+    const key = input.value.trim();
+    if (!key) {
+      input.focus();
+      return;
+    }
+    connectBusy = p.id;
+    errLine.hidden = true;
+    connectBtn.disabled = true;
+    connectBtn.innerHTML = `<span class="spin"></span> Checking…`;
+    send({ type: "set_provider_key", provider: p.id, key });
+  };
+  connectBtn.addEventListener("click", go);
+  input.addEventListener("keydown", (e) => {
+    // The dialog is a form: Enter would close it instead of connecting.
+    if (e.key === "Enter") {
+      e.preventDefault();
+      go();
+    }
+  });
+  actions.append(connectBtn, el("span", "connect-note", "Checked instantly · saved on this PC only."));
+  panel.append(steps, errLine, actions);
+}
+
+function buildJevPanel(panel) {
+  const jev = state?.jev;
+  const [jt, jc] = jevPill();
+  panel.append(connectHead("Jev by TypeSafe", JEV_LOGO, [jt, jc]));
+  panel.append(
+    el(
+      "p",
+      "muted small",
+      "Jev reads each message in a fraction of a second. Quick commands — undo, setting or locking values it found, picking your game — run instantly instead of waiting on the chat AI.",
+    ),
+  );
+  if (jev?.problem) panel.append(el("p", "connect-error", jev.problem));
+  const [keyRow, input] = keyInputRow(jev?.source ? "Paste a new key to replace it" : "Paste your TypeSafe key");
+  const save = el("button", "primary", "Save");
+  save.type = "button";
+  save.dataset.connect = "1";
+  const errLine = el("p", "connect-error");
+  errLine.hidden = true;
+  const go = () => {
+    const key = input.value.trim();
+    if (!key) {
+      input.focus();
+      return;
+    }
+    connectBusy = "jev";
+    errLine.hidden = true;
+    save.disabled = true;
+    save.innerHTML = `<span class="spin"></span> Checking…`;
+    send({ type: "set_jev_key", key });
+  };
+  save.addEventListener("click", go);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      go();
+    }
+  });
+  keyRow.append(save);
+  const actions = el("div", "connect-actions");
+  if (jev?.source === "saved") {
+    const off = el("button", "link", "Turn Jev off (forget the key)");
+    off.type = "button";
+    off.addEventListener("click", () => send({ type: "set_jev_key", key: null }));
+    actions.append(off);
+  } else if (jev?.source === "env") {
+    actions.append(el("span", "connect-note", "Using TYPESAFE_API_KEY from .env — a saved key replaces it."));
+  } else {
+    const a = el("a", null, "Get a key at console.typesafe.ai");
+    a.href = "https://console.typesafe.ai/keys";
+    a.target = "_blank";
+    a.rel = "noreferrer";
+    actions.append(a);
+  }
+  panel.append(keyRow, errLine, actions);
 }
 
 $("ai-chip").addEventListener("click", openAiMenu);
-$("ai-apply").addEventListener("click", () => {
-  const provider = document.querySelector('input[name="provider"]:checked')?.value;
-  const model = $("model-input").value.trim();
-  if (!provider || !model) return toast("Pick a provider and type or choose a model.", "error");
-  send({ type: "set_model", provider, model });
-  $("ai-dialog").close();
-});
+
 for (const b of document.querySelectorAll("[data-copy]")) {
   b.addEventListener("click", async () => {
     const text = $(b.dataset.copy).textContent;

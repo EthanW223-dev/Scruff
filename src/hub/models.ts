@@ -21,6 +21,8 @@ export interface ProviderStatus {
   /** One line for the picker: what's wrong, or where it's running. */
   detail: string;
   models: string[];
+  /** Where the API key came from, for providers that use one. */
+  keySource?: "env" | "saved";
 }
 
 interface ProviderDef {
@@ -28,12 +30,21 @@ interface ProviderDef {
   label: string;
   baseURL?: string;
   apiKey?: string;
+  /** Where the API key came from, for providers that use one. */
+  keySource?: "env" | "saved";
   /** Needs no probing to know it's unusable (e.g. no API key). */
   missing?: string;
 }
 
 const PROBE_TIMEOUT_MS = 1500;
 const NOT_CHAT = /embed|tts|whisper|dall-e|moderation|transcribe|realtime|audio|image|rerank/i;
+
+/** Tolerates what people paste: spaces, quotes, a "Bearer " prefix. */
+function cleanKey(key: unknown): string | null {
+  if (typeof key !== "string") return null;
+  const t = key.trim().replace(/^Bearer\s+/i, "").replace(/^["']|["']$/g, "").trim();
+  return t.length >= 8 ? t : null;
+}
 
 /** Accepts "http://host:11434" or ".../v1". */
 function v1(url: string): string {
@@ -60,24 +71,39 @@ function hostLabel(baseURL: string): string {
  * OpenAI-compatible chat API that local runtimes and most other providers speak.
  */
 export class ModelRouter {
-  private defs: Map<ProviderId, ProviderDef>;
-  private claude: Anthropic | null;
+  private defs!: Map<ProviderId, ProviderDef>;
+  private claude!: Anthropic | null;
   private claudeModels: string[] | null = null;
+  private keysFile: string;
+  private savedKeys: Record<string, string> = {};
   selection: Selection = { provider: "claude", model: "claude-opus-5" };
 
   constructor(
-    env: NodeJS.ProcessEnv,
+    private env: NodeJS.ProcessEnv,
     private settingsFile: string,
     private effort: Effort,
   ) {
-    const claudeKey = Boolean(env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN);
-    this.claude = claudeKey ? new Anthropic() : null;
-    const openaiBase = env.OPENAI_BASE_URL ? v1(env.OPENAI_BASE_URL) : env.OPENAI_API_KEY ? "https://api.openai.com/v1" : undefined;
+    this.keysFile = path.join(path.dirname(settingsFile), "keys.json");
+    this.loadKeys();
+    this.reload();
+  }
+
+  /** (Re)build provider defs from env plus keys saved through the dashboard. Saved keys win. */
+  private reload(): void {
+    const env = this.env;
+    const claudeKey = this.savedKeys.claude || env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN;
+    this.claude = claudeKey ? new Anthropic(this.savedKeys.claude ? { apiKey: this.savedKeys.claude } : undefined) : null;
+    const openaiBase = env.OPENAI_BASE_URL
+      ? v1(env.OPENAI_BASE_URL)
+      : this.savedKeys.openai || env.OPENAI_API_KEY
+        ? "https://api.openai.com/v1"
+        : undefined;
     const defs: ProviderDef[] = [
       {
         id: "claude",
-        label: "Claude (API key)",
-        missing: claudeKey ? undefined : "Add ANTHROPIC_API_KEY to .env",
+        label: "Claude",
+        keySource: this.savedKeys.claude ? "saved" : env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN ? "env" : undefined,
+        missing: claudeKey ? undefined : "No API key yet",
       },
       { id: "ollama", label: "Ollama", baseURL: v1(env.OLLAMA_URL ?? "http://127.0.0.1:11434") },
       { id: "lmstudio", label: "LM Studio", baseURL: v1(env.LMSTUDIO_URL ?? "http://127.0.0.1:1234") },
@@ -85,8 +111,9 @@ export class ModelRouter {
         id: "openai",
         label: openaiBase ? hostLabel(openaiBase) : "OpenAI-compatible",
         baseURL: openaiBase,
-        apiKey: env.OPENAI_API_KEY,
-        missing: openaiBase ? undefined : "Set OPENAI_BASE_URL (and OPENAI_API_KEY) in .env",
+        apiKey: this.savedKeys.openai || env.OPENAI_API_KEY,
+        keySource: this.savedKeys.openai ? "saved" : env.OPENAI_API_KEY ? "env" : undefined,
+        missing: openaiBase ? undefined : "No server configured",
       },
     ];
     this.defs = new Map(defs.map((d) => [d.id, d]));
@@ -149,7 +176,7 @@ export class ModelRouter {
   async status(): Promise<ProviderStatus[]> {
     return Promise.all(
       [...this.defs.values()].map(async (def): Promise<ProviderStatus> => {
-        const base = { id: def.id, label: def.label };
+        const base = { id: def.id, label: def.label, keySource: def.keySource };
         if (def.missing) {
           return { ...base, ready: false, detail: def.missing, models: def.id === "claude" ? CLAUDE_MODELS : [] };
         }
@@ -188,6 +215,70 @@ export class ModelRouter {
       if (ids.length >= 300) break;
     }
     return ids.sort((a, b) => a.localeCompare(b));
+  }
+
+  private loadKeys(): void {
+    try {
+      const raw = JSON.parse(fs.readFileSync(this.keysFile, "utf8")) as Record<string, unknown>;
+      for (const id of ["claude", "openai"]) {
+        const k = cleanKey(raw[id]);
+        if (k) this.savedKeys[id] = k;
+      }
+    } catch {
+      this.savedKeys = {};
+    }
+  }
+
+  private persistKeys(): void {
+    try {
+      fs.mkdirSync(path.dirname(this.keysFile), { recursive: true });
+      const ids = Object.keys(this.savedKeys);
+      if (!ids.length) {
+        fs.rmSync(this.keysFile, { force: true });
+        return;
+      }
+      fs.writeFileSync(this.keysFile, JSON.stringify(this.savedKeys, null, 2), { mode: 0o600 });
+    } catch {
+      // not fatal: the key just won't survive a restart
+    }
+  }
+
+  /**
+   * Save an API key from the dashboard's connect flow (null forgets it). The key is
+   * validated live before it's stored, and it takes precedence over .env afterwards.
+   */
+  async setProviderKey(id: string, key: string | null): Promise<void> {
+    if (id !== "claude" && id !== "openai") throw new Error(`${id} doesn't use an API key.`);
+    const clean = cleanKey(key);
+    if (key && !clean) throw new Error("That doesn't look like an API key. Copy it from the provider's dashboard.");
+    if (clean) {
+      await this.validateKey(id as "claude" | "openai", clean);
+      this.savedKeys[id] = clean;
+    } else {
+      delete this.savedKeys[id];
+    }
+    this.persistKeys();
+    this.claudeModels = null;
+    this.reload();
+  }
+
+  /** Throws with a human-readable reason when the provider rejects the key. */
+  private async validateKey(id: "claude" | "openai", key: string): Promise<void> {
+    try {
+      if (id === "claude") {
+        await listClaudeModels(new Anthropic({ apiKey: key, timeout: 10000, maxRetries: 0 }));
+      } else {
+        const baseURL = this.env.OPENAI_BASE_URL ? v1(this.env.OPENAI_BASE_URL) : "https://api.openai.com/v1";
+        const client = new OpenAI({ baseURL, apiKey: key, timeout: 10000, maxRetries: 0 });
+        await client.models.list();
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/401|unauthorized|invalid|incorrect|authentication/i.test(msg)) {
+        throw new Error("That key was rejected. Double-check you copied the whole thing.");
+      }
+      throw new Error(`Couldn't reach the provider to check the key: ${msg}`);
+    }
   }
 
   private load(): Selection | null {

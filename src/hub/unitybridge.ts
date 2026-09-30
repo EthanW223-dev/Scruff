@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { bridgeState, unityFlavor, installBridge, removeBridge } from "../games/bepinex.ts";
+import { listProcesses } from "../memory/platform.ts";
 import type { AdapterRegistry } from "./adapters.ts";
 import type { GameManager } from "./game.ts";
 import { defineTool, json, type HubTool } from "./tools.ts";
@@ -73,7 +74,20 @@ export function unityBridgeTools(games: GameManager, adapters: AdapterRegistry, 
         games.requireSession();
         const p = profile();
         const dll = unityFlavor(p) === "il2cpp" ? opts.il2cppBridgeDll : opts.bridgeDll;
-        const report = await installBridge(p, { bridgeDll: dll, port: opts.port, onProgress: ctx.progress });
+        const report = await installBridge(p, {
+          bridgeDll: dll,
+          port: opts.port,
+          onProgress: ctx.progress,
+          isRunning: async (exePath) => {
+            const want = exePath.toLowerCase();
+            const base = want.split(/[/\\]/).pop();
+            const procs = await listProcesses().catch(() => []);
+            return procs.some((pr) => {
+              const have = (pr.exe ?? "").toLowerCase();
+              return have === want || have.split(/[/\\]/).pop() === base;
+            });
+          },
+        });
         games.emit("update");
         return json(report);
       },

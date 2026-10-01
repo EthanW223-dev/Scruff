@@ -71,7 +71,8 @@ export function unityBridgeTools(games: GameManager, adapters: AdapterRegistry, 
         "remove_unity_bridge takes it out again. The game must be restarted afterwards.",
       input: z.object({}),
       async run(_input, ctx) {
-        games.requireSession();
+        // Only the game's folder is needed: this works while the game runs (first install) or
+        // after it closed (updates), since Telos keeps the profile of the last attached game.
         const p = profile();
         const dll = unityFlavor(p) === "il2cpp" ? opts.il2cppBridgeDll : opts.bridgeDll;
         const report = await installBridge(p, {

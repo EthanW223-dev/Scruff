@@ -169,11 +169,9 @@ test("the AI menu lists providers and can switch models", async () => {
   dash.send(JSON.stringify({ type: "set_model", provider: "ollama", model: "llama3.1:8b" }));
   await waitFor(() => inbox.slice(start).some((m) => m.type === "hello" && m.ai.model === "llama3.1:8b"), "model switch");
   assert.equal(hub.agent.brain.model, "llama3.1:8b");
-  assert.deepEqual(
-    JSON.parse(fs.readFileSync(settings, "utf8")),
-    { provider: "ollama", model: "llama3.1:8b", voice: "en-US-AriaNeural", voiceEnabled: false },
-    "the choice is remembered",
-  );
+  // The settings file also holds voice preferences; this is about the model choice.
+  const saved = JSON.parse(fs.readFileSync(settings, "utf8"));
+  assert.deepEqual({ provider: saved.provider, model: saved.model }, { provider: "ollama", model: "llama3.1:8b" }, "the choice is remembered");
 });
 
 test("a model the server doesn't have gives a helpful error", async () => {

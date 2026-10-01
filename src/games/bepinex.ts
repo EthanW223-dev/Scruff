@@ -56,7 +56,7 @@ export interface InstallOptions {
   onProgress?: (text: string) => void;
   /** Tests: pretend the game exe is this bitness. */
   archOverride?: "x64" | "x86";
-  /** True when the game's exe is currently running (its files are locked). */
+  /** True when the game's exe is running. Only matters for updates: a loaded bridge's file is locked. */
   isRunning?: (exePath: string) => Promise<boolean>;
 }
 
@@ -163,14 +163,16 @@ export async function installBridge(profile: GameProfile, opts: InstallOptions):
   const flavor = unityFlavor(profile);
   if (!flavor) throw new Error(`The bridge is for Unity games; this one is ${profile.engine}.`);
   if (!fs.existsSync(opts.bridgeDll)) throw new Error(`The bridge isn't built (${opts.bridgeDll} is missing); run npm run build:bridge.`);
-  // Windows locks a running game's files: fail fast with a clear message instead of
-  // dying halfway through the install on a locked DLL.
-  if (opts.isRunning && (await opts.isRunning(profile.exe))) {
+  const { coreZipPath, coreRel, pluginDll, loader, notThis } = FLAVORS[flavor];
+  // A first install into a running game is fine: nothing new loads until the restart. Updating is
+  // not: Windows locks the bridge the game has loaded, so say so up front instead of failing halfway.
+  const updating = fs.existsSync(path.join(profile.installDir, PLUGIN_DIR, pluginDll));
+  if (updating && opts.isRunning && (await opts.isRunning(profile.exe))) {
     throw new Error(
-      `${profile.name} is running right now, so its files are locked. Quit the game fully, then run install_unity_bridge again.`,
+      `${profile.name} is running with the bridge loaded, so its file is locked. Quit the game fully: Telos updates ` +
+        `the bridge by itself when the game closes (or run install_unity_bridge again then).`,
     );
   }
-  const { coreZipPath, coreRel, pluginDll, loader, notThis } = FLAVORS[flavor];
   const dir = profile.installDir;
   const previous = readManifest(dir);
   if (previous?.bridge && previous.bridge !== flavor) {

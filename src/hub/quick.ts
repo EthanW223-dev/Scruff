@@ -756,7 +756,11 @@ export function quickPath(opts: QuickPathOptions): QuickHandler {
         });
         if (!out.ok) return notHandled(`Jev tried to start a search for ${thing} without a number, but: ${out.text}`);
         want = { what: thing.toLowerCase(), goal, bar: true, session: session!, extra: 0 };
-        return afterSearch(thing, JSON.parse(out.text), {});
+        // A fresh snapshot: nothing has moved yet, so explain the first step (not "it went…").
+        return say(
+          `On it. Tell me the number the game shows for ${thing}, or if it's a bar or has no number, make it go down or up ` +
+            `in the game (take a hit, eat, use one...) and tell me which way it went.`,
+        );
       }
       case "report_new_amount": {
         if (currentNumber === null || !search) return notHandled();

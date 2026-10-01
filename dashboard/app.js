@@ -369,13 +369,15 @@ function renderState() {
 }
 
 // The Unity bridge: full live control of Unity (Mono) games, installed with one click.
-function bridgeRow(bridge) {
+function bridgeRow(bridge, engine) {
   if (!bridge?.supported) return [];
-  const connected = (state?.adapters ?? []).some((a) => a.prefix.startsWith("unity"));
+  // Unity bridges register as "unity", the Unreal one as "unreal".
+  const unreal = engine === "Unreal Engine";
+  const connected = (state?.adapters ?? []).some((a) => a.prefix.startsWith(unreal ? "unreal" : "unity"));
   const dd = el("dd", "bridge");
   const status = connected
     ? bridge.outdated ? "connected · update ready" : "connected"
-    : bridge.outdated ? "update ready" : bridge.installed ? "installed, restart the game" : "not installed";
+    : bridge.outdated ? "update ready" : bridge.installed ? (unreal ? "staged, not loaded yet" : "installed, restart the game") : "not installed";
   dd.append(el("span", connected ? "ok" : "", status));
   const action = (label, type, title) => {
     const button = el("button", "link", label);
@@ -387,10 +389,16 @@ function bridgeRow(bridge) {
     dd.append(" ", button);
   };
   if (!bridge.installed) {
-    action("install", "install_bridge", "Add BepInEx and the Telos bridge to the game folder, so the AI can change anything in it (needs a game restart)");
+    action(
+      "install",
+      "install_bridge",
+      unreal
+        ? "Put the Telos Unreal bridge next to the game (bridge-unreal/README.md says how it loads)"
+        : "Add BepInEx and the Telos bridge to the game folder, so the AI can change anything in it (needs a game restart)",
+    );
   } else {
     if (bridge.outdated) action("update", "install_bridge", "Quit the game first (it keeps the bridge file open), then update and start it again");
-    if (!connected) action("remove", "remove_bridge", "Take the bridge (and BepInEx, if Telos added it) out of the game");
+    if (!connected) action("remove", "remove_bridge", unreal ? "Take the staged bridge out of the game folder" : "Take the bridge (and BepInEx, if Telos added it) out of the game");
   }
   return [el("dt", "", "Bridge"), dd];
 }
@@ -412,7 +420,7 @@ function renderGameFiles(profile) {
       dd.style.whiteSpace = "pre-line";
       return [el("dt", "", k), dd];
     }),
-    ...bridgeRow(profile.bridge),
+    ...bridgeRow(profile.bridge, profile.engine),
   );
 }
 

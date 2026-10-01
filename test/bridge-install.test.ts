@@ -267,15 +267,28 @@ test("an older installed bridge is spotted and updated once the game has quit", 
   assert.ok(!fs.existsSync(path.join(install, "winhttp.dll")));
 });
 
-test("refuses to install while the game is running, before touching any files", async () => {
-  const { profile } = fakeGame();
+test("a first install works while the game runs (the bridge loads at the next start)", async () => {
+  const { install, profile } = fakeGame();
+  const zipFile = path.join(install, "..", "bepinex.zip");
+  fs.writeFileSync(zipFile, bepinexZip());
+  const report = await installBridge(profile, { bridgeDll: BRIDGE, bepinexZip: zipFile, isRunning: async () => true });
+  assert.equal(report.installedBepInEx, true);
+  assert.equal(bridgeState(profile).installed, true);
+});
+
+test("updating a bridge the running game has loaded is refused up front, without touching files", async () => {
+  const { install, profile } = fakeGame();
+  const zipFile = path.join(install, "..", "bepinex.zip");
+  fs.writeFileSync(zipFile, bepinexZip());
+  const old = path.join(install, "..", "OldBridge.dll");
+  fs.writeFileSync(old, "bridge 1.0");
+  await installBridge(profile, { bridgeDll: old, bepinexZip: zipFile });
   await assert.rejects(
     installBridge(profile, { bridgeDll: BRIDGE, isRunning: async () => true }),
-    /is running right now.*Quit the game fully/,
-    "clear message naming the game",
+    /running with the bridge loaded.*Quit the game fully/,
   );
-  assert.ok(!fs.existsSync(path.join(profile.installDir, "BepInEx")), "nothing was written");
-  assert.ok(!fs.existsSync(path.join(profile.installDir, ".scruff-bridge.json")), "no manifest either");
+  const plugin = path.join(install, "BepInEx", "plugins", "ScruffBridge", "ScruffBridge.dll");
+  assert.equal(fs.readFileSync(plugin, "utf8"), "bridge 1.0", "the old one is untouched");
 });
 
 test("installs fine when the game is not running", async () => {

@@ -47,14 +47,24 @@ export class GameManager extends EventEmitter {
       .toLowerCase()
       .split(/[^a-z0-9]+/)
       .filter((w) => w.length > 2 && !SEARCH_NOISE.has(w));
-    return all
+    const candidates = all
       .filter((p) => !NOT_GAMES.has(baseName(p.name)))
       // On Windows, games have a window; searching by name also finds ones that don't.
-      .filter((p) => process.platform !== "win32" || Boolean(p.title) || words.length > 0)
-      .filter((p) => {
+      .filter((p) => process.platform !== "win32" || Boolean(p.title) || words.length > 0);
+    if (!words.length) return candidates.slice(0, 60);
+    // Any word counts, best matches first: people (and AIs) describe games loosely, and a game
+    // can be renamed. When something matches every word, only those are shown.
+    const scored = candidates
+      .map((p) => {
         const hay = [p.name, p.title, p.command].join(" ").toLowerCase();
-        return words.every((w) => hay.includes(w));
+        return { p, score: words.filter((w) => hay.includes(w)).length };
       })
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score);
+    const exact = scored.length > 0 && scored[0].score === words.length;
+    return scored
+      .filter((x) => !exact || x.score === words.length)
+      .map((x) => x.p)
       .slice(0, 60);
   }
 

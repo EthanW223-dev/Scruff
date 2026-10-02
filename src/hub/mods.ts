@@ -28,7 +28,8 @@ export interface EngineModSupport {
 const FULL_NOTE =
   "Full modding is available through the Unity bridge (unity__ tools): recolor, move/resize, " +
   "hide/remove, spawn copies, slow motion and game speed, gravity, calling the game's own " +
-  "methods, reading/writing any field. ";
+  "methods, reading/writing any field, and bringing in 3D models from other games or files " +
+  "(load_model; find_model_files finds exports). ";
 const BRIDGE_MISSING =
   "The bridge isn't connected: offer install_unity_bridge in one line (needs a game restart), " +
   "meanwhile only number changes via memory work. ";

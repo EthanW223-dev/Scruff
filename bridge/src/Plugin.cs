@@ -16,7 +16,7 @@ namespace ScruffBridge
     [BepInPlugin("dev.scruff.bridge", "Scruff Bridge", Version)]
     public class Plugin : BaseUnityPlugin
     {
-        public const string Version = "1.1.0";
+        public const string Version = "1.2.0";
 
         void Awake()
         {

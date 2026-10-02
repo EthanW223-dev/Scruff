@@ -6,6 +6,7 @@ import { gameFileTools } from "./gamefiles.ts";
 import { describeProfile } from "../games/profile.ts";
 import { JevService, JevSettings, type Jev } from "./jev.ts";
 import { LinkManager, linkTools } from "./links.ts";
+import { modelFileTools } from "./modelfiles.ts";
 import { McpEndpoint } from "./mcp.ts";
 import { engineModSupport } from "./mods.ts";
 import { quickPath } from "./quick.ts";
@@ -106,6 +107,7 @@ export async function createHub(opts: HubOptions) {
     themes.tool(),
     adapters.dispatchTool(),
     ...linkTools(links, games, adapters),
+    ...modelFileTools(),
   ];
 
   const jev = new JevService(new JevSettings(path.join(dataDir, "typesafe.json")), opts.jev);

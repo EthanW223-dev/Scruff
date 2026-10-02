@@ -121,6 +121,20 @@ namespace ScruffBridge
                 "normally -9.81) and gravity_2d ([x,y] or y). Returns the current values; give nothing to just read them.",
                 S("time_scale:number?:Game speed", "gravity:any?:3D gravity", "gravity_2d:any?:2D gravity"),
                 World);
+            Define("load_model",
+                "Bring a 3D model into this game from a file (merging games: a character or item exported from another game " +
+                "with FModel or AssetRipper, or any model from Blender): .glb, .gltf or .obj on this computer. It appears " +
+                "next to an object (e.g. the player) or in front of the camera, sized to fit, drawn with this game's own " +
+                "shaders. replace_id makes an object look like the model instead (its scripts and collisions stay). Static " +
+                "only: no skeleton or animations. Returns an id for transform, color, spawn, destroy.",
+                S("file:string:Full path of the .glb, .gltf or .obj file",
+                  "near_id:integer?:Put it next to this object (default: in front of the camera)",
+                  "replace_id:integer?:Make this object look like the model instead (hides its own look)",
+                  "size:number?:Height in world units (default: the replaced object's height, else 2)",
+                  "offset:any?:[x,y,z] from near_id in its own directions (default 2 in front of it)",
+                  "rotation:any?:[x,y,z] degrees to turn it",
+                  "color:any?:Tint instead of the model's own colors"),
+                LoadModel);
             Define("scenes",
                 "The levels/maps: which are loaded and which the game has; load one by name or number (this changes the map).",
                 S("load:any?:Scene name or build index to load"),
@@ -790,6 +804,216 @@ namespace ScruffBridge
             }
             UnityTypes[fullName] = t;
             return t;
+        }
+
+        // ------------------------------------------------------------------ models
+
+        static readonly PropertyInfo IndexFormatProperty = typeof(Mesh).GetProperty("indexFormat");
+
+        static object LoadModel(Args a, MonoBehaviour host)
+        {
+            string file = a.Need("file").Trim().Trim('"');
+            List<ModelPart> parts = ModelFile.Load(file);
+            GameObject replace = a.Has("replace_id") ? Obj(a, "replace_id") : null;
+            Shader shader = PickShader(replace);
+            bool tint = a.Has("color");
+            UnityEngine.Color tintColor = tint ? (UnityEngine.Color)Reflect.Convert(a.Raw("color"), typeof(UnityEngine.Color)) : UnityEngine.Color.white;
+
+            float[] b = ModelFile.Bounds(parts);
+            // The model's own origin moves to its bottom center, so "next to" and "size" mean what they say.
+            var pivot = new Vector3((b[0] + b[3]) / 2f, b[1], (b[2] + b[5]) / 2f);
+            var root = new GameObject("Telos model: " + Path.GetFileNameWithoutExtension(file));
+            var textures = new Dictionary<byte[], Texture2D>();
+            int meshes = 0, vertices = 0, textured = 0;
+            foreach (ModelPart whole in parts)
+            {
+                // Unity before 2017.3 has 16-bit mesh indices; split big parts for it.
+                List<ModelPart> pieces = IndexFormatProperty != null ? new List<ModelPart> { whole } : ModelFile.Split(whole, 65000);
+                foreach (ModelPart p in pieces)
+                {
+                    var go = new GameObject(string.IsNullOrEmpty(p.Name) ? "part" : p.Name);
+                    go.transform.SetParent(root.transform, false);
+                    go.transform.localPosition = -pivot;
+                    var mesh = new Mesh { name = go.name };
+                    if (p.VertexCount > 65000) IndexFormatProperty.SetValue(mesh, Enum.ToObject(IndexFormatProperty.PropertyType, 1), null);
+                    mesh.vertices = Vectors3(p.Positions);
+                    if (p.UVs != null) mesh.uv = Vectors2(p.UVs);
+                    mesh.triangles = p.Indices;
+                    if (p.Normals != null) mesh.normals = Vectors3(p.Normals);
+                    else mesh.RecalculateNormals();
+                    mesh.RecalculateBounds();
+                    go.AddComponent<MeshFilter>().sharedMesh = mesh;
+                    var material = new Material(shader);
+                    PaintMaterial(material, tint ? tintColor : new UnityEngine.Color(p.Color[0], p.Color[1], p.Color[2], p.Color[3]));
+                    if (p.Texture != null && !tint)
+                    {
+                        Texture2D tex;
+                        if (!textures.TryGetValue(p.Texture, out tex)) textures[p.Texture] = tex = LoadTexture(p.Texture);
+                        if (tex != null && TextureMaterial(material, tex)) textured++;
+                    }
+                    go.AddComponent<MeshRenderer>().sharedMaterial = material;
+                    meshes++;
+                    vertices += p.VertexCount;
+                }
+            }
+
+            float height = b[4] - b[1], extent = Math.Max(b[3] - b[0], Math.Max(height, b[5] - b[2]));
+            Bounds replaced = replace != null ? RenderBounds(replace) : new Bounds();
+            float size = a.Has("size")
+                ? (float)a.Num("size").Value
+                : replace != null && replaced.size.y > 0.01f ? replaced.size.y : 2f;
+            float scale = height > 1e-5f ? size / height : extent > 1e-5f ? size / extent : 1f;
+            root.transform.localScale = Vector3.one * scale;
+
+            int hidden = 0;
+            if (replace != null)
+            {
+                Vector3 bottom = replaced.size == Vector3.zero ? replace.transform.position : new Vector3(replaced.center.x, replaced.min.y, replaced.center.z);
+                root.transform.position = bottom;
+                root.transform.rotation = replace.transform.rotation;
+                foreach (Renderer r in replace.GetComponentsInChildren<Renderer>(true))
+                {
+                    if (!r.enabled) continue;
+                    r.enabled = false;
+                    hidden++;
+                }
+                // Moves and turns with the object it replaces.
+                root.transform.SetParent(replace.transform, true);
+            }
+            else
+            {
+                Transform anchor = a.Has("near_id") ? Obj(a, "near_id").transform : (Camera.main != null ? Camera.main.transform : null);
+                if (anchor != null)
+                {
+                    Vector3 offset = a.Has("offset") ? (Vector3)Reflect.Convert(a.Raw("offset"), typeof(Vector3)) : new Vector3(0, 0, a.Has("near_id") ? 2f : 5f);
+                    root.transform.position = anchor.position + anchor.rotation * offset;
+                    // Upright, facing the same way as the anchor (a tilted camera shouldn't tilt the model).
+                    root.transform.rotation = Quaternion.Euler(0, anchor.eulerAngles.y, 0);
+                }
+            }
+            if (a.Has("rotation")) root.transform.rotation *= Quaternion.Euler((Vector3)Reflect.Convert(a.Raw("rotation"), typeof(Vector3)));
+
+            var result = new Dictionary<string, object>
+            {
+                { "id", Remember(root) },
+                { "name", root.name },
+                { "meshes", meshes },
+                { "vertices", vertices },
+                { "textured_parts", textured },
+                { "shader", shader.name },
+                { "height", Math.Round(size, 2) },
+                { "position", Reflect.Describe(root.transform.position, 1) },
+            };
+            if (replace != null)
+            {
+                result["replaced"] = replace.name;
+                result["hidden_renderers"] = hidden;
+                result["note"] = "set_active false on this id and set the replaced object's renderers back on (or reload the level) to undo.";
+            }
+            if (textured == 0 && parts.Exists(p => p.Texture != null) && !tint) result["textures"] = "The model has textures this game couldn't load (it only takes PNG and JPEG); it shows its base colors.";
+            return result;
+        }
+
+        static Vector3[] Vectors3(float[] f)
+        {
+            var v = new Vector3[f.Length / 3];
+            for (int i = 0; i < v.Length; i++) v[i] = new Vector3(f[i * 3], f[i * 3 + 1], f[i * 3 + 2]);
+            return v;
+        }
+
+        static Vector2[] Vectors2(float[] f)
+        {
+            var v = new Vector2[f.Length / 2];
+            for (int i = 0; i < v.Length; i++) v[i] = new Vector2(f[i * 2], f[i * 2 + 1]);
+            return v;
+        }
+
+        static Bounds RenderBounds(GameObject go)
+        {
+            Renderer[] rs = go.GetComponentsInChildren<Renderer>(false);
+            if (rs.Length == 0) return new Bounds(go.transform.position, Vector3.zero);
+            Bounds b = rs[0].bounds;
+            foreach (Renderer r in rs) b.Encapsulate(r.bounds);
+            return b;
+        }
+
+        /// <summary>
+        /// A shader this game draws with: one of its own (they're guaranteed to be in the build and to
+        /// suit its render pipeline), preferring ordinary lit ones; Shader.Find only as a fallback.
+        /// </summary>
+        static Shader PickShader(GameObject like)
+        {
+            var seen = new List<Shader>();
+            IEnumerable<Renderer> renderers = like != null
+                ? like.GetComponentsInChildren<Renderer>(true)
+                : Object.FindObjectsOfType<MeshRenderer>().Cast<Renderer>().Concat(Object.FindObjectsOfType<SkinnedMeshRenderer>().Cast<Renderer>());
+            foreach (Renderer r in renderers)
+            {
+                if (r == null || r is SpriteRenderer) continue;
+                foreach (Material m in r.sharedMaterials)
+                {
+                    if (m == null || m.shader == null || seen.Contains(m.shader) || m.shader.name.StartsWith("Hidden")) continue;
+                    if (!m.HasProperty("_MainTex") && !m.HasProperty("_BaseMap") && !m.HasProperty("_BaseColorMap")) continue;
+                    seen.Add(m.shader);
+                    if (seen.Count >= 200) break;
+                }
+            }
+            string[] ordinary = { "Standard", "/Lit", "Lit", "Diffuse", "Toon", "Simple" };
+            foreach (string word in ordinary)
+            {
+                Shader s = seen.FirstOrDefault(x => x.name.IndexOf(word, StringComparison.OrdinalIgnoreCase) >= 0 && x.name.IndexOf("Transparent", StringComparison.OrdinalIgnoreCase) < 0);
+                if (s != null) return s;
+            }
+            if (seen.Count > 0) return seen[0];
+            foreach (string name in new[] { "Standard", "Universal Render Pipeline/Lit", "HDRP/Lit", "Legacy Shaders/Diffuse", "Diffuse", "Mobile/Diffuse", "Unlit/Texture", "Sprites/Default" })
+            {
+                Shader s = Shader.Find(name);
+                if (s != null) return s;
+            }
+            throw new InvalidOperationException("This game has no shader Telos can draw a model with (no 3D objects in this level?). Try again in a level with 3D objects.");
+        }
+
+        static void PaintMaterial(Material m, UnityEngine.Color color)
+        {
+            foreach (string prop in new[] { "_Color", "_BaseColor", "_TintColor", "_MainColor" })
+                if (m.HasProperty(prop)) m.SetColor(prop, color);
+        }
+
+        static bool TextureMaterial(Material m, Texture2D tex)
+        {
+            bool any = false;
+            foreach (string prop in new[] { "_MainTex", "_BaseMap", "_BaseColorMap" })
+            {
+                if (!m.HasProperty(prop)) continue;
+                m.SetTexture(prop, tex);
+                any = true;
+            }
+            return any;
+        }
+
+        /// <summary>PNG/JPEG bytes to a texture. Unity 2017.1 moved LoadImage to ImageConversion; older ones have it on Texture2D.</summary>
+        static Texture2D LoadTexture(byte[] data)
+        {
+            var tex = new Texture2D(2, 2);
+            bool ok = false;
+            Type conv = UnityType("UnityEngine.ImageConversion");
+            MethodInfo m = conv != null ? conv.GetMethod("LoadImage", BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(Texture2D), typeof(byte[]) }, null) : null;
+            try
+            {
+                if (m != null) ok = (bool)m.Invoke(null, new object[] { tex, data });
+                else
+                {
+                    MethodInfo im = typeof(Texture2D).GetMethod("LoadImage", new[] { typeof(byte[]) });
+                    if (im != null) ok = (bool)im.Invoke(tex, new object[] { data });
+                }
+            }
+            catch (Exception e)
+            {
+                Runner.Log.LogWarning("Couldn't load a model texture: " + Reflect.Unwrap(e).Message);
+            }
+            if (ok) return tex;
+            Object.Destroy(tex);
+            return null;
         }
 
         static object Scenes(Args a, MonoBehaviour host)

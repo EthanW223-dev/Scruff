@@ -367,7 +367,8 @@ function renderState() {
   $("revert-all").hidden = !(attached?.changes ?? []).some((c) => !c.undone);
   $("detach").hidden = !attached;
   $("app-bar-game").textContent = attached ? attached.title || attached.name.replace(/\.exe$/i, "") : "";
-  renderGameFiles(attached ? game.profile : null);
+  // The last game stays shown after it closes: fixing its bridge (an update, a too-old BepInEx) happens with it closed.
+  renderGameFiles(game.profile ?? null);
 }
 
 // The Unity bridge: full live control of Unity (Mono) games, installed with one click.

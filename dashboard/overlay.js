@@ -40,9 +40,10 @@ function startPanelWindow({ bridge }) {
       bridge.setPanel(false);
     }
   });
+  // The open panel covers the dimmed game: a click outside its windows goes back to the game.
   document.addEventListener("mousedown", (e) => {
     if (!document.body.classList.contains("panel-open")) return;
-    if (!e.target.closest(".app, dialog")) bridge.setPanel(false);
+    if (!e.target.closest(".win, .menubar, .dock, .banner, dialog, .toasts")) bridge.setPanel(false);
   });
 }
 
@@ -104,19 +105,25 @@ function startHudWindow({ bridge, toolLabel, speak }) {
     status(game ? `Telos · ${game}` : "Telos");
   }
 
+  // A notification: an icon tile, a title, the text, and a bar counting down until it goes.
   function toast(text, kind = "", ms = 6000) {
-    const t = document.createElement("div");
-    t.className = `hud-toast ${kind}`;
-    if (kind !== "step") {
-      const bar = document.createElement("div");
-      bar.className = "win-bar";
-      bar.textContent = kind === "you" ? "YOU" : kind === "error" ? "ERROR" : "SCRUFF";
-      t.append(bar);
+    const part = (tag, cls, content) => {
+      const n = document.createElement(tag);
+      n.className = cls;
+      if (content !== undefined) n.textContent = content;
+      return n;
+    };
+    const t = part("div", `hud-toast ${kind}`);
+    const glyph = { you: "▸", error: "!", step: "»" }[kind] ?? "✦";
+    const main = part("div", "t-main");
+    if (kind !== "step") main.append(part("div", "t-title", kind === "you" ? "You" : kind === "error" ? "Problem" : "Telos"));
+    main.append(part("div", "body", text));
+    t.append(part("span", "t-glyph", glyph), main);
+    if (ms) {
+      const ttl = part("i", "t-ttl");
+      ttl.style.animationDuration = `${ms}ms`;
+      t.append(ttl);
     }
-    const body = document.createElement("div");
-    body.className = "body";
-    body.textContent = text;
-    t.append(body);
     $("hud-toasts").append(t);
     while ($("hud-toasts").children.length > MAX_TOASTS) $("hud-toasts").firstElementChild.remove();
     if (ms) fadeOut(t, ms);
@@ -251,12 +258,15 @@ function startHudWindow({ bridge, toolLabel, speak }) {
     const frozen = watch.filter((w) => w.frozen).slice(0, 6);
     $("hud-mods").replaceChildren(
       ...frozen.map((w) => {
-        const chip = document.createElement("span");
-        chip.className = "hud-mod";
+        const row = document.createElement("div");
+        row.className = "hud-mod";
+        const label = document.createElement("span");
+        label.className = "k";
+        label.textContent = w.label;
         const value = document.createElement("b");
         value.textContent = typeof w.value === "number" ? (Math.round(w.value * 100) / 100).toLocaleString() : "?";
-        chip.append(`${w.label} `, value);
-        return chip;
+        row.append(label, value);
+        return row;
       }),
     );
   }

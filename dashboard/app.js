@@ -17,6 +17,7 @@ import {
   unlockDeviceLabels,
 } from "./audio.js";
 import { startRecording } from "./voice.js";
+import { hydrateIcons, icon } from "./icons.js";
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -46,10 +47,12 @@ function connect() {
   ws.onmessage = (e) => handle(JSON.parse(e.data));
   ws.onclose = () => {
     setBanner("Lost connection to Telos. Is it still running? Reconnecting…");
+    setHubStatus(false);
     setTimeout(connect, 1500);
   };
   ws.onopen = () => {
     setBanner(null);
+    setHubStatus(true);
     // The overlay can always capture the game window itself.
     if (screenStream || overlay) send({ type: "screen", sharing: true });
   };
@@ -330,6 +333,8 @@ function renderState() {
   busy = state.busy;
   $("send").hidden = busy;
   $("stop").hidden = !busy;
+  $("chat-status").textContent = busy ? "Working" : attached ? "Ready" : "Idle";
+  $("chat-status").classList.toggle("busy", busy);
 
   $("game-chip").querySelector(".dot").className = `dot ${attached ? "on" : ""}`;
   $("game-label").textContent = attached ? attached.title || attached.name : game.supported.ok ? "Pick a game" : "Memory editing unsupported";
@@ -338,7 +343,7 @@ function renderState() {
 
   const adapters = state.adapters;
   $("adapter-chip").hidden = adapters.length === 0;
-  $("adapter-label").textContent = adapters.length === 1 ? `Adapter: ${adapters[0].name}` : `${adapters.length} adapters`;
+  $("adapter-label").textContent = adapters.length === 1 ? adapters[0].name : `${adapters.length} bridges`;
   $("adapters-panel").hidden = adapters.length === 0;
   $("adapters").replaceChildren(
     ...adapters.map((a) => {
@@ -464,6 +469,8 @@ function renderWatch(watch) {
   $("watch-empty").hidden = watch.length > 0;
   $("mods-count").hidden = watch.length === 0;
   $("mods-count").textContent = watch.length;
+  $("watch-count").hidden = watch.length === 0;
+  $("watch-count").textContent = watch.length;
   const existing = new Map([...list.children].map((li) => [li.dataset.address, li]));
   const keep = new Set();
   for (const w of watch) {
@@ -500,7 +507,12 @@ function renderWatch(watch) {
     if (document.activeElement !== input) input.value = w.value === null ? "?" : formatValue(w.value, w.type);
     const lock = li.querySelector(".lock");
     lock.setAttribute("aria-pressed", String(w.frozen));
-    lock.textContent = w.frozen ? "🔒" : "🔓";
+    lock.title = w.frozen ? "Frozen: click to let it change again" : "Freeze this value";
+    const lockIcon = w.frozen ? "lock" : "unlock";
+    if (lock.dataset.icon !== lockIcon) {
+      lock.dataset.icon = lockIcon;
+      lock.replaceChildren(icon(lockIcon, 15));
+    }
   }
   for (const [address, li] of existing) if (!keep.has(address)) li.remove();
 }
@@ -1728,6 +1740,29 @@ for (const tab of ["chat", "mods"]) {
 
 // ---------- misc ----------
 
+/** The hotkey strip's connection light. */
+function setHubStatus(online) {
+  $("hub-dot").className = `dot ${online ? "on" : "live"}`;
+  $("hub-status").textContent = online ? "Telos hub online" : "Reconnecting…";
+}
+
+/** The menu bar clock (the overlay covers the game's own, and the taskbar). */
+function tickClock() {
+  $("clock").textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+/** The hotkey strip: what each key does here. In the overlay, the real global hotkeys. */
+function renderKeys(keys) {
+  $("dock-keys").replaceChildren(
+    ...keys.map(([combo, what]) => {
+      const hint = el("span", "key-hint");
+      for (const k of combo.split("+")) hint.append(el("kbd", "", k.replace("CommandOrControl", "Ctrl")));
+      hint.append(what);
+      return hint;
+    }),
+  );
+}
+
 function setBanner(html, isHtml = false) {
   const b = $("banner");
   b.hidden = !html;
@@ -1752,6 +1787,23 @@ function toast(text, level = "info") {
 $("speak").addEventListener("change", () => {
   send({ type: "set_voice", voice: voiceState.name, enabled: $("speak").checked });
 });
+
+hydrateIcons(document);
+tickClock();
+setInterval(tickClock, 15_000);
+if (overlay && !hudOnly) {
+  overlay
+    .hotkeys?.()
+    .then(({ panel, talk }) =>
+      renderKeys([
+        [panel, "toggle overlay"],
+        [talk, "talk"],
+        ["Esc", "back to game"],
+        ["Enter", "send"],
+      ]),
+    )
+    .catch(() => {});
+}
 
 if (overlay) {
   overlay.onPanel((open) => {

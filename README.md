@@ -70,13 +70,18 @@ access to the game, run the terminal as administrator.
 
 ## The overlay
 
-- **Ctrl+Shift+S** opens and closes the panel (chat, mods, undo). **Esc** or clicking the game
+- **Ctrl+Shift+S** opens and closes the panel. Like a console's game bar, it dims the game and
+  lays out a small retro desktop over it. A menu bar shows the AI, the game, screen sharing,
+  connected bridges and the time. The chat sits in its own window, with widget windows beside it
+  for the values Telos is holding (Mods), Changes (each with undo), Game files, Bridges and Game
+  links. A strip along the bottom lists the hotkeys. **Esc**, or a click outside the windows,
   hands control back to the game.
 - **Ctrl+Shift+Space** is push-to-talk: press, speak, press again. Speech is turned into text
   on your PC with Whisper; the first use downloads an ~80 MB voice model.
-- The overlay is just one small button while you play. A dashed frame around it means Telos is
-  working, a red one that it's listening; hover it for details. Replies and the values it's
-  holding show up as small notes under it, so you can keep playing.
+- While you play, the overlay is just Telos's orb. A ring around it means Telos is working; hover
+  it for details. Replies show up next to the orb. Frozen values stay on screen in a small
+  *Pinned* widget, and notifications slide in under it with a bar counting down, so you can keep
+  playing.
 - To use your own button art, save it over `dashboard/button.svg` (keep it square).
 - Run the game in **windowed or borderless fullscreen**. No overlay app can draw over
   *exclusive* fullscreen without hooking into the game, which is exactly what anti-cheat looks

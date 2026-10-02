@@ -33,33 +33,45 @@
     <div id="hud-toasts" class="hud-toasts" aria-live="polite"></div>
   </div>
 
+  <!-- The panel: a small retro desktop. In the overlay it opens over a dimmed game (like a
+       console's game bar): a menu bar with status, the chat window, widget windows for what
+       Telos changed, and a hotkey strip. In a browser it's the whole page. -->
   <div id="app" class="app">
-  <div class="win-bar app-bar">
-    <span class="win-title">Telos.exe<span id="app-bar-game"></span></span>
-    <button id="app-close" class="win-close" type="button" aria-label="Close" hidden>×</button>
-  </div>
-  <header class="topbar">
-    <div class="chips">
-      <button class="chip" id="ai-chip" title="Choose the AI"><span class="dot"></span><span id="ai-label">AI</span></button>
-      <button class="chip" id="game-chip" title="Pick the game to mod"><span class="dot"></span><span id="game-label">No game</span></button>
-      <button class="chip" id="screen-chip" title="Let Telos see your game"><span class="dot"></span><span id="screen-label">Share screen</span></button>
-      <span class="chip static" id="adapter-chip" hidden><span class="dot on"></span><span id="adapter-label"></span></span>
+  <header class="menubar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"><i data-icon="spark"></i></span>
+      <span class="brand-name">Telos</span>
+      <span id="app-bar-game" class="brand-game"></span>
+    </div>
+    <div class="chips" role="toolbar" aria-label="Status">
+      <button class="chip" id="ai-chip" title="Choose the AI"><i data-icon="chip"></i><span class="dot"></span><span id="ai-label">AI</span></button>
+      <button class="chip" id="game-chip" title="Pick the game to mod"><i data-icon="game"></i><span class="dot"></span><span id="game-label">No game</span></button>
+      <button class="chip" id="screen-chip" title="Let Telos see your game"><i data-icon="screen"></i><span class="dot"></span><span id="screen-label">Share screen</span></button>
+      <span class="chip static" id="adapter-chip" hidden><i data-icon="plug"></i><span class="dot on"></span><span id="adapter-label"></span></span>
     </div>
     <nav class="tabs" role="tablist">
       <button role="tab" id="tab-chat" aria-selected="true">Chat</button>
       <button role="tab" id="tab-mods" aria-selected="false">Mods <span id="mods-count" class="count" hidden></span></button>
     </nav>
+    <div class="menubar-end">
+      <span id="clock" class="clock" aria-hidden="true"></span>
+      <button id="app-close" class="menubar-close" type="button" aria-label="Back to the game" title="Back to the game (Esc)" hidden><kbd>Esc</kbd><i data-icon="close"></i></button>
+    </div>
   </header>
 
   <div id="banner" class="banner" hidden></div>
 
   <main class="layout" data-view="chat">
-    <section class="chat" aria-label="Chat">
+    <section class="chat win" aria-label="Chat">
+      <div class="win-head">
+        <i data-icon="chat"></i><h2>Chat</h2><span class="stripes" aria-hidden="true"></span>
+        <span id="chat-status" class="win-status">Ready</span>
+      </div>
       <div id="log" class="log" aria-live="polite">
         <div class="empty" id="empty">
-          <p class="kicker">[ UNIVERSAL LIVE MOD ]</p>
-          <h1>What are we modding?</h1>
-          <p>Start a game, then just say what you want.</p>
+          <p class="kicker"><span class="blink-dot" aria-hidden="true"></span>Universal live mod</p>
+          <h1>What are we<br>modding?</h1>
+          <p class="lede">Start a game, then just say what you want.</p>
           <div class="examples">
             <button class="example">I'm playing Stardew, give me 50,000 gold</button>
             <button class="example">Make my health infinite</button>
@@ -72,12 +84,11 @@
       <form id="composer" class="composer">
         <div id="voice-status" class="voice-status" hidden></div>
         <div class="composer-row">
+          <span class="prompt-mark" aria-hidden="true">&gt;</span>
           <textarea id="input" rows="1" placeholder="Tell Telos what to change…" autocomplete="off"></textarea>
-          <button type="button" id="mic" class="icon-btn" title="Push to talk (Ctrl+Space)" aria-label="Push to talk">
-            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
-          </button>
-          <button type="submit" id="send" class="primary">Send</button>
-          <button type="button" id="stop" class="danger" hidden>Stop</button>
+          <button type="button" id="mic" class="icon-btn" title="Push to talk (Ctrl+Space)" aria-label="Push to talk"><i data-icon="mic" data-size="18"></i></button>
+          <button type="submit" id="send" class="primary"><span>Send</span><i data-icon="send"></i></button>
+          <button type="button" id="stop" class="danger" hidden><i data-icon="stop"></i><span>Stop</span></button>
         </div>
         <div class="composer-opts">
           <label id="handsfree-label" title="Keep listening; start a request by saying 'Telos, …'"><input type="checkbox" id="handsfree"> Hands-free ("Telos, …")</label>
@@ -88,43 +99,53 @@
     </section>
 
     <aside class="mods" aria-label="Mods">
-      <div class="panel">
+      <div class="panel win">
         <div class="panel-head">
-          <h2>Mods</h2>
-          <button id="revert-all" class="link" hidden>Undo all</button>
+          <i data-icon="sliders"></i><h2>Mods</h2><span class="stripes" aria-hidden="true"></span>
+          <span id="watch-count" class="badge" hidden></span>
+          <button id="revert-all" class="head-btn" hidden title="Undo every change"><i data-icon="undo"></i>Undo all</button>
         </div>
         <div id="scan" class="scan" hidden>
           <div class="scan-line"><span id="scan-text"></span></div>
           <div class="progress" hidden id="scan-progress"><div></div></div>
         </div>
         <ul id="watch" class="watch"></ul>
-        <p id="watch-empty" class="muted small">Values Telos finds and changes show up here. Toggle a lock to freeze one.</p>
+        <p id="watch-empty" class="empty-note">Values Telos finds and changes show up here. Lock one to freeze it.</p>
       </div>
-      <div class="panel">
-        <div class="panel-head"><h2>Changes</h2></div>
+      <div class="panel win">
+        <div class="panel-head"><i data-icon="history"></i><h2>Changes</h2><span class="stripes" aria-hidden="true"></span></div>
         <ul id="changes" class="changes"></ul>
-        <p id="changes-empty" class="muted small">Nothing changed yet. Every change can be undone.</p>
+        <p id="changes-empty" class="empty-note">Nothing changed yet. Every change can be undone.</p>
       </div>
-      <div class="panel" id="game-panel" hidden>
-        <div class="panel-head"><h2>Game files</h2></div>
+      <div class="panel win" id="game-panel" hidden>
+        <div class="panel-head"><i data-icon="folder"></i><h2>Game files</h2><span class="stripes" aria-hidden="true"></span></div>
         <dl id="game-info" class="game-info"></dl>
       </div>
-      <div class="panel" id="adapters-panel" hidden>
-        <div class="panel-head"><h2>Game adapters</h2></div>
+      <div class="panel win" id="adapters-panel" hidden>
+        <div class="panel-head"><i data-icon="plug"></i><h2>Bridges</h2><span class="stripes" aria-hidden="true"></span></div>
         <ul id="adapters" class="adapters"></ul>
       </div>
-      <div class="panel" id="links-panel" hidden>
-        <div class="panel-head"><h2>Game links</h2></div>
-        <ul id="links" class="changes"></ul>
+      <div class="panel win" id="links-panel" hidden>
+        <div class="panel-head"><i data-icon="link"></i><h2>Game links</h2><span class="stripes" aria-hidden="true"></span></div>
+        <ul id="links" class="changes links"></ul>
       </div>
     </aside>
   </main>
+
+  <footer class="dock">
+    <div id="dock-keys" class="keys">
+      <span class="key-hint"><kbd>Enter</kbd> send</span>
+      <span class="key-hint"><kbd>Ctrl</kbd><kbd>Space</kbd> talk</span>
+    </div>
+    <div class="dock-status"><span id="hub-dot" class="dot"></span><span id="hub-status">Connecting…</span></div>
+  </footer>
   </div>
 
   <dialog id="ai-dialog" class="picker ai-dialog">
     <form method="dialog" class="picker-inner">
       <div class="picker-head">
         <h2><span class="term-prompt">&gt;&nbsp;connect-ai</span><span class="cursor" aria-hidden="true"></span></h2>
+        <span class="stripes" aria-hidden="true"></span>
         <button value="close" class="icon-btn" aria-label="Close">✕</button>
       </div>
       <p class="muted small">Pick a brain. Local models connect with one click; cloud ones walk you through it.</p>
@@ -141,6 +162,7 @@
     <form method="dialog" class="picker-inner">
       <div class="picker-head">
         <h2>Which game?</h2>
+        <span class="stripes" aria-hidden="true"></span>
         <button value="close" class="icon-btn" aria-label="Close">✕</button>
       </div>
       <input id="picker-search" type="search" placeholder="Search running programs…" autocomplete="off">

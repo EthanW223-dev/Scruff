@@ -24,6 +24,7 @@ the game once; the bridge connects to Scruff on its own and shows up as the `uni
 | `set_active` / `destroy` | Hide, show or remove objects |
 | `world` | Time scale, 3D and 2D gravity |
 | `scenes` | List levels and load one |
+| `load_model` | Bring in a `.glb`, `.gltf` or `.obj` (from another game, via FModel or AssetRipper, or from Blender): next to an object, or replacing how one looks. Drawn with the game's own shaders; static, no animation |
 
 Changes through the bridge aren't in Scruff's undo list; `set` returns the old value so the AI can
 put it back.

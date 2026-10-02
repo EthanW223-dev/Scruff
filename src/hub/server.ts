@@ -7,6 +7,7 @@ import type { AdapterRegistry } from "./adapters.ts";
 import type { LinkManager } from "./links.ts";
 import { connectedBridge } from "./bridges.ts";
 import { installRpgMakerBridge, removeRpgMakerBridge } from "../games/rpgmaker.ts";
+import { installUe4ssBridge, removeUe4ssBridge, ue4ssBridgeState } from "../games/ue4ss.ts";
 import type { Agent, AgentEvent } from "./agent.ts";
 import type { GameManager } from "./game.ts";
 import type { JevService } from "./jev.ts";
@@ -255,6 +256,12 @@ export async function startServer(opts: ServerOptions): Promise<http.Server> {
         if (!games.profile) throw new Error("Attach to the game first.");
         const port = (server.address() as AddressInfo).port;
         const engine = games.profile.engine;
+        if (engine === "Unreal Engine" && ue4ssBridgeState(games.profile).present) {
+          const report = installUe4ssBridge(games.profile, { modSource: path.join(opts.root, "bridge-ue4ss", "TelosBridge") });
+          games.emit("update");
+          toast(ws, `${report.updated ? "Updated" : "Added"} Telos's UE4SS mod. Restart the game to load it.`, "info");
+          break;
+        }
         if (engine === "Unreal Engine") {
           const report = installUnrealBridge(games.profile, {
             bridgeDll: path.join(opts.root, "bridge-unreal", "TelosBridgeUE.dll"),
@@ -301,6 +308,12 @@ export async function startServer(opts: ServerOptions): Promise<http.Server> {
         break;
       case "remove_bridge": {
         if (!games.profile) throw new Error("Attach to the game first.");
+        if (games.profile.engine === "Unreal Engine" && ue4ssBridgeState(games.profile).installed) {
+          removeUe4ssBridge(games.profile);
+          games.emit("update");
+          toast(ws, "Removed Telos's UE4SS mod (UE4SS itself stays). Restart the game to finish.", "info");
+          break;
+        }
         if (games.profile.engine === "Unreal Engine") {
           removeUnrealBridge(games.profile);
           games.emit("update");

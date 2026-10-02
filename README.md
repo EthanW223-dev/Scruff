@@ -29,6 +29,11 @@ Pro/Max subscription through Claude Desktop or Claude Code, or any model running
   not just numbers: colors, skins and looks, sizes, movement speed, gravity, spawn collectibles or
   enemies, remove walls, load other levels, and call the game's own functions ("AddItem", "Heal").
   See [bridge/README.md](bridge/README.md).
+- **Link games together.** Telos can attach to several games at once and tie them with rules:
+  "when I get hurt in one game, spawn a zombie in the other", "my coins in game B follow my money
+  in game A". Links work through bridges and through values Telos found in memory. You can also
+  bring a character or item from one game into a Unity game as a 3D model. See
+  [Merge games](#merge-games).
 - **It reads the game's files.** When you pick a game, Telos works out its engine (Unity,
   Unreal, Godot, GameMaker, RPG Maker, Ren'Py, Source), finds its save and settings folders, and
   for Unity games reads the code's own variable names and types ("soup is a float"), so the AI
@@ -102,16 +107,55 @@ What works depends on the engine (the status note in chat always says which tier
   ask for a mod and the AI offers it). Telos adds the [BepInEx](https://github.com/BepInEx/BepInEx)
   mod loader and its bridge plugin to the game folder. Restart the game once, then everything
   above works through the live bridge.
-- **Unreal Engine — numbers now, bridge scaffolded.** Number changes work via memory editing.
-  Structural mods need the Unreal bridge in `bridge-unreal/`, which is an honest scaffold:
-  it compiles but is untested against real games (per-version pattern verification required —
-  see its README). Telos says so instead of pretending.
+  If the game already uses MelonLoader for its mods, Telos leaves it alone (BepInEx next to
+  MelonLoader usually stops a game from starting) and says so.
+- **Unreal Engine — numbers, plus a UE4SS bridge.** Number changes work via memory editing.
+  For more, install [UE4SS](https://github.com/UE4SS-RE/RE-UE4SS/releases), the Unreal
+  community's mod loader. Extract it next to the game's exe in `Binaries/Win64` and start the
+  game once. Then **install** adds Telos's bridge as an ordinary UE4SS Lua mod
+  ([bridge-ue4ss/](bridge-ue4ss/README.md)): find objects, read and change their properties,
+  call their functions, teleport, game speed, gravity, console commands. Without UE4SS there is
+  still the older staged DLL in `bridge-unreal/`. Neither has been tried in a real game yet,
+  and Telos says so.
+- **RPG Maker MV/MZ — data files, plus a plugin bridge.** The game's database (items, enemies,
+  prices) is plain JSON that Telos edits. **install** adds one plugin
+  ([bridge-rpgmaker/](bridge-rpgmaker/README.md)) for live changes: gold, items, party HP and
+  levels, switches and variables by name, teleporting, walking through walls, random
+  encounters.
 - **Everything else (Godot, GameMaker, Source, ...) — numbers only.** Colors, models, spawning
   and removing things need per-game reverse engineering, which Telos doesn't do.
 
 **remove** in the same place takes out exactly what Telos added. It works for Unity games built
 with Mono (the Game files panel says *Unity (Mono)*); IL2CPP Unity games and other engines get
 memory editing and file editing.
+
+## Merge games
+
+**Link games.** Telos can have several games connected at once. Each game with a bridge stays
+connected, and values Telos found in a game's memory stay reachable after you attach to the next
+game (for as long as that game keeps running). Ask for a rule and Telos makes a *link*:
+
+> "When my health goes down in 60 Seconds, spawn that many zombies in my other game."
+> "Mirror my money in game A into my coins in game B."
+> "When I enter a new map in the RPG, slow down time in the Unity game."
+
+A link watches an event or a number in one game and changes another: `{delta}`, `{value}` and
+math like `{delta*10}` carry the change across. Mirrored values don't bounce back and forth.
+Links are listed in the dashboard's *Game links* panel, where you can pause or remove them.
+Links through bridges are saved; links on memory values last until that game closes, because
+memory addresses change every time a game starts.
+
+**Bring a model from another game.** The Unity bridge can load a `.glb`, `.gltf` or `.obj`
+into the running game. It can go next to you, or replace how something looks:
+
+> "Put the zombie model from my Downloads next to me."
+> "Make my character look like that knight model."
+
+Export the model first: [FModel](https://github.com/4sval/FModel) saves Unreal games' meshes as
+glTF, [AssetRipper](https://github.com/AssetRipper/AssetRipper) exports Unity games' models, and
+Blender converts most other formats to `.glb`. The model is drawn with the game's own shaders.
+It doesn't animate (no skeleton yet). Ripped assets belong to their games' makers, so keep this
+to your own single-player use.
 
 ## Pick your AI
 
@@ -206,6 +250,11 @@ in raw memory like a real game, and also connects to Telos as a game adapter. As
   `dotnet.ts` (variable names and types from a Unity game's `Assembly-CSharp.dll`), `bepinex.ts`
   (installs and removes the Unity bridge).
 - `bridge/` is the Unity bridge: a BepInEx plugin in C# ([bridge/README.md](bridge/README.md)).
+  `bridge-rpgmaker/` is the RPG Maker plugin, and `bridge-ue4ss/` is the UE4SS Lua mod for Unreal
+  games. `src/games/rpgmaker.ts` and `src/games/ue4ss.ts` install them, and `src/hub/ue4ssrelay.ts`
+  connects to the UE4SS mod through files, since UE4SS's Lua has no network access.
+- `src/hub/links.ts` is game links; `src/hub/bridges.ts` works out which connected bridge belongs
+  to the attached game.
 - `src/memory/` scans and edits another process's memory: `windows.ts` (Win32 via koffi),
   `linux.ts` (`/proc/<pid>/mem`), `scanner.ts` (first scan + refine, ~1.3 GB/s), `session.ts`
   (watch list, freezing, undo log), `safety.ts` (anti-cheat check).
@@ -256,6 +305,12 @@ In `.env` (all optional):
   features; on Linux the overlay simply covers the main screen.
 - The Windows memory backend and the overlay's window tracking follow the Win32 API docs but have
   only been run on Linux so far; please report what happens on your games.
+- The RPG Maker plugin and the UE4SS mod are tested against stand-ins for RPG Maker and UE4SS,
+  not yet inside real games. The same goes for model loading in Unity: the file reading is
+  tested, but building the mesh in a real game isn't yet. Loaded models are static (no
+  animation).
+- Game links on memory values stop when that game closes. Find the value again and remake the
+  link.
 - The Unity bridge's core (networking, JSON, reading and changing objects) is tested against Telos,
   but its Unity-specific tools haven't run inside a real Unity game yet. The bridge supports Mono
   Unity games only (not IL2CPP), and its changes aren't in the undo list.

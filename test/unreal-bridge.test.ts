@@ -99,3 +99,9 @@ test("a player-installed loader is detected", () => {
   const state = unrealBridgeState(profile);
   assert.equal(state.loader, "dwmapi.dll");
 });
+
+test("a loader next to the game's exe (Binaries/Win64, where UE4SS goes) is detected too", () => {
+  const { profile } = fakeUnreal();
+  fs.writeFileSync(path.join(path.dirname(profile.exe), "dwmapi.dll"), "ue4ss proxy");
+  assert.equal(unrealBridgeState(profile).loader, "dwmapi.dll");
+});

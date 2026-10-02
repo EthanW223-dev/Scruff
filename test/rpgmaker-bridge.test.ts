@@ -7,6 +7,7 @@ import { after, before, test } from "node:test";
 import vm from "node:vm";
 import { buildProfile, type UserDirs } from "../src/games/profile.ts";
 import { installRpgMakerBridge, readPlugins, removeRpgMakerBridge, rpgMakerBridgeState } from "../src/games/rpgmaker.ts";
+import { connectedBridge } from "../src/hub/bridges.ts";
 import { createHub } from "../src/hub/create.ts";
 import { fakeModel, text } from "./fake-model.ts";
 
@@ -43,6 +44,7 @@ function fakeRpgMaker(layout: "mv" | "mz") {
 test("installs into an MV game (www/) and comes out exactly, keeping the player's plugins", () => {
   const { install, base, profile } = fakeRpgMaker("mv");
   assert.equal(profile.engine, "RPG Maker MV/MZ");
+  assert.equal(profile.name, "Hero Quest", "named from its database, not Game.exe");
   assert.deepEqual(rpgMakerBridgeState(profile, PLUGIN), { supported: true, installed: false });
 
   const report = installRpgMakerBridge(profile, { pluginJs: PLUGIN, port: 7788 });
@@ -235,6 +237,8 @@ test("the plugin connects as the 'rpgmaker' adapter, named after the game", () =
   const a = hub.adapters.state().find((x) => x.prefix === "rpgmaker");
   assert.ok(a, "connected");
   assert.equal(a!.name, "RPG Maker bridge: Hero Quest");
+  // Attached to that game, Telos sees its bridge as this game's own.
+  assert.equal(connectedBridge(fakeRpgMaker("mz").profile, hub.adapters), "rpgmaker");
   for (const t of ["status", "read", "gold", "items", "give", "actor", "heal_party", "party", "switch", "variable", "teleport", "player", "common_event"]) {
     assert.ok(a!.tools.includes(t), t);
   }

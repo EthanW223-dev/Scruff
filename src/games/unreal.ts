@@ -67,7 +67,7 @@ export function unrealBridgeState(profile: GameProfile, bundledDll?: string): Un
             "Confirm one harmless change on screen before promising anything.",
         }
       : {}),
-    loader: detectLoader(profile.installDir),
+    loader: detectLoader(profile),
   };
 }
 
@@ -163,9 +163,11 @@ export function removeUnrealBridge(profile: GameProfile): { removed: string[]; r
 }
 
 /** Look for a UE mod loader next to the game's exe (player-installed; Telos never adds one). */
-function detectLoader(installDir: string): string | null {
+function detectLoader(profile: GameProfile): string | null {
   const candidates = ["dwmapi.dll", "UE4SS.dll", "xinput1_3.dll", "winmm.dll"];
-  const dirs = [path.join(installDir, "Binaries", "Win64"), installDir];
+  // Next to the exe (<Root>/<Project>/Binaries/Win64; installDir is <Root>), in newer UE4SS's ue4ss/ folder, or at the top.
+  const exeDir = path.dirname(profile.exe);
+  const dirs = [exeDir, path.join(exeDir, "ue4ss"), path.join(profile.installDir, "Binaries", "Win64"), profile.installDir];
   for (const d of dirs) {
     for (const c of candidates) {
       try {

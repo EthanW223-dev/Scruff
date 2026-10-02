@@ -22,7 +22,10 @@ export function connectedBridge(profile: GameProfile, adapters: AdapterRegistry)
   const family = bridgeFamily(profile.engine);
   if (!family) return null;
   const mine = adapters.state().filter((a) => a.prefix.startsWith(family));
-  const names = [profile.name, profile.exe.split(/[/\\]/).pop()!.replace(/\.exe$/i, "").replace(/-Win64-Shipping$/i, "")].map(norm);
+  const base = (p: string) => p.split(/[/\\]/).pop() ?? "";
+  const names = [profile.name, base(profile.exe).replace(/\.exe$/i, "").replace(/-Win64-Shipping$/i, ""), base(profile.installDir)]
+    .map(norm)
+    .filter((n) => n && n !== "game");
   const hit = mine.find((a) => {
     const game = norm(a.name.includes(":") ? a.name.slice(a.name.indexOf(":") + 1) : "");
     if (!game) return false;

@@ -38,7 +38,11 @@ Connect to `ws://127.0.0.1:7777/ws/adapter` (connections from other machines nee
 }
 ```
 
-- `game` becomes the tool prefix the AI sees (`skyrim__add_item`).
+- `game` becomes the tool prefix the AI sees (`skyrim__add_item`). A second adapter with the
+  same `game` gets `skyrim2`, and so on.
+- End `name` with the game's title after a colon (`"Skyrim tools: The Elder Scrolls V: Skyrim"`).
+  Telos uses it to tell which connected adapter belongs to the game you're attached to, and game
+  links store it, so a link still finds its game when adapters connect in a different order.
 - Tool names: letters, digits, `_` and `-`, up to 36 characters.
 - `input_schema` is JSON Schema. The AI reads it to know what to send.
 

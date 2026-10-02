@@ -135,6 +135,16 @@ export function buildProfile(exe: string, dirs: UserDirs = userDirs()): GameProf
     else if (exists(path.join(installDir, "www", "data", "System.json")) || exists(path.join(installDir, "data", "System.json"))) {
       profile.engine = "RPG Maker MV/MZ";
       const www = exists(path.join(installDir, "www")) ? path.join(installDir, "www") : installDir;
+      // Every RPG Maker game's exe is Game.exe: the real name is in its database.
+      try {
+        const title = JSON.parse(fs.readFileSync(path.join(www, "data", "System.json"), "utf8")).gameTitle;
+        if (typeof title === "string" && title.trim()) {
+          profile.name = title.trim();
+          names.add(profile.name);
+        }
+      } catch {
+        // unreadable or encrypted: keep the exe's name
+      }
       extraSaveDirs.push(path.join(www, "save"));
       profile.notes.push("RPG Maker keeps items, actors and prices in plain JSON under data/ (edit_game_file works on them).");
     } else if (isDir(path.join(installDir, "renpy"))) {

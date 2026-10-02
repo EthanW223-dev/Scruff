@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { installUnrealBridge, removeUnrealBridge, unrealBridgeState } from "../games/unreal.ts";
+import { UE4SS_RELEASES, installUe4ssBridge, removeUe4ssBridge, ue4ssBridgeState } from "../games/ue4ss.ts";
 import type { GameProfile } from "../games/profile.ts";
 import type { AdapterRegistry } from "./adapters.ts";
 import { connectedBridge } from "./bridges.ts";
@@ -19,6 +20,8 @@ import { defineTool, json, type HubTool } from "./tools.ts";
 
 export interface UnrealBridgeOptions {
   bridgeDll: string;
+  /** bridge-ue4ss/TelosBridge: the bridge as a UE4SS Lua mod (preferred when the game has UE4SS). */
+  ue4ssMod: string;
   /** The hub's live port, so the staged hub.txt always points at this session. */
   port: number;
 }
@@ -47,10 +50,30 @@ export function unrealBridgeTools(games: GameManager, adapters: AdapterRegistry,
         const p = profile();
         const state = unrealBridgeState(p, opts.bridgeDll);
         const connected = unrealBridgeConnected(adapters, p);
+        const ue4ss = ue4ssBridgeState(p, `${opts.ue4ssMod}/Scripts/main.lua`);
+        if (state.supported && ue4ss.present) {
+          // The UE4SS mod is the way in: no injector, loads with the game like any UE4SS mod.
+          return json({
+            ue4ss,
+            connected,
+            verified: false,
+            next: connected
+              ? "Connected through UE4SS but UNVERIFIED on this game: confirm one harmless change on screen before promising structural mods. Use use_game_adapter with the unreal__ tools (start with unreal__player)."
+              : ue4ss.outdated
+                ? "A newer Telos UE4SS mod is ready: install_ue4ss_bridge updates it, then the player restarts the game."
+                : ue4ss.installed
+                  ? "The Telos UE4SS mod is installed but not running: the player restarts the game (quit fully, start again)."
+                  : "This game has UE4SS: ask the player if they'd like the Telos mod for it (one mod folder and a line in mods.txt; restart the game), then install_ue4ss_bridge.",
+          });
+        }
         return json({
           ...state,
+          ue4ss,
           connected,
           verified: false,
+          recommended: state.supported && !connected
+            ? `The easiest way in is UE4SS, the Unreal mod loader the player installs from ${UE4SS_RELEASES} (extract it next to the game's exe in Binaries/Win64); then install_ue4ss_bridge.`
+            : undefined,
           next: !state.supported
             ? "Not available for this game: use memory editing and game files."
             : state.outdated
@@ -78,6 +101,32 @@ export function unrealBridgeTools(games: GameManager, adapters: AdapterRegistry,
         const report = installUnrealBridge(profile(), { bridgeDll: opts.bridgeDll, port: opts.port });
         games.emit("update");
         return json(report);
+      },
+    }),
+
+    defineTool({
+      name: "install_ue4ss_bridge",
+      description:
+        "Add Telos's bridge to the attached Unreal game as a UE4SS mod (the game must already have UE4SS, which the " +
+        "player installs): one mod folder and one line in mods.txt. Only after the player agreed. Restart the game " +
+        "afterwards; it then connects as the 'unreal' adapter: find objects, read/change properties, call functions, " +
+        "teleport, game speed, gravity, console commands.",
+      input: z.object({}),
+      run() {
+        const report = installUe4ssBridge(profile(), { modSource: opts.ue4ssMod });
+        games.emit("update");
+        return json(report);
+      },
+    }),
+
+    defineTool({
+      name: "remove_ue4ss_bridge",
+      description: "Take Telos's UE4SS mod out of the attached game (its folder and its mods.txt line); UE4SS itself stays.",
+      input: z.object({}),
+      run() {
+        const report = removeUe4ssBridge(profile());
+        games.emit("update");
+        return json({ ...report, next: "Restart the game to finish." });
       },
     }),
 

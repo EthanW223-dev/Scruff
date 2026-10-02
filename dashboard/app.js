@@ -380,9 +380,10 @@ function bridgeRow(bridge, engine) {
   }
   if (!bridge?.supported) return [];
   // The hub says whether this game's own bridge is connected (other games' may be too, for links).
-  const unreal = engine === "Unreal Engine";
+  const unreal = engine === "Unreal Engine" && bridge.via !== "UE4SS";
+  const ue4ss = bridge.via === "UE4SS";
   const rpgmaker = engine.startsWith("RPG Maker");
-  const connected = bridge.connected ?? (state?.adapters ?? []).some((a) => a.prefix.startsWith(unreal ? "unreal" : rpgmaker ? "rpgmaker" : "unity"));
+  const connected = bridge.connected ?? (state?.adapters ?? []).some((a) => a.prefix.startsWith(unreal || ue4ss ? "unreal" : rpgmaker ? "rpgmaker" : "unity"));
   const dd = el("dd", "bridge");
   const status = connected
     ? bridge.outdated ? "connected · update ready" : "connected"
@@ -397,13 +398,15 @@ function bridgeRow(bridge, engine) {
     });
     dd.append(" ", button);
   };
-  if (!bridge.installed) {
+  if (!bridge.installed && !connected) {
     action(
       "install",
       "install_bridge",
       unreal
         ? "Put the Telos Unreal bridge next to the game (bridge-unreal/README.md says how it loads)"
-        : rpgmaker
+        : ue4ss
+          ? "Add Telos's mod to this game's UE4SS (one mod folder and a line in mods.txt), for live objects, properties, speed and more (needs a game restart)"
+          : rpgmaker
           ? "Add the Telos bridge plugin to the game (one file plus a line in js/plugins.js), for live gold, items, party and more (needs a game restart)"
           : "Add BepInEx and the Telos bridge to the game folder, so the AI can change anything in it (needs a game restart)",
     );
@@ -413,7 +416,7 @@ function bridgeRow(bridge, engine) {
       action(
         "remove",
         "remove_bridge",
-        unreal ? "Take the staged bridge out of the game folder" : rpgmaker ? "Take the bridge plugin out of the game" : "Take the bridge (and BepInEx, if Telos added it) out of the game",
+        unreal ? "Take the staged bridge out of the game folder" : ue4ss ? "Take Telos's mod out of UE4SS (UE4SS stays)" : rpgmaker ? "Take the bridge plugin out of the game" : "Take the bridge (and BepInEx, if Telos added it) out of the game",
       );
     }
   }
@@ -500,6 +503,7 @@ function renderLinks(links) {
       const li = el("li", l.enabled ? "" : "undone");
       const status = l.problem ? `⚠ ${l.problem}` : !l.enabled ? "paused" : l.fired ? `fired ${l.fired}×` : "waiting";
       const what = el("span", "what", l.description);
+      what.title = l.description;
       const vals = el("span", "vals", status);
       if (l.problem) vals.title = l.problem;
       li.append(what, vals);

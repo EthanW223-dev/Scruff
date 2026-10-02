@@ -7,6 +7,9 @@ import { describeProfile } from "../games/profile.ts";
 import { JevService, JevSettings, type Jev } from "./jev.ts";
 import { LinkManager, linkTools } from "./links.ts";
 import { modelFileTools } from "./modelfiles.ts";
+import { Ue4ssRelays } from "./ue4ssrelay.ts";
+import { ue4ssModDir } from "../games/ue4ss.ts";
+import fs from "node:fs";
 import { McpEndpoint } from "./mcp.ts";
 import { engineModSupport } from "./mods.ts";
 import { quickPath } from "./quick.ts";
@@ -41,11 +44,19 @@ export async function createHub(opts: HubOptions) {
   games.il2cppBridgeDll = path.join(opts.root, "bridge", "TelosBridge.IL2CPP.dll");
   games.unrealBridgeDll = path.join(opts.root, "bridge-unreal", "TelosBridgeUE.dll");
   games.rpgMakerBridgeJs = path.join(opts.root, "bridge-rpgmaker", "TelosBridge.js");
+  games.ue4ssBridgeMain = path.join(opts.root, "bridge-ue4ss", "TelosBridge", "Scripts", "main.lua");
   const adapters = new AdapterRegistry();
   const screen = new ScreenBridge();
   const dataDir = opts.dataDir ?? path.join(opts.root, ".scruff");
   const themes = new ThemeStore(path.join(dataDir, "themes.json"), games);
   const links = new LinkManager({ file: path.join(dataDir, "links.json"), adapters, games });
+  // Unreal games with Telos's UE4SS mod talk through files: a relay per game shows each as an adapter.
+  const ue4ssRelays = new Ue4ssRelays(adapters);
+  games.on("update", () => {
+    const p = games.profile;
+    const modDir = p && p.engine === "Unreal Engine" ? ue4ssModDir(p) : null;
+    if (p && modDir && fs.existsSync(path.join(modDir, "Scripts", "main.lua"))) ue4ssRelays.ensure(modDir, p.name);
+  });
 
   const brain = opts.brain ?? opts.router?.brain();
   if (!brain) throw new Error("createHub needs a router or a brain.");
@@ -97,6 +108,7 @@ export async function createHub(opts: HubOptions) {
     }),
     ...unrealBridgeTools(games, adapters, {
       bridgeDll: path.join(opts.root, "bridge-unreal", "TelosBridgeUE.dll"),
+      ue4ssMod: path.join(opts.root, "bridge-ue4ss", "TelosBridge"),
       port: opts.port,
     }),
     ...rpgMakerBridgeTools(games, adapters, {
@@ -160,6 +172,7 @@ export async function createHub(opts: HubOptions) {
     close() {
       agent.stop();
       links.close();
+      ue4ssRelays.close();
       games.detach();
       server.closeAllConnections();
       server.close();

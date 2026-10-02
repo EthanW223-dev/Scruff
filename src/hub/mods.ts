@@ -37,8 +37,9 @@ const BRIDGE_READY = "The bridge is connected: prefer it over memory editing for
 
 const UNREAL_NOTE =
   "Unreal Engine: number changes work via memory editing. Structural mods (finding objects, " +
-  "reading/writing properties, slow-mo) need the Unreal bridge: offer unreal_bridge_status in " +
-  "one line. The bridge compiles and its protocol is tested, but it is UNVERIFIED against real " +
+  "reading/writing properties, slow-mo, console commands) need the Unreal bridge: check " +
+  "unreal_bridge_status and offer it in one line. With UE4SS in the game (the community mod " +
+  "loader the player installs), the bridge is a UE4SS mod: install_ue4ss_bridge, nothing to inject. The bridge compiles and its protocol is tested, but it is UNVERIFIED against real " +
   "games — say so plainly on first use with a game, and confirm one harmless change on screen " +
   "before promising anything. ";
 const UNREAL_READY =

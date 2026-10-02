@@ -1,6 +1,8 @@
 import { EventEmitter } from "node:events";
+import path from "node:path";
 import { bridgeState, installBridge } from "../games/bepinex.ts";
 import { installRpgMakerBridge, rpgMakerBridgeState } from "../games/rpgmaker.ts";
+import { installUe4ssBridge, ue4ssBridgeState } from "../games/ue4ss.ts";
 import { installUnrealBridge, unrealBridgeState } from "../games/unreal.ts";
 import { buildProfile, type GameProfile } from "../games/profile.ts";
 import { z } from "zod";
@@ -41,6 +43,8 @@ export class GameManager extends EventEmitter {
   unrealBridgeDll: string | null = null;
   /** The RPG Maker bridge plugin Telos ships. */
   rpgMakerBridgeJs: string | null = null;
+  /** The UE4SS mod's script Telos ships. */
+  ue4ssBridgeMain: string | null = null;
   scanProgress: number | null = null;
 
   async listGames(search?: string): Promise<ProcessInfo[]> {
@@ -106,6 +110,16 @@ export class GameManager extends EventEmitter {
   async updateBridge(tries = 4): Promise<boolean> {
     const profile = this.profile;
     if (!profile) return false;
+    if (profile.engine === "Unreal Engine" && this.ue4ssBridgeMain && ue4ssBridgeState(profile, this.ue4ssBridgeMain).outdated) {
+      try {
+        installUe4ssBridge(profile, { modSource: path.dirname(path.dirname(this.ue4ssBridgeMain)) });
+        this.emit("notice", "Updated Telos's UE4SS mod in the game; it loads the next time you start it.");
+        return true;
+      } catch (err) {
+        this.emit("notice", `Couldn't update Telos's UE4SS mod: ${(err as Error).message}`);
+        return false;
+      }
+    }
     if (profile.engine === "Unreal Engine") {
       if (!this.unrealBridgeDll || !unrealBridgeState(profile, this.unrealBridgeDll).outdated) return false;
       try {
@@ -161,8 +175,11 @@ export class GameManager extends EventEmitter {
 
   state() {
     const p = this.profile;
+    const ue4ss = p && p.engine === "Unreal Engine" ? ue4ssBridgeState(p, this.ue4ssBridgeMain ?? undefined) : null;
     const bridge =
-      p && p.engine === "Unreal Engine"
+      p && ue4ss?.present
+        ? { supported: true, installed: ue4ss.installed, ...(ue4ss.outdated ? { outdated: true } : {}), via: "UE4SS" }
+        : p && p.engine === "Unreal Engine"
         ? unrealBridgeState(p, this.unrealBridgeDll ?? undefined)
         : p && p.engine.startsWith("RPG Maker")
           ? rpgMakerBridgeState(p, this.rpgMakerBridgeJs ?? undefined)

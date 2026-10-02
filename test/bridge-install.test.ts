@@ -189,29 +189,116 @@ test("IL2CPP games are supported: BepInEx 6 IL2CPP zip installs the IL2CPP bridg
   assert.ok(!fs.existsSync(path.join(install, "BepInEx")));
 });
 
-test("IL2CPP picks the BepInEx 6 IL2CPP pre-release from the release list", async () => {
+const BE_PAGE = `<a href="/projects/bepinex_be/787/BepInEx-Unity.IL2CPP-win-x64-6.0.0-be.787%2B7cb1246.zip">x64</a>
+<a href="/projects/bepinex_be/788/BepInEx-Unity.IL2CPP-win-x86-6.0.0-be.788%2B5b766a3.zip">x86</a>
+<a href="/projects/bepinex_be/788/BepInEx-Unity.IL2CPP-win-x64-6.0.0-be.788%2B5b766a3.zip">x64</a>
+<a href="/projects/bepinex_be/788/BepInEx-Unity.Mono-win-x64-6.0.0-be.788%2B5b766a3.zip">mono</a>`;
+
+/** A BepInEx 6 IL2CPP build as Telos sees it: its version in BepInEx.Core.dll, the metadata range in LibCpp2IL.dll. */
+function be6Zip(build: string, maxMetadata: number, extra: Record<string, string> = {}) {
+  // .NET stores the message as UTF-16, here at an odd offset like in the real DLL.
+  const lib = Buffer.concat([Buffer.from([0x4d, 0x5a, 0x00]), Buffer.from(`Unsupported metadata version found! We support 23-${maxMetadata}, got `, "utf16le")]);
+  return writeZip({
+    "winhttp.dll": "doorstop",
+    "doorstop_config.ini": "[General]\nenabled = true\n",
+    "dotnet/coreclr.dll": `coreclr for ${build}`,
+    "BepInEx/core/BepInEx.Unity.IL2CPP.dll": "core6",
+    "BepInEx/core/BepInEx.Core.dll": `MZ...6.0.0-${build}+abc123...`,
+    "BepInEx/core/LibCpp2IL.dll": lib.toString("latin1"),
+    ...extra,
+  });
+}
+
+/** Unity 2022.3+: IL2CPP metadata v31 (global-metadata.dat: magic 0xFAB11BAF, then the version). */
+function setMetadataVersion(install: string, version: number) {
+  const head = Buffer.alloc(16);
+  head.writeUInt32LE(0xfab11baf, 0);
+  head.writeInt32LE(version, 4);
+  fs.writeFileSync(path.join(install, "Game_Data", "il2cpp_data", "Metadata", "global-metadata.dat"), head);
+}
+
+test("IL2CPP takes the newest bleeding-edge BepInEx 6 build for the game's bitness (GitHub's are too old)", async () => {
   const { profile } = fakeGame({ il2cpp: true });
   const asked: string[] = [];
   const fakeFetch = (async (url: string) => {
     asked.push(url);
-    if (url.includes("api.github.com")) {
-      return Response.json([
-        { tag_name: "v5.4.23.3", prerelease: false, assets: [{ name: "BepInEx_win_x64_5.4.23.3.zip", browser_download_url: "https://x/5.zip" }] },
-        { tag_name: "v6.0.0-pre.2", prerelease: true, assets: [{ name: "BepInEx-Unity.IL2CPP-win-x64-6.0.0-pre.2.zip", browser_download_url: "https://x/6il2cpp.zip" }] },
-      ]);
-    }
-    return new Response(
-      new Uint8Array(
-        writeZip({
-          "winhttp.dll": "doorstop",
-          "BepInEx/core/BepInEx.Unity.IL2CPP.dll": "core6",
-        }),
-      ),
-    );
+    if (url === "https://builds.bepinex.dev/projects/bepinex_be") return new Response(BE_PAGE);
+    return new Response(new Uint8Array(be6Zip("be.788", 106)));
   }) as unknown as typeof fetch;
   const IL2CPP_BRIDGE = path.resolve(import.meta.dirname, "..", "bridge", "TelosBridge.IL2CPP.dll");
-  const report = await installBridge(profile, { bridgeDll: IL2CPP_BRIDGE, fetch: fakeFetch });
-  assert.equal(report.bepinexSource, "https://x/6il2cpp.zip");
+  const report = await installBridge(profile, { bridgeDll: IL2CPP_BRIDGE, fetch: fakeFetch, archOverride: "x64" });
+  assert.equal(report.bepinexSource, "https://builds.bepinex.dev/projects/bepinex_be/788/BepInEx-Unity.IL2CPP-win-x64-6.0.0-be.788%2B5b766a3.zip");
+  assert.ok(!asked.some((u) => u.includes("api.github.com")), "the GitHub releases aren't used for IL2CPP");
+
+  // The build list unreachable: a known-good build.
+  const { profile: p2 } = fakeGame({ il2cpp: true, x86: true });
+  const offline = (async (url: string) =>
+    url.endsWith("bepinex_be") ? new Response("down", { status: 503 }) : new Response(new Uint8Array(be6Zip("be.788", 106)))) as unknown as typeof fetch;
+  const r2 = await installBridge(p2, { bridgeDll: IL2CPP_BRIDGE, fetch: offline });
+  assert.match(r2.bepinexSource!, /bepinex_be\/788\/BepInEx-Unity\.IL2CPP-win-x86-6\.0\.0-be\.788/);
+});
+
+test("an IL2CPP game whose BepInEx is too old for its Unity (metadata v31 vs 23-29) gets BepInEx updated, keeping the player's mods", async () => {
+  const { install, profile } = fakeGame({ il2cpp: true });
+  setMetadataVersion(install, 31);
+  // The player's BepInEx be.697 (as in Schedule I): another mod, their settings, what it generated, and its failed start.
+  for (const e of readZip(be6Zip("be.697", 29))) {
+    fs.mkdirSync(path.dirname(path.join(install, e.name)), { recursive: true });
+    fs.writeFileSync(path.join(install, e.name), e.data());
+  }
+  const mine = { "BepInEx/plugins/OtherMod.dll": "someone's mod", "BepInEx/config/BepInEx.cfg": "[Logging.Console]\nEnabled = false\n", "BepInEx/interop/Assembly-CSharp.dll": "stale" };
+  for (const [file, data] of Object.entries(mine)) {
+    fs.mkdirSync(path.dirname(path.join(install, file)), { recursive: true });
+    fs.writeFileSync(path.join(install, file), data);
+  }
+  fs.writeFileSync(path.join(install, "BepInEx", "LogOutput.log"), "[Error  :InteropManager] ... System.FormatException: Unsupported metadata version found! We support 23-29, got 31\n");
+
+  const IL2CPP_BRIDGE = path.resolve(import.meta.dirname, "..", "bridge", "TelosBridge.IL2CPP.dll");
+  const before = bridgeState(profile, IL2CPP_BRIDGE);
+  assert.deepEqual(before.bepinexTooOld, { build: "be.697", supports: "23-29", needs: 31 });
+  assert.match(before.reason!, /be\.697.*metadata v31; it reads 23-29.*won't start/);
+
+  // Not while the game runs (its BepInEx files are locked).
+  await assert.rejects(
+    installBridge(profile, { bridgeDll: IL2CPP_BRIDGE, bepinexZip: "unused", isRunning: async () => true }),
+    /is running.*Quit the game fully/,
+  );
+
+  const newZip = path.join(install, "..", "be788.zip");
+  fs.writeFileSync(newZip, be6Zip("be.788", 106, { "BepInEx/config/BepInEx.cfg": "[Logging.Console]\nEnabled = true\n" }));
+  const report = await installBridge(profile, { bridgeDll: IL2CPP_BRIDGE, bepinexZip: newZip, archOverride: "x64", isRunning: async () => false });
+  assert.deepEqual(report.updatedBepInEx, { from: "be.697", to: "be.788" });
+  assert.equal(report.installedBepInEx, false);
+  assert.match(report.next, /first start.*minute or two/);
+
+  const read = (f: string) => fs.readFileSync(path.join(install, f), "utf8");
+  assert.equal(read("dotnet/coreclr.dll"), "coreclr for be.788", "BepInEx's own files replaced");
+  assert.equal(read("BepInEx/plugins/OtherMod.dll"), "someone's mod", "the player's mods stay");
+  assert.equal(read("BepInEx/config/BepInEx.cfg"), mine["BepInEx/config/BepInEx.cfg"], "and their settings");
+  assert.ok(!fs.existsSync(path.join(install, "BepInEx", "interop")), "the old build's generated files are regenerated");
+  assert.ok(!fs.existsSync(path.join(install, "BepInEx", "LogOutput.log")));
+  assert.ok(fs.existsSync(path.join(install, "BepInEx", "plugins", "ScruffBridge", "TelosBridge.IL2CPP.dll")));
+
+  const after = bridgeState(profile, IL2CPP_BRIDGE);
+  assert.equal(after.bepinexTooOld, undefined);
+  assert.equal(after.installed, true);
+  assert.equal(after.existingBepInEx, true, "still the player's BepInEx");
+  assert.equal(removeBridge(profile).keptBepInEx, true);
+  assert.equal(read("BepInEx/plugins/OtherMod.dll"), "someone's mod");
+});
+
+test("a BepInEx that already reads the game's metadata is left as it is", async () => {
+  const { install, profile } = fakeGame({ il2cpp: true });
+  setMetadataVersion(install, 31);
+  for (const e of readZip(be6Zip("be.753", 31))) {
+    fs.mkdirSync(path.dirname(path.join(install, e.name)), { recursive: true });
+    fs.writeFileSync(path.join(install, e.name), e.data());
+  }
+  const IL2CPP_BRIDGE = path.resolve(import.meta.dirname, "..", "bridge", "TelosBridge.IL2CPP.dll");
+  assert.equal(bridgeState(profile, IL2CPP_BRIDGE).bepinexTooOld, undefined);
+  const report = await installBridge(profile, { bridgeDll: IL2CPP_BRIDGE, bepinexZip: "never-downloaded.zip" });
+  assert.equal(report.updatedBepInEx, undefined);
+  assert.equal(fs.readFileSync(path.join(install, "dotnet", "coreclr.dll"), "utf8"), "coreclr for be.753");
 });
 
 test("a BepInEx 5 zip is refused for IL2CPP games, and the wrong installed core fails loudly", async () => {

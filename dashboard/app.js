@@ -385,6 +385,20 @@ function bridgeRow(bridge, engine) {
   const rpgmaker = engine.startsWith("RPG Maker");
   const connected = bridge.connected ?? (state?.adapters ?? []).some((a) => a.prefix.startsWith(unreal || ue4ss ? "unreal" : rpgmaker ? "rpgmaker" : "unity"));
   const dd = el("dd", "bridge");
+  if (bridge.bepinexTooOld && !connected) {
+    // The game's BepInEx can't read this Unity version: the game won't start until it's updated.
+    const warn = el("span", "warn", "BepInEx too old for this game");
+    warn.title = bridge.reason ?? "";
+    dd.append(warn, " ");
+    const fix = el("button", "link", "update BepInEx");
+    fix.title = `${bridge.reason ?? ""} Quit the game first.`;
+    fix.addEventListener("click", () => {
+      fix.disabled = true;
+      send({ type: "install_bridge" });
+    });
+    dd.append(fix);
+    return [el("dt", "", "Bridge"), dd];
+  }
   const status = connected
     ? bridge.outdated ? "connected · update ready" : "connected"
     : bridge.outdated ? "update ready" : bridge.installed ? (unreal ? "staged, not loaded yet" : "installed, restart the game") : "not installed";

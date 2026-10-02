@@ -360,6 +360,7 @@ textarea:focus { box-shadow: 3px 3px 0 var(--accent); }
 .game-info dt { color: var(--muted); text-transform: uppercase; font-size: 10.5px; padding-top: 1px; }
 .game-info dd { margin: 0; overflow-wrap: anywhere; }
 .game-info .bridge .ok { background: var(--accent); color: var(--accent-ink); padding: 0 4px; }
+.game-info .bridge .warn { background: var(--danger); color: #fff; padding: 0 4px; }
 
 /* ---------- dialogs ---------- */
 .picker {

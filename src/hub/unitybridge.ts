@@ -52,6 +52,8 @@ export function unityBridgeTools(games: GameManager, adapters: AdapterRegistry, 
           connected,
           next: !state.supported
             ? (state.reason ?? "Not available for this game: use memory editing and game files.")
+            : state.bepinexTooOld
+              ? `${state.reason} Ask the player to quit the game fully, then install_unity_bridge: it updates BepInEx and the bridge together.`
             : state.outdated
               ? "A newer bridge is ready. Ask the player to quit the game, then install_unity_bridge to update it and start the game again." +
                 (connected ? " The current one works meanwhile." : "")

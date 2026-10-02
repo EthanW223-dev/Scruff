@@ -293,9 +293,12 @@ export async function startServer(opts: ServerOptions): Promise<http.Server> {
         games.emit("update");
         toast(
           ws,
-          updating
-            ? "Updated the Telos bridge. Start the game again to load it."
-            : `Installed${report.installedBepInEx ? " BepInEx and" : ""} the Telos bridge. Restart the game to load it.`,
+          report.updatedBepInEx
+            ? `Updated BepInEx (${report.updatedBepInEx.from ?? "old build"} → ${report.updatedBepInEx.to ?? "current"}) so it can read this game, and added the Telos bridge. ` +
+                "Start the game: the first start takes a minute or two while BepInEx sets itself up."
+            : updating
+              ? "Updated the Telos bridge. Start the game again to load it."
+              : `Installed${report.installedBepInEx ? " BepInEx and" : ""} the Telos bridge. Restart the game to load it.`,
           "info",
         );
         break;

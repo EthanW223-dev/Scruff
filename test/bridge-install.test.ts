@@ -298,3 +298,25 @@ test("installs fine when the game is not running", async () => {
   const report = await installBridge(profile, { bridgeDll: BRIDGE, bepinexZip: zipFile, isRunning: async () => false });
   assert.equal(report.installedBepInEx, true);
 });
+
+test("a game that runs MelonLoader is left alone: no BepInEx next to it, with the reason", async () => {
+  const { install } = fakeGame();
+  fs.mkdirSync(path.join(install, "MelonLoader", "net35"), { recursive: true });
+  fs.writeFileSync(path.join(install, "MelonLoader", "net35", "MelonLoader.dll"), "ml");
+  fs.writeFileSync(path.join(install, "version.dll"), "ml proxy");
+  const profile = buildProfile(path.join(install, "Game.exe"), { home: install, appData: install, localAppData: install });
+  assert.ok(profile.notes.some((n) => /MelonLoader/.test(n)));
+
+  const state = bridgeState(profile, BRIDGE);
+  assert.equal(state.supported, false);
+  assert.equal(state.otherLoader, "MelonLoader");
+  assert.match(state.reason ?? "", /MelonLoader.*Memory editing/s);
+
+  const before = tree(install);
+  await assert.rejects(installBridge(profile, { bridgeDll: BRIDGE, bepinexZip: "unused.zip", archOverride: "x64" }), /already uses MelonLoader/);
+  assert.deepEqual(tree(install), before, "nothing was written");
+
+  // An empty leftover MelonLoader folder doesn't count.
+  fs.rmSync(path.join(install, "MelonLoader", "net35"), { recursive: true });
+  assert.equal(bridgeState(profile, BRIDGE).supported, true);
+});

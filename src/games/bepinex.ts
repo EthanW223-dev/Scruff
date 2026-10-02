@@ -33,6 +33,8 @@ export interface BridgeState {
   outdated?: boolean;
   /** BepInEx was already there before Telos (the player mods this game). */
   existingBepInEx?: boolean;
+  /** Another Unity mod loader runs this game's mods; BepInEx next to it usually breaks the game. */
+  otherLoader?: "MelonLoader";
 }
 
 export interface BridgeManifest {
@@ -92,6 +94,26 @@ const FLAVORS = {
   },
 } as const;
 
+/**
+ * MelonLoader, the other big Unity mod loader (Mono and IL2CPP). It leaves a MelonLoader folder
+ * next to the exe, plus Mods/ and UserLibs/ for its mods.
+ */
+export function hasMelonLoader(dir: string): boolean {
+  const ml = path.join(dir, "MelonLoader");
+  try {
+    if (!fs.statSync(ml).isDirectory()) return false;
+  } catch {
+    return false;
+  }
+  // Its own DLL sits at the top (0.5) or under net35/ and net6/ (0.6+); a bare folder of leftovers doesn't count.
+  return ["MelonLoader.dll", "net35/MelonLoader.dll", "net6/MelonLoader.dll", "net8/MelonLoader.dll"].some((f) => fs.existsSync(path.join(ml, f)));
+}
+
+const MELON_CONFLICT =
+  "This game already uses MelonLoader for its mods. Adding BepInEx next to it usually stops the game from starting, " +
+  "so Telos won't. Memory editing and the game's files still work. To use the bridge, remove MelonLoader (its " +
+  "MelonLoader folder and version.dll) first, then install the bridge again.";
+
 /** `bundledDll`: the bridge Telos ships, to tell whether the installed one is older. */
 export function bridgeState(profile: GameProfile, bundledDll?: string): BridgeState {
   const flavor = unityFlavor(profile);
@@ -108,6 +130,9 @@ export function bridgeState(profile: GameProfile, bundledDll?: string): BridgeSt
   const installed = fs.existsSync(plugin);
   const existing = fs.existsSync(path.join(dir, coreRel));
   const outdated = installed && bundledDll !== undefined && fileHash(plugin) !== fileHash(bundledDll);
+  if (!existing && !installed && hasMelonLoader(dir)) {
+    return { supported: false, installed: false, otherLoader: "MelonLoader", reason: MELON_CONFLICT };
+  }
   return {
     supported: true,
     installed,
@@ -210,6 +235,7 @@ export async function installBridge(profile: GameProfile, opts: InstallOptions):
   let source: string | undefined;
   const needBepInEx = !fs.existsSync(path.join(dir, coreRel));
   if (needBepInEx) {
+    if (hasMelonLoader(dir)) throw new Error(MELON_CONFLICT);
     // The wrong major version's core (BepInEx 5 in an IL2CPP game or vice versa) would
     // silently not load the bridge: fail loudly instead of installing alongside it.
     const other = flavor === "mono" ? FLAVORS.il2cpp : FLAVORS.mono;

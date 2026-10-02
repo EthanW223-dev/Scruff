@@ -93,6 +93,9 @@ export function buildProfile(exe: string, dirs: UserDirs = userDirs()): GameProf
     } else {
       profile.engine = "Unity";
     }
+    if (isDir(path.join(installDir, "MelonLoader"))) {
+      profile.notes.push("This game has MelonLoader (mods in its Mods folder); Telos won't add BepInEx next to it.");
+    }
     // app.info holds the company and product names Unity uses for its save folder.
     const [company, product] = dataDir ? readLines(path.join(dataDir, "app.info")) : [];
     if (product) {

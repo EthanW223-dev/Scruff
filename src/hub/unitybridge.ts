@@ -1,7 +1,9 @@
 import { z } from "zod";
 import { bridgeState, unityFlavor, installBridge, removeBridge } from "../games/bepinex.ts";
 import { listProcesses } from "../memory/platform.ts";
+import type { GameProfile } from "../games/profile.ts";
 import type { AdapterRegistry } from "./adapters.ts";
+import { connectedBridge } from "./bridges.ts";
 import type { GameManager } from "./game.ts";
 import { defineTool, json, type HubTool } from "./tools.ts";
 
@@ -19,8 +21,9 @@ export interface UnityBridgeOptions {
   port: number;
 }
 
-/** Whether the bridge is connected right now (from any game). */
-export function unityBridgeConnected(adapters: AdapterRegistry): boolean {
+/** Whether a Unity bridge is connected right now: this game's when a profile is given, else any game's. */
+export function unityBridgeConnected(adapters: AdapterRegistry, profile?: GameProfile | null): boolean {
+  if (profile) return profile.engine.startsWith("Unity") && connectedBridge(profile, adapters) !== null;
   return adapters.state().some((a) => a.prefix.startsWith("unity"));
 }
 
@@ -43,17 +46,17 @@ export function unityBridgeTools(games: GameManager, adapters: AdapterRegistry, 
         const backend = unityFlavor(p);
         const dll = backend === "il2cpp" ? opts.il2cppBridgeDll : opts.bridgeDll;
         const state = bridgeState(p, dll);
-        const connected = unityBridgeConnected(adapters);
+        const connected = unityBridgeConnected(adapters, p);
         return json({
           ...state,
           connected,
           next: !state.supported
-            ? "Not available for this game: use memory editing and game files."
+            ? (state.reason ?? "Not available for this game: use memory editing and game files.")
             : state.outdated
               ? "A newer bridge is ready. Ask the player to quit the game, then install_unity_bridge to update it and start the game again." +
                 (connected ? " The current one works meanwhile." : "")
               : connected
-              ? "Connected: use use_game_adapter with the unity__ tools."
+              ? `Connected: use use_game_adapter with the ${connectedBridge(p, adapters)}__ tools.`
               : state.installed
                 ? "Installed but not connected: the player needs to restart the game (quit fully, start again)."
                 : backend === "il2cpp"

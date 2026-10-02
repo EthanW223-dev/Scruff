@@ -5,6 +5,7 @@ import { GameManager, memoryTools } from "./game.ts";
 import { gameFileTools } from "./gamefiles.ts";
 import { describeProfile } from "../games/profile.ts";
 import { JevService, JevSettings, type Jev } from "./jev.ts";
+import { LinkManager, linkTools } from "./links.ts";
 import { McpEndpoint } from "./mcp.ts";
 import { engineModSupport } from "./mods.ts";
 import { quickPath } from "./quick.ts";
@@ -13,8 +14,10 @@ import { ScreenBridge } from "./screen.ts";
 import { startServer } from "./server.ts";
 import { ThemeStore } from "./themes.ts";
 import { codeVersion } from "./version.ts";
-import { unityBridgeConnected, unityBridgeTools } from "./unitybridge.ts";
-import { unrealBridgeConnected, unrealBridgeTools } from "./unrealbridge.ts";
+import { unityBridgeTools } from "./unitybridge.ts";
+import { unrealBridgeTools } from "./unrealbridge.ts";
+import { rpgMakerBridgeTools } from "./rpgmakerbridge.ts";
+import { connectedBridge } from "./bridges.ts";
 import { visionFromBrain, type VisionClient } from "./vision.ts";
 
 export interface HubOptions {
@@ -36,10 +39,12 @@ export async function createHub(opts: HubOptions) {
   games.bridgeDll = path.join(opts.root, "bridge", "ScruffBridge.dll");
   games.il2cppBridgeDll = path.join(opts.root, "bridge", "TelosBridge.IL2CPP.dll");
   games.unrealBridgeDll = path.join(opts.root, "bridge-unreal", "TelosBridgeUE.dll");
+  games.rpgMakerBridgeJs = path.join(opts.root, "bridge-rpgmaker", "TelosBridge.js");
   const adapters = new AdapterRegistry();
   const screen = new ScreenBridge();
   const dataDir = opts.dataDir ?? path.join(opts.root, ".scruff");
   const themes = new ThemeStore(path.join(dataDir, "themes.json"), games);
+  const links = new LinkManager({ file: path.join(dataDir, "links.json"), adapters, games });
 
   const brain = opts.brain ?? opts.router?.brain();
   if (!brain) throw new Error("createHub needs a router or a brain.");
@@ -68,8 +73,9 @@ export async function createHub(opts: HubOptions) {
       attached && games.profile ? describeProfile(games.profile) : "",
       attached ? (themes.hasSaved() ? "The overlay is already styled for this game." : "The overlay isn't styled for this game yet.") : "",
       adapters.describe(),
+      links.describe(),
       attached && games.profile
-        ? `Mod support: ${engineModSupport(games.profile.engine, unityBridgeConnected(adapters), unrealBridgeConnected(adapters)).note}`
+        ? `Mod support: ${engineModSupport(games.profile.engine, connectedBridge(games.profile, adapters) !== null).note}`
         : "",
     ]
       .filter(Boolean)
@@ -92,9 +98,14 @@ export async function createHub(opts: HubOptions) {
       bridgeDll: path.join(opts.root, "bridge-unreal", "TelosBridgeUE.dll"),
       port: opts.port,
     }),
+    ...rpgMakerBridgeTools(games, adapters, {
+      pluginJs: path.join(opts.root, "bridge-rpgmaker", "TelosBridge.js"),
+      port: opts.port,
+    }),
     ...screen.tools(vision),
     themes.tool(),
     adapters.dispatchTool(),
+    ...linkTools(links, games, adapters),
   ];
 
   const jev = new JevService(new JevSettings(path.join(dataDir, "typesafe.json")), opts.jev);
@@ -129,6 +140,7 @@ export async function createHub(opts: HubOptions) {
     agent,
     games,
     adapters,
+    links,
     screen,
     mcp,
     version: codeVersion(opts.root),
@@ -140,10 +152,12 @@ export async function createHub(opts: HubOptions) {
     themes,
     games,
     adapters,
+    links,
     screen,
     server,
     close() {
       agent.stop();
+      links.close();
       games.detach();
       server.closeAllConnections();
       server.close();

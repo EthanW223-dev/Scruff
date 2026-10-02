@@ -26,11 +26,20 @@ test("Unreal has its own tier: bridge installable, unverified on real games", ()
 });
 
 test("other engines are numbers-only", () => {
-  for (const e of ["Godot", "GameMaker", "Source", "Unknown", "RPG Maker MV/MZ"]) {
+  for (const e of ["Godot", "GameMaker", "Source", "Unknown"]) {
     const s = engineModSupport(e, false);
     assert.equal(s.tier, "numbers");
     assert.match(s.note, /Only number changes work/);
   }
+});
+
+test("RPG Maker has a plugin bridge tier: data files plus live changes once connected", () => {
+  const off = engineModSupport("RPG Maker MV/MZ", false);
+  assert.equal(off.tier, "rpgmaker");
+  assert.match(off.note, /install_rpgmaker_bridge/);
+  assert.match(off.note, /data\//);
+  const on = engineModSupport("RPG Maker MV/MZ", true);
+  assert.match(on.note, /rpgmaker__ tools/);
 });
 
 // ---------- intent detection ----------

@@ -4,6 +4,9 @@ import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { AdapterRegistry } from "./adapters.ts";
+import type { LinkManager } from "./links.ts";
+import { connectedBridge } from "./bridges.ts";
+import { installRpgMakerBridge, removeRpgMakerBridge } from "../games/rpgmaker.ts";
 import type { Agent, AgentEvent } from "./agent.ts";
 import type { GameManager } from "./game.ts";
 import type { JevService } from "./jev.ts";
@@ -41,6 +44,7 @@ export interface ServerOptions {
   agent: Agent;
   games: GameManager;
   adapters: AdapterRegistry;
+  links: LinkManager;
   screen: ScreenBridge;
   mcp: McpEndpoint;
   /** Short git commit of the serving code; lets the overlay spot a stale hub. */
@@ -105,7 +109,7 @@ function connectInfo(root: string, port: number) {
 }
 
 export async function startServer(opts: ServerOptions): Promise<http.Server> {
-  const { agent, games, adapters, screen, mcp, router, themes, jev } = opts;
+  const { agent, games, adapters, links, screen, mcp, router, themes, jev } = opts;
   const aiInfo = () =>
     router?.describe() ?? { provider: "custom", model: agent.brain.model, providerLabel: "Custom", ready: true, problem: undefined };
   // Keep the dashboard's voice section honest about whether edge-tts is installed.
@@ -120,10 +124,18 @@ export async function startServer(opts: ServerOptions): Promise<http.Server> {
     const data = JSON.stringify(msg);
     for (const ws of dashboards) if (ws.readyState === ws.OPEN) ws.send(data);
   };
+  /** The game's state, with whether this game's own bridge is connected (others may be, for game links). */
+  const gameState = () => {
+    const game = games.state();
+    const bridge = game.profile?.bridge;
+    if (!game.profile || !bridge || !games.profile) return game;
+    return { ...game, profile: { ...game.profile, bridge: { ...bridge, connected: connectedBridge(games.profile, adapters) !== null } } };
+  };
   const state = () => ({
     type: "state",
-    game: games.state(),
+    game: gameState(),
     adapters: adapters.state(),
+    links: links.state(),
     screen: { active: screen.active },
     theme: themes.current(),
     jev: jev.info(),
@@ -142,6 +154,8 @@ export async function startServer(opts: ServerOptions): Promise<http.Server> {
   games.on("update", pushState);
   games.on("notice", (text: string) => broadcast({ type: "toast", text, level: "info" }));
   adapters.on("update", pushState);
+  links.on("update", pushState);
+  links.on("notice", (text: string) => broadcast({ type: "toast", text, level: "info" }));
   screen.on("update", pushState);
   themes.on("change", pushState);
   jev.on("change", pushState);
@@ -250,6 +264,12 @@ export async function startServer(opts: ServerOptions): Promise<http.Server> {
           toast(ws, `Staged the Telos Unreal bridge (${report.arch}). ${report.next}`, "info");
           break;
         }
+        if (engine.startsWith("RPG Maker")) {
+          const report = installRpgMakerBridge(games.profile, { pluginJs: path.join(opts.root, "bridge-rpgmaker", "TelosBridge.js"), port });
+          games.emit("update");
+          toast(ws, `${report.updated ? "Updated" : "Installed"} the Telos bridge plugin. Restart the game (or press F5 in it) to load it.`, "info");
+          break;
+        }
         const flavor = unityFlavor(games.profile);
         if (!flavor) {
           throw new Error(
@@ -273,12 +293,24 @@ export async function startServer(opts: ServerOptions): Promise<http.Server> {
         );
         break;
       }
+      case "remove_link":
+        links.remove(Number(msg.id));
+        break;
+      case "toggle_link":
+        links.setEnabled(Number(msg.id), msg.enabled !== false);
+        break;
       case "remove_bridge": {
         if (!games.profile) throw new Error("Attach to the game first.");
         if (games.profile.engine === "Unreal Engine") {
           removeUnrealBridge(games.profile);
           games.emit("update");
           toast(ws, "Removed the staged Telos Unreal bridge.", "info");
+          break;
+        }
+        if (games.profile.engine.startsWith("RPG Maker")) {
+          removeRpgMakerBridge(games.profile);
+          games.emit("update");
+          toast(ws, "Removed the Telos bridge plugin. Restart the game to finish.", "info");
           break;
         }
         const report = removeBridge(games.profile);
@@ -292,7 +324,15 @@ export async function startServer(opts: ServerOptions): Promise<http.Server> {
       case "attach": {
         const s = await games.attach(Number(msg.pid));
         const engine = games.profile?.engine;
-        const tier = engine ? (engine.startsWith("Unity") ? "full mods" : engine === "Unreal Engine" ? "numbers + Unreal bridge" : "number mods") : "";
+        const tier = engine
+          ? engine.startsWith("Unity")
+            ? "full mods"
+            : engine === "Unreal Engine"
+              ? "numbers + Unreal bridge"
+              : engine.startsWith("RPG Maker")
+                ? "data files + RPG Maker bridge"
+                : "number mods"
+          : "";
         toast(ws, `Attached to ${s.target.name}${engine ? ` · ${engine}` : ""}${tier ? ` — ${tier}` : ""}`, "info");
         break;
       }

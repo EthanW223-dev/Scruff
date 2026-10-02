@@ -10,11 +10,14 @@
  *   object search and property read/write through engine reflection. It compiles and its
  *   protocol layer is tested, but it has NOT been verified against a real game — first
  *   use on any game is unverified. Numbers work via memory regardless.
- * - numbers-only (Godot, GameMaker, RPG Maker, Ren'Py, Source, unknown): memory editing.
+ * - rpgmaker (RPG Maker MV/MZ): a plugin bridge (one JS file in the game's plugin list) for
+ *   live gold, items, party stats, switches, variables, teleporting and encounters; the
+ *   database itself (items, enemies, prices) is plain JSON the file tools edit.
+ * - numbers-only (Godot, GameMaker, Ren'Py, Source, unknown): memory editing.
  *   Structural mods there need per-game reverse engineering, which Telos doesn't do.
  */
 
-export type ModTier = "full" | "unreal" | "numbers";
+export type ModTier = "full" | "unreal" | "rpgmaker" | "numbers";
 
 export interface EngineModSupport {
   tier: ModTier;
@@ -41,6 +44,15 @@ const UNREAL_READY =
   "The Unreal bridge is connected: prefer the unreal__ tools over memory editing for object " +
   "and property work, but it is still unverified on this game — confirm on screen. ";
 
+const RPGMAKER_NOTE =
+  "RPG Maker MV/MZ: the database (items, weapons, enemies, actors, prices) is plain JSON under data/ that the " +
+  "game file tools edit (restart to see it). Live changes (gold, items, party HP/MP/levels/stats, switches, " +
+  "variables, teleporting, walking through walls, encounters, common events) go through the RPG Maker bridge. ";
+const RPGMAKER_MISSING =
+  "The bridge isn't connected: offer install_rpgmaker_bridge in one line (one plugin file; restart the game). " +
+  "Meanwhile number changes via memory work. ";
+const RPGMAKER_READY = "The RPG Maker bridge is connected: use the rpgmaker__ tools (start with rpgmaker__status). ";
+
 const NUMBERS_NOTE =
   "Only number changes work on this engine (memory editing). Colors, models, spawning and " +
   "removing things need per-game reverse engineering, which Telos doesn't do — say so plainly. ";
@@ -51,7 +63,10 @@ export function engineModSupport(engine: string, bridgeConnected: boolean, unrea
     return { tier: "full", note: FULL_NOTE + (bridgeConnected ? BRIDGE_READY : BRIDGE_MISSING) };
   }
   if (engine === "Unreal Engine") {
-    return { tier: "unreal", note: UNREAL_NOTE + (unrealConnected ? UNREAL_READY : "") };
+    return { tier: "unreal", note: UNREAL_NOTE + (unrealConnected || bridgeConnected ? UNREAL_READY : "") };
+  }
+  if (engine.startsWith("RPG Maker")) {
+    return { tier: "rpgmaker", note: RPGMAKER_NOTE + (bridgeConnected ? RPGMAKER_READY : RPGMAKER_MISSING) };
   }
   return { tier: "numbers", note: NUMBERS_NOTE };
 }

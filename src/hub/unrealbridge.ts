@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { installUnrealBridge, removeUnrealBridge, unrealBridgeState } from "../games/unreal.ts";
+import type { GameProfile } from "../games/profile.ts";
 import type { AdapterRegistry } from "./adapters.ts";
+import { connectedBridge } from "./bridges.ts";
 import type { GameManager } from "./game.ts";
 import { defineTool, json, type HubTool } from "./tools.ts";
 
@@ -21,8 +23,9 @@ export interface UnrealBridgeOptions {
   port: number;
 }
 
-/** Whether the Unreal bridge is connected right now (from any game). */
-export function unrealBridgeConnected(adapters: AdapterRegistry): boolean {
+/** Whether an Unreal bridge is connected right now: this game's when a profile is given, else any game's. */
+export function unrealBridgeConnected(adapters: AdapterRegistry, profile?: GameProfile | null): boolean {
+  if (profile) return profile.engine === "Unreal Engine" && connectedBridge(profile, adapters) !== null;
   return adapters.state().some((a) => a.prefix.startsWith("unreal"));
 }
 
@@ -43,7 +46,7 @@ export function unrealBridgeTools(games: GameManager, adapters: AdapterRegistry,
       run() {
         const p = profile();
         const state = unrealBridgeState(p, opts.bridgeDll);
-        const connected = unrealBridgeConnected(adapters);
+        const connected = unrealBridgeConnected(adapters, p);
         return json({
           ...state,
           connected,

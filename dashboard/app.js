@@ -348,6 +348,8 @@ function renderState() {
     }),
   );
 
+  renderLinks(state.links ?? []);
+
   // Scan status
   const scan = attached?.scan;
   const scanning = game.scanProgress !== null;
@@ -370,10 +372,17 @@ function renderState() {
 
 // The Unity bridge: full live control of Unity (Mono) games, installed with one click.
 function bridgeRow(bridge, engine) {
+  if (bridge?.otherLoader) {
+    // Another mod loader runs this game's mods: say why there's no install button.
+    const dd = el("dd", "bridge", `${bridge.otherLoader} in use`);
+    dd.title = bridge.reason ?? "";
+    return [el("dt", "", "Bridge"), dd];
+  }
   if (!bridge?.supported) return [];
-  // Unity bridges register as "unity", the Unreal one as "unreal".
+  // The hub says whether this game's own bridge is connected (other games' may be too, for links).
   const unreal = engine === "Unreal Engine";
-  const connected = (state?.adapters ?? []).some((a) => a.prefix.startsWith(unreal ? "unreal" : "unity"));
+  const rpgmaker = engine.startsWith("RPG Maker");
+  const connected = bridge.connected ?? (state?.adapters ?? []).some((a) => a.prefix.startsWith(unreal ? "unreal" : rpgmaker ? "rpgmaker" : "unity"));
   const dd = el("dd", "bridge");
   const status = connected
     ? bridge.outdated ? "connected · update ready" : "connected"
@@ -394,11 +403,19 @@ function bridgeRow(bridge, engine) {
       "install_bridge",
       unreal
         ? "Put the Telos Unreal bridge next to the game (bridge-unreal/README.md says how it loads)"
-        : "Add BepInEx and the Telos bridge to the game folder, so the AI can change anything in it (needs a game restart)",
+        : rpgmaker
+          ? "Add the Telos bridge plugin to the game (one file plus a line in js/plugins.js), for live gold, items, party and more (needs a game restart)"
+          : "Add BepInEx and the Telos bridge to the game folder, so the AI can change anything in it (needs a game restart)",
     );
   } else {
     if (bridge.outdated) action("update", "install_bridge", "Quit the game first (it keeps the bridge file open), then update and start it again");
-    if (!connected) action("remove", "remove_bridge", unreal ? "Take the staged bridge out of the game folder" : "Take the bridge (and BepInEx, if Telos added it) out of the game");
+    if (!connected) {
+      action(
+        "remove",
+        "remove_bridge",
+        unreal ? "Take the staged bridge out of the game folder" : rpgmaker ? "Take the bridge plugin out of the game" : "Take the bridge (and BepInEx, if Telos added it) out of the game",
+      );
+    }
   }
   return [el("dt", "", "Bridge"), dd];
 }
@@ -473,6 +490,27 @@ function renderWatch(watch) {
 function formatValue(v, type) {
   if (type === "float" || type === "double") return String(Math.round(v * 1000) / 1000);
   return String(v);
+}
+
+// Game links: rules that tie games together ("when X in game A, do Y in game B").
+function renderLinks(links) {
+  $("links-panel").hidden = links.length === 0;
+  $("links").replaceChildren(
+    ...links.map((l) => {
+      const li = el("li", l.enabled ? "" : "undone");
+      const status = l.problem ? `⚠ ${l.problem}` : !l.enabled ? "paused" : l.fired ? `fired ${l.fired}×` : "waiting";
+      const what = el("span", "what", l.description);
+      const vals = el("span", "vals", status);
+      if (l.problem) vals.title = l.problem;
+      li.append(what, vals);
+      const toggle = el("button", "link", l.enabled ? "pause" : "resume");
+      toggle.addEventListener("click", () => send({ type: "toggle_link", id: l.id, enabled: !l.enabled }));
+      const remove = el("button", "link", "remove");
+      remove.addEventListener("click", () => send({ type: "remove_link", id: l.id }));
+      li.append(toggle, remove);
+      return li;
+    }),
+  );
 }
 
 function renderChanges(changes) {

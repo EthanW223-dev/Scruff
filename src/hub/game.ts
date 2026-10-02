@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { bridgeState, installBridge } from "../games/bepinex.ts";
+import { installRpgMakerBridge, rpgMakerBridgeState } from "../games/rpgmaker.ts";
 import { installUnrealBridge, unrealBridgeState } from "../games/unreal.ts";
 import { buildProfile, type GameProfile } from "../games/profile.ts";
 import { z } from "zod";
@@ -38,6 +39,8 @@ export class GameManager extends EventEmitter {
   il2cppBridgeDll: string | null = null;
   /** The Unreal bridge Telos ships. */
   unrealBridgeDll: string | null = null;
+  /** The RPG Maker bridge plugin Telos ships. */
+  rpgMakerBridgeJs: string | null = null;
   scanProgress: number | null = null;
 
   async listGames(search?: string): Promise<ProcessInfo[]> {
@@ -114,6 +117,18 @@ export class GameManager extends EventEmitter {
         return false;
       }
     }
+    if (profile.engine.startsWith("RPG Maker")) {
+      // Plugin files aren't locked while the game runs, but a new one only loads at the next start anyway.
+      if (!this.rpgMakerBridgeJs || !rpgMakerBridgeState(profile, this.rpgMakerBridgeJs).outdated) return false;
+      try {
+        installRpgMakerBridge(profile, { pluginJs: this.rpgMakerBridgeJs });
+        this.emit("notice", "Updated the Telos bridge in the game; it loads the next time you start it.");
+        return true;
+      } catch (err) {
+        this.emit("notice", `Couldn't update the Telos bridge: ${(err as Error).message}`);
+        return false;
+      }
+    }
     const bundled = profile.engine === "Unity (IL2CPP)" ? this.il2cppBridgeDll : this.bridgeDll;
     if (!bundled || !bridgeState(profile, bundled).outdated) return false;
     for (let attempt = 1; attempt <= tries; attempt++) {
@@ -149,7 +164,9 @@ export class GameManager extends EventEmitter {
     const bridge =
       p && p.engine === "Unreal Engine"
         ? unrealBridgeState(p, this.unrealBridgeDll ?? undefined)
-        : p
+        : p && p.engine.startsWith("RPG Maker")
+          ? rpgMakerBridgeState(p, this.rpgMakerBridgeJs ?? undefined)
+          : p
           ? bridgeState(p, (p.engine === "Unity (IL2CPP)" ? this.il2cppBridgeDll : this.bridgeDll) ?? undefined)
           : null;
     return {

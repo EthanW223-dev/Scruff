@@ -1,5 +1,4 @@
 import { EventEmitter } from "node:events";
-import type { WebSocket } from "ws";
 import { z } from "zod";
 import { defineTool, type HubTool, type ToolResultContent } from "./tools.ts";
 
@@ -27,9 +26,19 @@ export interface GameEvent {
   at: number;
 }
 
+/**
+ * What an adapter talks through: a WebSocket from a game, or an in-process relay (the UE4SS
+ * file relay) that behaves like one.
+ */
+export interface AdapterSocket {
+  send(data: string): void;
+  on(event: "message", listener: (raw: unknown) => void): unknown;
+  on(event: "close", listener: () => void): unknown;
+}
+
 interface Adapter {
   id: number;
-  ws: WebSocket;
+  ws: AdapterSocket;
   name: string;
   prefix: string;
   description: string;
@@ -39,6 +48,11 @@ interface Adapter {
 
 const CALL_TIMEOUT_MS = 30_000;
 const MAX_EVENTS = 50;
+
+/** "60 Seconds! Reatomized" and "60secondsreatomized" are the same game. */
+export function norm(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
 
 function slug(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 24) || "adapter";
@@ -51,7 +65,7 @@ export class AdapterRegistry extends EventEmitter {
   /** Game events not yet shown to Claude; drained into the next user message. */
   private unseen: GameEvent[] = [];
 
-  handle(ws: WebSocket): void {
+  handle(ws: AdapterSocket): void {
     let adapter: Adapter | null = null;
 
     ws.on("message", (raw) => {
@@ -181,6 +195,36 @@ export class AdapterRegistry extends EventEmitter {
       description: a.description,
       tools: a.tools.map((t) => t.name),
     }));
+  }
+
+  /**
+   * The connected adapter a player or AI means by `game`: its tool prefix ("unity", "unity2"),
+   * else its name or the game in it ("60 Seconds", "Unity bridge: 60 Seconds! Reatomized").
+   */
+  find(game: string): { name: string; prefix: string } | null {
+    const all = [...this.adapters.values()];
+    const want = norm(game);
+    // "Unity bridge: 60 Seconds! Reatomized" -> "60secondsreatomized": the game in the adapter's name.
+    const gameOf = (a: Adapter) => norm(a.name.replace(/^[^:]*:\s*/, ""));
+    const hit =
+      all.find((a) => a.prefix === game.toLowerCase()) ??
+      all.find((a) => norm(a.name) === want || gameOf(a) === want) ??
+      (want.length > 2
+        ? all.find((a) => norm(a.name).includes(want) || (gameOf(a).length > 2 && want.includes(gameOf(a))))
+        : undefined);
+    return hit ? { name: hit.name, prefix: hit.prefix } : null;
+  }
+
+  /** Calls a tool on the adapter `game` names (see find). For Telos's own features, like game links. */
+  callTool(game: string, tool: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResultContent> {
+    const found = this.find(game);
+    const adapter = found && [...this.adapters.values()].find((a) => a.prefix === found.prefix);
+    if (!adapter) return Promise.reject(new Error(`${game} isn't connected right now.`));
+    const name = tool.includes("__") ? tool.slice(tool.indexOf("__") + 2) : tool;
+    if (!adapter.tools.some((t) => t.name === name)) {
+      return Promise.reject(new Error(`${adapter.name} has no tool "${name}" (it has: ${adapter.tools.map((t) => t.name).join(", ")}).`));
+    }
+    return this.call(adapter, name, input, signal ?? new AbortController().signal);
   }
 
   private call(adapter: Adapter, tool: string, input: unknown, signal: AbortSignal): Promise<ToolResultContent> {

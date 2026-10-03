@@ -196,6 +196,8 @@ namespace ScruffBridge
                     if (m == null) throw new MissingMemberException(Describe(currentType) + " has no \"" + seg.Name + "\". " + Suggest(currentType, isStatic, seg.Name));
                     current = m.Get(current);
                 }
+                // A field typed as a base class may hold a subclass: carry on as what it really is.
+                current = Il2Cpp.Real(current);
                 isStatic = false;
                 if (current == null) return null;
                 currentType = current.GetType();
@@ -219,6 +221,27 @@ namespace ScruffBridge
             if (seg.Name == null)
             {
                 IList list = obj as IList;
+                int count;
+                PropertyInfo indexer;
+                if (list == null && Indexable(obj, out count, out indexer))
+                {
+                    // IL2CPP's own List<T> or array.
+                    if (seg.Index < 0 || seg.Index >= count) throw new ArgumentOutOfRangeException("Index " + seg.Index + " is outside 0.." + (count - 1) + ".");
+                    var at = new object[] { seg.Index };
+                    if (last)
+                    {
+                        before = indexer.GetValue(obj, at);
+                        indexer.SetValue(obj, Convert(json, indexer.PropertyType), at);
+                    }
+                    else
+                    {
+                        object element = Il2Cpp.Real(indexer.GetValue(obj, at));
+                        if (element == null) throw new NullReferenceException("Item " + seg.Index + " is empty.");
+                        object changed = SetAt(element, element.GetType(), false, segs, i + 1, json, out before);
+                        if (element.GetType().IsValueType) indexer.SetValue(obj, changed, at);
+                    }
+                    return obj;
+                }
                 if (list == null) throw new ArgumentException("[" + seg.Index + "] needs a list or array.");
                 if (seg.Index < 0 || seg.Index >= list.Count) throw new ArgumentOutOfRangeException("Index " + seg.Index + " is outside 0.." + (list.Count - 1) + ".");
                 Type elementType = ElementType(list.GetType()) ?? (list[seg.Index] != null ? list[seg.Index].GetType() : typeof(object));
@@ -244,7 +267,7 @@ namespace ScruffBridge
                 m.Set(obj, Convert(json, m.Type));
                 return obj;
             }
-            object child = m.Get(obj);
+            object child = Il2Cpp.Real(m.Get(obj));
             if (child == null) throw new NullReferenceException(m.Name + " is empty (null), so nothing inside it can be set.");
             object updated = SetAt(child, child.GetType(), false, segs, i + 1, json, out before);
             // Structs are copies: put the changed copy back.
@@ -260,6 +283,13 @@ namespace ScruffBridge
                 if (index < 0 || index >= list.Count) throw new ArgumentOutOfRangeException("Index " + index + " is outside 0.." + (list.Count - 1) + ".");
                 return list[index];
             }
+            int count;
+            PropertyInfo indexer;
+            if (Indexable(obj, out count, out indexer))
+            {
+                if (index < 0 || index >= count) throw new ArgumentOutOfRangeException("Index " + index + " is outside 0.." + (count - 1) + ".");
+                return indexer.GetValue(obj, new object[] { index });
+            }
             IEnumerable seq = obj as IEnumerable;
             if (seq != null)
             {
@@ -268,6 +298,32 @@ namespace ScruffBridge
                 throw new ArgumentOutOfRangeException("Index " + index + " is past the end.");
             }
             throw new ArgumentException("[" + index + "] needs a list or array.");
+        }
+
+        /// <summary>
+        /// IL2CPP's own lists (Il2CppSystem List&lt;T&gt;, Il2Cpp arrays) aren't .NET IList: read them through
+        /// their Count/Length and int indexer instead.
+        /// </summary>
+        static bool Indexable(object obj, out int count, out PropertyInfo indexer)
+        {
+            count = 0;
+            indexer = null;
+            if (obj == null || obj is string) return false;
+            Type t = obj.GetType();
+            try
+            {
+                PropertyInfo size = t.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .FirstOrDefault(p => (p.Name == "Count" || p.Name == "Length") && p.PropertyType == typeof(int) && p.GetIndexParameters().Length == 0);
+                indexer = t.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .FirstOrDefault(p => p.GetIndexParameters().Length == 1 && p.GetIndexParameters()[0].ParameterType == typeof(int));
+                if (size == null || indexer == null) return false;
+                count = (int)size.GetValue(obj, null);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         static Type ElementType(Type listType)
@@ -618,6 +674,7 @@ namespace ScruffBridge
         public static object Describe(object value, int depth)
         {
             if (value == null) return null;
+            value = Il2Cpp.Real(value);
             Type t = value.GetType();
             if (value is string)
             {
@@ -652,6 +709,19 @@ namespace ScruffBridge
                     items[System.Convert.ToString(kv.Key, CultureInfo.InvariantCulture)] = depth > 0 ? Describe(kv.Value, depth - 1) : Short(kv.Value);
                 }
                 return new Dictionary<string, object> { { "count", dict.Count }, { "items", items } };
+            }
+            int size;
+            PropertyInfo at;
+            if (!(value is IEnumerable) && Indexable(value, out size, out at))
+            {
+                // IL2CPP's List<T> and arrays.
+                var items = new List<object>();
+                for (int i = 0; i < size && i < 15; i++)
+                {
+                    object item = at.GetValue(value, new object[] { i });
+                    items.Add(depth > 0 ? Describe(item, depth - 1) : Short(item));
+                }
+                return new Dictionary<string, object> { { "count", size }, { "items", items } };
             }
             IEnumerable seq = value as IEnumerable;
             if (seq != null)

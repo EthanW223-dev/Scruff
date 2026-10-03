@@ -60,7 +60,7 @@ export function unityBridgeTools(games: GameManager, adapters: AdapterRegistry, 
               : connected
               ? `Connected: use use_game_adapter with the ${connectedBridge(p, adapters)}__ tools.`
               : state.installed
-                ? "Installed but not connected: the player needs to restart the game (quit fully, start again)."
+                ? `Installed but not connected. ${state.log?.message ?? "The player needs to restart the game (quit fully, start again)."}`
                 : backend === "il2cpp"
                   ? "Not installed: ask the player if they'd like it (it adds the BepInEx 6 IL2CPP mod loader to the game folder and needs a game restart; first launch takes a while generating bindings), then install_unity_bridge."
                   : "Not installed: ask the player if they'd like it (it adds the BepInEx mod loader to the game folder and needs a game restart), then install_unity_bridge.",

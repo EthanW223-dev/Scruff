@@ -407,3 +407,47 @@ test("a game that runs MelonLoader is left alone: no BepInEx next to it, with th
   fs.rmSync(path.join(install, "MelonLoader", "net35"), { recursive: true });
   assert.equal(bridgeState(profile, BRIDGE).supported, true);
 });
+
+test("an installed bridge that isn't connected says why, from BepInEx's log", async () => {
+  const { bridgeLog } = await import("../src/games/bepinex.ts");
+  const { install, profile } = fakeGame({ il2cpp: true });
+  const IL2CPP_BRIDGE = path.resolve(import.meta.dirname, "..", "bridge", "TelosBridge.IL2CPP.dll");
+  const zip = path.join(install, "..", "be6.zip");
+  fs.writeFileSync(zip, be6Zip("be.788", 106));
+  await installBridge(profile, { bridgeDll: IL2CPP_BRIDGE, bepinexZip: zip });
+  const logFile = path.join(install, "BepInEx", "LogOutput.log");
+  const said = (log: string | null) => {
+    if (log === null) fs.rmSync(logFile, { force: true });
+    else fs.writeFileSync(logFile, log);
+    return bridgeLog(install);
+  };
+
+  assert.equal(said(null).state, "no-log");
+  assert.equal(bridgeState(profile, IL2CPP_BRIDGE).log?.state, "no-log", "the dashboard gets it too");
+
+  // What the old bridge did in Schedule I: a Unity call that doesn't exist in IL2CPP games.
+  const crash = said(
+    "[Message:   BepInEx] Chainloader initialized\n[Info   :   BepInEx] Loading [Scruff Bridge 1.1.0]\n" +
+      "[Error  :   BepInEx] Error loading [Scruff Bridge 1.1.0]: System.MissingMethodException: Method not found: 'Void UnityEngine.Events.UnityAction`2..ctor(System.Object, IntPtr)'.\n" +
+      "   at ScruffBridge.Runner.Begin(String hubUrl, ManualLogSource log)\n",
+  );
+  assert.equal(crash.state, "failed");
+  assert.match(crash.message, /crashed.*MissingMethodException: Method not found/);
+
+  const failedStart = said("[Error  :Scruff Bridge] Telos bridge failed to start: System.TypeLoadException: Could not load type 'X'\n");
+  assert.equal(failedStart.state, "failed");
+  assert.match(failedStart.message, /TypeLoadException/);
+
+  const waiting = said("[Info   :Scruff Bridge] Telos bridge 1.2.0 (IL2CPP) started; connecting to ws://127.0.0.1:7777/ws/adapter\n[Info   :Scruff Bridge] Waiting for Telos (Connection refused)\n");
+  assert.equal(waiting.state, "waiting");
+  assert.match(waiting.message, /can't reach Telos \(Connection refused\).*Keep Telos open/);
+
+  assert.equal(said("[Info   :Scruff Bridge] Waiting for Telos (x)\n[Info   :Scruff Bridge] Connected to Telos.\n").state, "connected");
+
+  const setup = said("[Error  :InteropManager] Failed to generate Il2Cpp interop assemblies: Cpp2IL.Core.Exceptions.LibCpp2ILInitializationException\n");
+  assert.equal(setup.state, "setup-failed");
+  assert.match(setup.message, /couldn't set itself up.*Failed to generate/);
+
+  assert.match(said("[Message:   BepInEx] Chainloader startup complete\n").message, /didn't load the Telos bridge/);
+  assert.match(said("[Message:InteropManager] Running Cpp2IL to generate dummy assemblies\n").message, /still setting up/);
+});

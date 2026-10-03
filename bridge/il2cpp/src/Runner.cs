@@ -41,16 +41,24 @@ namespace ScruffBridge
             // The Telos overlay takes focus while the player types; many games pause without this.
             Application.runInBackground = true;
             UnityTools.Setup();
-            SceneManager.sceneLoaded += OnSceneLoaded;
+            // Scene changes are noticed by polling in Update: SceneManager.sceneLoaded is an IL2CPP
+            // delegate type, which managed methods can't be added to directly.
             running = true;
             thread = new Thread(ConnectionLoop) { IsBackground = true, Name = "Telos bridge" };
             thread.Start();
             Log.LogInfo("Telos bridge " + Plugin.Version + " (IL2CPP) started; connecting to " + url);
         }
 
-        static void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+        static string lastScene;
+
+        static void WatchScene()
         {
-            lock (events) events.Enqueue("Scene loaded: " + scene.name);
+            string name;
+            try { name = SceneManager.GetActiveScene().name; }
+            catch { return; }
+            if (name == lastScene) return;
+            if (lastScene != null) lock (events) events.Enqueue("Scene loaded: " + name);
+            lastScene = name;
         }
 
         public void OnApplicationQuit()
@@ -98,6 +106,7 @@ namespace ScruffBridge
 
         public void Update()
         {
+            WatchScene();
             WebSocketClient s = socket;
             if (s == null) return;
             var watch = Stopwatch.StartNew();

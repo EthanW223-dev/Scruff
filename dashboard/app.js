@@ -405,10 +405,23 @@ function bridgeRow(bridge, engine) {
     dd.append(fix);
     return [el("dt", "", "Bridge"), dd];
   }
+  // Installed but not connected: what BepInEx's log says happened at the last start.
+  const LOG_STATUS = {
+    "no-log": "installed · start the game",
+    "setup-failed": "BepInEx couldn't set up",
+    "not-loaded": "installed · not loaded yet",
+    failed: "bridge crashed on start",
+    waiting: "running · can't reach Telos",
+    connected: "installed · start the game",
+  };
+  const logStatus = bridge.installed && bridge.log ? LOG_STATUS[bridge.log.state] : null;
   const status = connected
     ? bridge.outdated ? "connected · update ready" : "connected"
-    : bridge.outdated ? "update ready" : bridge.installed ? (unreal ? "staged, not loaded yet" : "installed, restart the game") : "not installed";
-  dd.append(el("span", connected ? "ok" : "", status));
+    : bridge.outdated ? "update ready" : bridge.installed ? (unreal ? "staged, not loaded yet" : logStatus ?? "installed, restart the game") : "not installed";
+  const statusEl = el("span", connected ? "ok" : ["failed", "setup-failed", "waiting"].includes(bridge.log?.state) ? "warn" : "", status);
+  if (!connected && bridge.log) statusEl.title = bridge.log.message;
+  dd.append(statusEl);
+  if (!connected && bridge.log && bridge.log.state !== "connected") dd.append(el("div", "bridge-why", bridge.log.message));
   const action = (label, type, title) => {
     const button = el("button", "link", label);
     button.title = title;

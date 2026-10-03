@@ -8,3 +8,5 @@ bridge/il2cpp/.build/
 bridge/il2cpp/obj/
 bridge/il2cpp/stubs/*/obj/
 bridge-unreal/test/test_json
+bridge/il2cpp/verify/obj/
+bridge/il2cpp/verify/bin/

@@ -18,7 +18,7 @@ namespace ScruffBridge
     [BepInPlugin("dev.scruff.bridge", "Scruff Bridge", Version)]
     public class Plugin : BasePlugin
     {
-        public const string Version = "1.1.0";
+        public const string Version = "1.2.0";
 
         public override void Load()
         {
@@ -32,7 +32,16 @@ namespace ScruffBridge
             host.hideFlags = HideFlags.HideAndDontSave;
             Object.DontDestroyOnLoad(host);
             var runner = host.AddComponent<Runner>();
-            runner.Begin(url, Log);
+            try
+            {
+                runner.Begin(url, Log);
+            }
+            catch (Exception e)
+            {
+                // Telos reads this line from LogOutput.log to say why the bridge isn't connecting.
+                Log.LogError("Telos bridge failed to start: " + e);
+                throw;
+            }
             Log.LogInfo("Telos bridge " + Version + " (IL2CPP) loaded; connecting to " + url);
         }
     }

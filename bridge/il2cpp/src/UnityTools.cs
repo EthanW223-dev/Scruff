@@ -223,10 +223,11 @@ namespace ScruffBridge
         {
             GameObject go;
             if (Known.TryGetValue(id, out go) && go != null) return go;
-            foreach (Object o in Resources.FindObjectsOfTypeAll(typeof(GameObject)))
+            foreach (Object o in Resources.FindObjectsOfTypeAll(Il2Cpp.Of(typeof(GameObject))))
             {
                 if (o.GetInstanceID() != id) continue;
-                go = (GameObject)o;
+                go = o.TryCast<GameObject>();
+                if (go == null) continue;
                 Known[id] = go;
                 return go;
             }
@@ -262,15 +263,17 @@ namespace ScruffBridge
                 return go;
             }
             Component[] all = go.GetComponents<Component>().Where(c => c != null).ToArray();
-            Component found = all.FirstOrDefault(c => TypeMatches(c.GetType(), component))
-                ?? all.FirstOrDefault(c => c.GetType().Name.IndexOf(component, StringComparison.OrdinalIgnoreCase) >= 0);
+            Component found = all.FirstOrDefault(c => TypeMatches(Il2Cpp.RealType(c), component))
+                ?? all.FirstOrDefault(c => Il2Cpp.TypeName(c).IndexOf(component, StringComparison.OrdinalIgnoreCase) >= 0);
             if (found == null)
             {
                 throw new ArgumentException(go.name + " has no " + component + ". It has: " +
-                    string.Join(", ", all.Select(c => c.GetType().Name).ToArray()) + ". (Children may have it: inspect them.)");
+                    string.Join(", ", all.Select(c => Il2Cpp.TypeName(c)).ToArray()) + ". (Children may have it: inspect them.)");
             }
-            type = found.GetType();
-            return found;
+            // As its own class, so every field of it can be read and changed.
+            object real = Il2Cpp.Real(found);
+            type = real.GetType();
+            return real;
         }
 
         static object Summary(GameObject go)
@@ -281,7 +284,7 @@ namespace ScruffBridge
                 { "name", go.name },
                 { "path", PathOf(go) },
                 { "active", go.activeInHierarchy },
-                { "components", go.GetComponents<Component>().Where(c => c != null && !(c is Transform)).Select(c => c.GetType().Name).Take(10).ToList() },
+                { "components", go.GetComponents<Component>().Where(c => c != null && !Il2Cpp.Is<Transform>(c)).Select(c => (object)Il2Cpp.TypeName(c)).Take(10).ToList() },
             };
             if (!go.scene.IsValid()) info["asset"] = true;
             return info;
@@ -291,10 +294,10 @@ namespace ScruffBridge
         {
             var o = value as Object;
             if (o == null) return "(destroyed)";
-            var info = new Dictionary<string, object> { { "ref", o.name }, { "type", o.GetType().Name } };
-            var c = o as Component;
+            var info = new Dictionary<string, object> { { "ref", o.name }, { "type", Il2Cpp.TypeName(o) } };
+            var c = Il2Cpp.As<Component>(o);
             if (c != null) info["id"] = Remember(c.gameObject);
-            var go = o as GameObject;
+            var go = Il2Cpp.As<GameObject>(o);
             if (go != null) info["id"] = Remember(go);
             return info;
         }
@@ -309,19 +312,19 @@ namespace ScruffBridge
                 if (type == typeof(GameObject) || type == typeof(Object)) return go;
                 if (typeof(Component).IsAssignableFrom(type))
                 {
-                    Component c = go.GetComponent(type);
+                    Component c = go.GetComponent(Il2Cpp.Of(type));
                     if (c == null) throw new ArgumentException(go.name + " has no " + type.Name + ".");
-                    return c;
+                    return Il2Cpp.CastTo(c, type);
                 }
             }
             string name = dict != null && dict.ContainsKey("name") ? Convert.ToString(dict["name"]) : json as string;
             if (name == null) throw new ArgumentException("For a " + type.Name + ", give {\"id\": …} or its name.");
-            Object[] all = Resources.FindObjectsOfTypeAll(type);
+            Object[] all = Resources.FindObjectsOfTypeAll(Il2Cpp.Of(type)).ToArray();
             Object hit = all.FirstOrDefault(o => o.name == name)
                 ?? all.FirstOrDefault(o => string.Equals(o.name, name, StringComparison.OrdinalIgnoreCase))
                 ?? all.FirstOrDefault(o => o.name.IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0);
             if (hit == null) throw new ArgumentException("No " + type.Name + " named \"" + name + "\".");
-            return hit;
+            return Il2Cpp.CastTo(hit, type);
         }
 
         // ------------------------------------------------------------------ tools
@@ -332,12 +335,13 @@ namespace ScruffBridge
             bool inactive = a.Bool("include_inactive", false), assets = a.Bool("include_assets", false);
             int limit = Math.Max(1, Math.Min(a.Int("limit", 30), 100));
             IEnumerable<Object> source = inactive || assets
-                ? Resources.FindObjectsOfTypeAll(typeof(GameObject))
-                : Object.FindObjectsOfType(typeof(GameObject));
+                ? Resources.FindObjectsOfTypeAll(Il2Cpp.Of(typeof(GameObject)))
+                : Object.FindObjectsOfType(Il2Cpp.Of(typeof(GameObject)));
             var hits = new List<GameObject>();
             foreach (Object o in source)
             {
-                var go = (GameObject)o;
+                var go = o == null ? null : o.TryCast<GameObject>();
+                if (go == null) continue;
                 if ((go.hideFlags & HideFlags.HideAndDontSave) == HideFlags.HideAndDontSave) continue;
                 bool inScene = go.scene.IsValid();
                 if (!inScene && !assets) continue;
@@ -345,7 +349,7 @@ namespace ScruffBridge
                 if (name != null && Reflect.Score(go.name, name) == 0) continue;
                 if (tag != null && !string.Equals(SafeTag(go), tag, StringComparison.OrdinalIgnoreCase)) continue;
                 if (component != null && !go.GetComponents<Component>().Any(c =>
-                        c != null && c.GetType().Name.IndexOf(component, StringComparison.OrdinalIgnoreCase) >= 0)) continue;
+                        c != null && Il2Cpp.TypeName(c).IndexOf(component, StringComparison.OrdinalIgnoreCase) >= 0)) continue;
                 hits.Add(go);
             }
             // Exact names, then the best matches and top-level objects first: usually what the player means.
@@ -406,20 +410,22 @@ namespace ScruffBridge
             var components = new List<object>();
             foreach (Component c in go.GetComponents<Component>())
             {
-                if (c == null || c is Transform) continue;
-                if (only != null && !TypeMatches(c.GetType(), only) && c.GetType().Name.IndexOf(only, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                if (c == null || Il2Cpp.Is<Transform>(c)) continue;
+                if (only != null && !TypeMatches(Il2Cpp.RealType(c), only) && Il2Cpp.TypeName(c).IndexOf(only, StringComparison.OrdinalIgnoreCase) < 0) continue;
                 components.Add(DescribeComponent(c, only != null));
             }
             info["components"] = components;
             return info;
         }
 
-        static object DescribeComponent(Component c, bool deep)
+        static object DescribeComponent(Component component, bool deep)
         {
+            // Read it as its own class: as a plain Component, its fields aren't visible.
+            object c = Il2Cpp.Real(component);
             Type type = c.GetType();
             bool builtin = type.Namespace != null && type.Namespace.StartsWith("UnityEngine");
             var entry = new Dictionary<string, object> { { "type", type.Name } };
-            var behaviour = c as Behaviour;
+            var behaviour = Il2Cpp.As<Behaviour>(component);
             if (behaviour != null) entry["enabled"] = behaviour.enabled;
             var members = new Dictionary<string, object>();
             foreach (Reflect.Member m in Reflect.ListMembers(type, false, builtin ? typeof(Component) : typeof(MonoBehaviour), Skip).Take(deep ? 120 : 50))
@@ -449,7 +455,7 @@ namespace ScruffBridge
             string path = a.Str("path");
             if (string.IsNullOrEmpty(path))
             {
-                var c = target as Component;
+                var c = Il2Cpp.As<Component>(target);
                 if (c != null) return DescribeComponent(c, true);
                 if (target == null) return StaticSummary(type, 40);
                 return Reflect.Describe(target, 2);
@@ -492,16 +498,17 @@ namespace ScruffBridge
             string path = a.Str("path");
             if (!string.IsNullOrEmpty(path))
             {
-                target = Reflect.Get(target, type, path);
+                target = Il2Cpp.Real(Reflect.Get(target, type, path));
                 if (target == null) throw new NullReferenceException(path + " is empty (null).");
                 type = target.GetType();
             }
             var args = a.Raw("args") as List<object>;
             object result = Reflect.Call(target, type, a.Need("method"), args);
-            var routine = result as IEnumerator;
+            // A coroutine (a method returning IEnumerator): IL2CPP's own IEnumerator, run by Unity.
+            var routine = Il2Cpp.As<Il2CppSystem.Collections.IEnumerator>(result);
             if (routine != null)
             {
-                var owner = target as MonoBehaviour ?? host;
+                var owner = Il2Cpp.As<MonoBehaviour>(target) ?? host;
                 owner.StartCoroutine(routine);
                 return new Dictionary<string, object> { { "result", "started (it runs over the next frames)" } };
             }
@@ -557,13 +564,15 @@ namespace ScruffBridge
             if (statics.Count > 0) info["static"] = statics;
             if (typeof(Object).IsAssignableFrom(t) && !t.IsAbstract && !t.ContainsGenericParameters)
             {
-                Object[] live = Object.FindObjectsOfType(t);
+                Object[] live;
+                try { live = Object.FindObjectsOfType(Il2Cpp.Of(t)).ToArray(); }
+                catch { live = new Object[0]; }
                 info["in_level"] = live.Length;
                 if (live.Length > 0)
                 {
                     info["ids"] = live.Take(8).Select(o =>
                     {
-                        var c = o as Component;
+                        var c = Il2Cpp.As<Component>(o);
                         return c != null ? (object)Remember(c.gameObject) : o.GetInstanceID();
                     }).ToList();
                 }
@@ -610,12 +619,13 @@ namespace ScruffBridge
 
         static void SetIfPresent(GameObject go, string componentType, string member, object value)
         {
-            Component c = go.GetComponents<Component>().FirstOrDefault(x => x != null && x.GetType().Name == componentType);
+            Component c = go.GetComponents<Component>().FirstOrDefault(x => x != null && Il2Cpp.TypeName(x) == componentType);
             if (c == null) return;
             try
             {
-                Reflect.Member m = Reflect.FindMember(c.GetType(), member, false);
-                if (m != null) m.Set(c, value);
+                object real = Il2Cpp.Real(c);
+                Reflect.Member m = Reflect.FindMember(real.GetType(), member, false);
+                if (m != null) m.Set(real, value);
             }
             catch { }
         }
@@ -624,21 +634,24 @@ namespace ScruffBridge
         {
             GameObject go = Obj(a, "id");
             var color = (UnityEngine.Color)Reflect.Convert(a.Raw("color"), typeof(UnityEngine.Color));
-            Component[] targets = a.Bool("children", true) ? go.GetComponentsInChildren<Component>(true) : go.GetComponents<Component>();
+            IEnumerable<Component> targets = a.Bool("children", true)
+                ? (IEnumerable<Component>)go.GetComponentsInChildren<Component>(true)
+                : go.GetComponents<Component>();
             int changed = 0;
             var what = new HashSet<string>();
             foreach (Component c in targets)
             {
                 if (c == null) continue;
-                PropertyInfo p = c.GetType().GetProperty("color", BindingFlags.Public | BindingFlags.Instance);
+                object real = Il2Cpp.Real(c);
+                PropertyInfo p = real.GetType().GetProperty("color", BindingFlags.Public | BindingFlags.Instance);
                 if (p != null && p.PropertyType == typeof(UnityEngine.Color) && p.GetSetMethod() != null)
                 {
-                    p.SetValue(c, color, null); // SpriteRenderer, UI Image/Text, Light, TextMesh...
+                    p.SetValue(real, color, null); // SpriteRenderer, UI Image/Text, Light, TextMesh...
                     changed++;
-                    what.Add(c.GetType().Name);
+                    what.Add(real.GetType().Name);
                     continue;
                 }
-                var r = c as Renderer;
+                var r = Il2Cpp.As<Renderer>(c);
                 if (r == null) continue;
                 foreach (Material m in r.materials) // this object's own copies, so others keep their look
                 {
@@ -647,7 +660,7 @@ namespace ScruffBridge
                         if (!m.HasProperty(prop)) continue;
                         m.SetColor(prop, color);
                         changed++;
-                        what.Add(c.GetType().Name);
+                        what.Add(real.GetType().Name);
                         break;
                     }
                 }
@@ -680,20 +693,20 @@ namespace ScruffBridge
                 tk.sharedMaterials = fk.sharedMaterials;
                 copied.Add("skinned mesh");
             }
-            Renderer fr = from.GetComponentsInChildren<Renderer>(true).FirstOrDefault(r => !(r is SpriteRenderer));
-            Renderer tr = to.GetComponentsInChildren<Renderer>(true).FirstOrDefault(r => !(r is SpriteRenderer));
+            Renderer fr = from.GetComponentsInChildren<Renderer>(true).FirstOrDefault(r => !Il2Cpp.Is<SpriteRenderer>(r));
+            Renderer tr = to.GetComponentsInChildren<Renderer>(true).FirstOrDefault(r => !Il2Cpp.Is<SpriteRenderer>(r));
             if (fr != null && tr != null)
             {
                 tr.sharedMaterials = fr.sharedMaterials;
                 copied.Add("materials");
             }
             // UI images (and anything else with a sprite property).
-            Component fi = from.GetComponentsInChildren<Component>(true).FirstOrDefault(c => c != null && !(c is SpriteRenderer) && HasSprite(c));
-            Component ti = to.GetComponentsInChildren<Component>(true).FirstOrDefault(c => c != null && !(c is SpriteRenderer) && HasSprite(c));
-            if (fi != null && ti != null && fi.GetType() == ti.GetType())
+            Component fi = from.GetComponentsInChildren<Component>(true).FirstOrDefault(c => c != null && !Il2Cpp.Is<SpriteRenderer>(c) && HasSprite(c));
+            Component ti = to.GetComponentsInChildren<Component>(true).FirstOrDefault(c => c != null && !Il2Cpp.Is<SpriteRenderer>(c) && HasSprite(c));
+            if (fi != null && ti != null && Il2Cpp.RealType(fi) == Il2Cpp.RealType(ti))
             {
-                PropertyInfo p = fi.GetType().GetProperty("sprite");
-                p.SetValue(ti, p.GetValue(fi, null), null);
+                PropertyInfo p = Il2Cpp.RealType(fi).GetProperty("sprite");
+                p.SetValue(Il2Cpp.Real(ti), p.GetValue(Il2Cpp.Real(fi), null), null);
                 copied.Add("UI sprite");
             }
             if (a.Bool("animation", true))
@@ -713,7 +726,7 @@ namespace ScruffBridge
 
         static bool HasSprite(Component c)
         {
-            PropertyInfo p = c.GetType().GetProperty("sprite", BindingFlags.Public | BindingFlags.Instance);
+            PropertyInfo p = Il2Cpp.RealType(c).GetProperty("sprite", BindingFlags.Public | BindingFlags.Instance);
             return p != null && p.PropertyType == typeof(Sprite) && p.GetSetMethod() != null;
         }
 
@@ -727,7 +740,8 @@ namespace ScruffBridge
             var ids = new List<object>();
             for (int i = 1; i <= count; i++)
             {
-                var copy = (GameObject)Object.Instantiate(source, anchor.position + spacing * i, source.transform.rotation);
+                var copy = Il2Cpp.As<GameObject>(Object.Instantiate(source, anchor.position + spacing * i, source.transform.rotation));
+                if (copy == null) throw new InvalidOperationException("Unity didn't make a copy of " + source.name + ".");
                 if (parent != null) copy.transform.SetParent(parent, true);
                 copy.name = source.name;
                 copy.SetActive(true);

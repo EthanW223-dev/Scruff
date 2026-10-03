@@ -47,6 +47,18 @@ export interface BridgeState {
    * version), so the game won't start with it. Installing the bridge updates BepInEx.
    */
   bepinexTooOld?: { build: string | null; supports: string | null; needs: number | null };
+  /** Installed but not connected: what BepInEx's log says happened at the game's last start. */
+  log?: BridgeLog;
+}
+
+export interface BridgeLog {
+  /**
+   * no-log: BepInEx hasn't run since the install. setup-failed: BepInEx couldn't prepare itself
+   * for this game. not-loaded: BepInEx ran but didn't load the bridge. failed: the bridge crashed
+   * on start. waiting: the bridge runs but can't reach Telos. connected: it reached Telos.
+   */
+  state: "no-log" | "setup-failed" | "not-loaded" | "failed" | "waiting" | "connected";
+  message: string;
 }
 
 export interface BridgeManifest {
@@ -149,6 +161,64 @@ export function bepinexInfo(dir: string): BepInExInfo {
   };
 }
 
+/**
+ * What happened to the bridge at the game's last start, from BepInEx/LogOutput.log (rewritten
+ * every start). Turns "installed, restart the game" into the actual reason it isn't connected.
+ */
+export function bridgeLog(dir: string): BridgeLog {
+  let log: string;
+  try {
+    const file = path.join(dir, "BepInEx", "LogOutput.log");
+    const size = fs.statSync(file).size;
+    // The end is what matters; the start of a big log is BepInEx's own setup chatter.
+    const fd = fs.openSync(file, "r");
+    try {
+      const len = Math.min(size, 2_000_000);
+      const buf = Buffer.alloc(len);
+      fs.readSync(fd, buf, 0, len, size - len);
+      log = buf.toString("utf8");
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return {
+      state: "no-log",
+      message:
+        "BepInEx hasn't run in this game since the bridge was installed. Start the game once (from Steam or its exe). " +
+        "If this stays, BepInEx isn't loading at all: its winhttp.dll must sit next to the game's exe.",
+    };
+  }
+  const line = (re: RegExp) => re.exec(log)?.[1]?.trim();
+  if (/Connected to Telos\./.test(log)) {
+    return { state: "connected", message: "The bridge reached Telos at the game's last start. If it isn't connected now, start the game again." };
+  }
+  const crashed =
+    line(/Telos bridge failed to start: ([^\r\n]+)/) ??
+    line(/Error loading \[Scruff Bridge[^\]]*\]:?\s*([^\r\n]*)/) ??
+    line(/(\S*Exception[^\r\n]*)(?:\r?\n[^\r\n]*){0,6}(?:ScruffBridge|TelosBridge)/);
+  if (crashed !== undefined) {
+    return { state: "failed", message: `The bridge crashed when the game started: ${crashed.slice(0, 300)}` };
+  }
+  const waiting = line(/Waiting for (?:Telos|Scruff) \(([^)]*)\)/);
+  if (waiting !== undefined) {
+    return {
+      state: "waiting",
+      message: `The bridge is running in the game but can't reach Telos (${waiting}). Keep Telos open while you play; if it is open, a firewall may be blocking 127.0.0.1.`,
+    };
+  }
+  const setup = line(/(Failed to generate Il2Cpp interop assemblies[^\r\n]*)/) ?? line(/(Fatal Exception[^\r\n]*)/);
+  if (setup !== undefined) return { state: "setup-failed", message: `BepInEx couldn't set itself up for this game: ${setup.slice(0, 300)}` };
+  if (/Chainloader startup complete/.test(log) || /Chainloader initialized/.test(log)) {
+    if (!/Loading \[Scruff Bridge/.test(log)) {
+      return { state: "not-loaded", message: "BepInEx started but didn't load the Telos bridge. Install the bridge again (it may have been moved or blocked)." };
+    }
+  }
+  return {
+    state: "not-loaded",
+    message: "BepInEx was still setting up at the game's last start (the first start can take a few minutes). Let the game finish loading, then check again.",
+  };
+}
+
 /** Whether the IL2CPP game's BepInEx can't read its metadata: from its supported range, or its last failed start. */
 function bepinexTooOld(profile: GameProfile): BridgeState["bepinexTooOld"] {
   if (unityFlavor(profile) !== "il2cpp" || !fs.existsSync(path.join(profile.installDir, FLAVORS.il2cpp.coreRel))) return undefined;
@@ -223,6 +293,7 @@ export function bridgeState(profile: GameProfile, bundledDll?: string): BridgeSt
     supported: true,
     installed,
     ...(outdated ? { outdated } : {}),
+    ...(installed && !tooOld ? { log: bridgeLog(dir) } : {}),
     existingBepInEx: existing && !readManifest(dir)?.bepinexByScruff,
     ...(tooOld
       ? {

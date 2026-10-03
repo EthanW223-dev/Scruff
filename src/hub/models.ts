@@ -1,14 +1,17 @@
 import Anthropic from "@anthropic-ai/sdk";
 import fs from "node:fs";
 import path from "node:path";
+import { parseEnv } from "node:util";
 import OpenAI from "openai";
 import type { Brain } from "./agent.ts";
 import { CLAUDE_MODELS, claudeStreamFactory, listClaudeModels, type Effort } from "./providers/anthropic.ts";
+import { CLAUDE_CODE_MODELS, claudeCodeStreamFactory, probeClaudeCode } from "./providers/claudecode.ts";
 import { openAICompatibleStreamFactory } from "./providers/openai.ts";
 import { BEST_VOICE, defaultVoiceFor, isVoiceFor, selectedEngineReady, TTS_ENGINES, voiceEnginesReady, type TtsEngine } from "./voice.ts";
 
 export const PROVIDER_IDS = [
   "claude",
+  "claude-code",
   "openai",
   "openrouter",
   "groq",
@@ -148,6 +151,9 @@ export class ModelRouter {
   voice: string = BEST_VOICE.id;
   voiceEngine: TtsEngine = BEST_VOICE.engine;
   voiceEnabled = false;
+  /** Where Claude Code (as the brain) reaches Telos's tools, and the folder it runs in. */
+  private claudeCodeHub = { mcpUrl: `http://127.0.0.1:${Number(process.env.SCRUFF_PORT ?? 7777)}/mcp`, cwd: "" };
+  private claudeCodeProbe: { ok: boolean; detail: string; at: number } | null = null;
 
   constructor(
     private env: NodeJS.ProcessEnv,
@@ -155,6 +161,7 @@ export class ModelRouter {
     private effort: Effort,
   ) {
     this.keysFile = path.join(path.dirname(settingsFile), "keys.json");
+    this.claudeCodeHub.cwd = path.join(path.dirname(settingsFile), "claude-code");
     this.loadKeys();
     this.reload();
   }
@@ -181,6 +188,8 @@ export class ModelRouter {
         keyUrl: "https://console.anthropic.com/settings/keys",
         keyKind: "Anthropic",
       },
+      // The player's own `claude` command (Claude Code): their Claude login, no key here.
+      { id: "claude-code", label: "Claude Code" },
     ];
     for (const cp of COMPAT_PROVIDERS) {
       const { apiKey, keySource } = keyOf(cp.id, cp.envKeys);
@@ -254,10 +263,50 @@ export class ModelRouter {
     }
   }
 
+  /** Called by the hub once it knows its port: Claude Code reaches Telos's tools there. */
+  useHub(hub: { mcpUrl: string; cwd: string }): void {
+    this.claudeCodeHub = hub;
+  }
+
+  /** The command that runs Claude Code. */
+  private claudeCommand(): string {
+    return this.env.SCRUFF_CLAUDE_COMMAND?.trim() || "claude";
+  }
+
+  /**
+   * Claude Code's environment: the player's own, minus an Anthropic key that came from
+   * Telos's .env. That key is for Telos's "Claude" choice; passed on, Claude Code would bill
+   * it instead of answering as the player's own login.
+   */
+  private claudeCodeEnv(): NodeJS.ProcessEnv {
+    const env = { ...this.env };
+    let dotenv: Record<string, string | undefined> = {};
+    try {
+      dotenv = parseEnv(fs.readFileSync(path.join(path.dirname(path.dirname(this.settingsFile)), ".env"), "utf8"));
+    } catch {
+      // no .env
+    }
+    for (const k of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"]) if (dotenv[k] && env[k] === dotenv[k]) delete env[k];
+    return env;
+  }
+
+  /** Whether Claude Code runs here (cached: it starts a process). */
+  private async probeClaudeCode(): Promise<{ ok: boolean; detail: string }> {
+    const fresh = this.claudeCodeProbe && Date.now() - this.claudeCodeProbe.at < (this.claudeCodeProbe.ok ? 60_000 : 5_000);
+    if (!fresh) this.claudeCodeProbe = { ...(await probeClaudeCode(this.claudeCommand(), this.claudeCodeEnv())), at: Date.now() };
+    return this.claudeCodeProbe!;
+  }
+
   brain(): Brain {
     const { provider, model } = this.selection;
     if (provider === "claude") {
       return { model, createStream: claudeStreamFactory(this.claude ?? new Anthropic(), this.effort) };
+    }
+    if (provider === "claude-code") {
+      return {
+        model,
+        createStream: claudeCodeStreamFactory({ command: this.claudeCommand(), ...this.claudeCodeHub, env: this.claudeCodeEnv() }),
+      };
     }
     const def = this.defs.get(provider)!;
     if (!def.baseURL) throw new Error(def.missing);
@@ -274,11 +323,12 @@ export class ModelRouter {
 
   describe() {
     const def = this.defs.get(this.selection.provider)!;
+    const probe = def.id === "claude-code" ? this.claudeCodeProbe : null;
     return {
       ...this.selection,
       providerLabel: def.id === "claude" ? "Claude" : def.label,
-      ready: !def.missing,
-      problem: def.missing,
+      ready: probe ? probe.ok : !def.missing,
+      problem: probe && !probe.ok ? probe.detail : def.missing,
       voice: this.voice,
       voiceEngine: this.voiceEngine,
       voiceEnabled: this.voiceEnabled,
@@ -301,6 +351,10 @@ export class ModelRouter {
     return Promise.all(
       [...this.defs.values()].map(async (def): Promise<ProviderStatus> => {
         const base = { id: def.id, label: def.label, keySource: def.keySource, keyUrl: def.keyUrl, keyKind: def.keyKind, baseURL: def.baseURL };
+        if (def.id === "claude-code") {
+          const probe = await this.probeClaudeCode();
+          return { ...base, ready: probe.ok, detail: probe.detail, models: CLAUDE_CODE_MODELS };
+        }
         if (def.missing) {
           return { ...base, ready: false, detail: def.missing, models: def.id === "claude" ? CLAUDE_MODELS : [] };
         }
@@ -325,6 +379,7 @@ export class ModelRouter {
   }
 
   private async models(id: ProviderId): Promise<string[]> {
+    if (id === "claude-code") return CLAUDE_CODE_MODELS;
     if (id === "claude") {
       if (!this.claude) return CLAUDE_MODELS;
       this.claudeModels ??= await listClaudeModels(this.claude).catch(() => CLAUDE_MODELS);

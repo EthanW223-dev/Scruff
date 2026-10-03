@@ -58,6 +58,8 @@ export async function createHub(opts: HubOptions) {
     if (p && modDir && fs.existsSync(path.join(modDir, "Scripts", "main.lua"))) ue4ssRelays.ensure(modDir, p.name);
   });
 
+  // Claude Code as the brain calls Telos's tools over this hub's own MCP endpoint.
+  opts.router?.useHub({ mcpUrl: `http://127.0.0.1:${opts.port}/mcp`, cwd: path.join(dataDir, "claude-code") });
   const brain = opts.brain ?? opts.router?.brain();
   if (!brain) throw new Error("createHub needs a router or a brain.");
   /**

@@ -5,6 +5,7 @@ import { EventEmitter } from "node:events";
 import type http from "node:http";
 import type { AgentEvent } from "./agent.ts";
 import { mcpInstructions } from "./prompt.ts";
+import { CHAT_HEADER } from "./providers/claudecode.ts";
 import type { HubTool, ToolResultContent } from "./tools.ts";
 
 /**
@@ -40,7 +41,8 @@ export class McpEndpoint extends EventEmitter {
       res.writeHead(405, { allow: "POST" }).end();
       return;
     }
-    const server = this.server();
+    // Claude Code running as Telos's own chat brain: its tool calls are part of the chat turn.
+    const server = this.server(req.headers[CHAT_HEADER] === "1");
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on("close", () => {
       void transport.close();
@@ -50,7 +52,7 @@ export class McpEndpoint extends EventEmitter {
     await transport.handleRequest(req, res);
   }
 
-  server(): McpServer {
+  server(ownChat = false): McpServer {
     const server = new McpServer(
       { name: "scruff", version: "0.2.0" },
       { instructions: mcpInstructions(this.opts.dashboardUrl) },
@@ -70,18 +72,20 @@ export class McpEndpoint extends EventEmitter {
             openWorldHint: false,
           },
         },
-        (args: unknown, extra: { signal: AbortSignal }) => this.call(tool, args, extra.signal),
+        (args: unknown, extra: { signal: AbortSignal }) => this.call(tool, args, extra.signal, ownChat),
       );
     }
     return server;
   }
 
-  private async call(tool: HubTool, args: unknown, signal: AbortSignal): Promise<CallToolResult> {
+  private async call(tool: HubTool, args: unknown, signal: AbortSignal, ownChat = false): Promise<CallToolResult> {
     const id = `mcp_${this.nextId++}`;
-    if (Date.now() - this.lastActivity > QUIET_MS) {
-      this.onEvent({ type: "notice", text: "Your Claude app is using Telos." });
+    if (!ownChat) {
+      if (Date.now() - this.lastActivity > QUIET_MS) {
+        this.onEvent({ type: "notice", text: "Your Claude app is using Telos." });
+      }
+      this.lastActivity = Date.now();
     }
-    this.lastActivity = Date.now();
     this.onEvent({ type: "tool_call", id, name: tool.name, input: args });
     try {
       const content = await tool.run(args, {

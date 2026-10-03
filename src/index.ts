@@ -44,7 +44,8 @@ export async function startTelos(options: { lan?: boolean; quiet?: boolean } = {
   }
   log(`  AI: ${ai.providerLabel} · ${ai.model || "(no model picked)"}${ai.problem ? `  ⚠ ${ai.problem}` : ""}`);
   log("  Change it in the dashboard's AI menu (local models via Ollama / LM Studio work too).");
-  log(`  Use your Claude subscription instead: claude mcp add --transport http scruff http://localhost:${port}/mcp\n`);
+  log("  Use your Claude subscription: pick Claude Code in the AI menu (it runs your own `claude` command).");
+  log(`  Or use Telos from Claude Code in a terminal: claude mcp add --transport http scruff http://localhost:${port}/mcp\n`);
   return hub;
 }
 

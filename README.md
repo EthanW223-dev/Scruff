@@ -179,12 +179,20 @@ remembers your choice.
 in as `ANTHROPIC_API_KEY`, and restart Telos. Any Claude model works; the default is
 `claude-opus-5`.
 
-**Your Claude subscription (Pro/Max), no API key.** Claude's own apps run on your plan, so Telos
-plugs into them as an MCP tool server: you chat in the Claude app, it calls Telos's tools, and
-every change still shows up in the dashboard with undo. The AI menu shows these commands with
-your paths filled in.
+**Your Claude subscription (Pro/Max), no API key.** Pick **Claude Code** in the AI menu and chat
+right in Telos's overlay: for each message Telos runs your own `claude` command (Claude Code)
+headless, with Telos's tools plugged in, so it answers with your Claude login, or whatever your
+`claude` is set up with. Its tool calls show up in the overlay like any other, and you can stop
+it mid-reply. It needs [Claude Code](https://claude.com/claude-code) installed and logged in
+once (run `claude` in a terminal). Each reply takes a few seconds to start, since every message
+starts it. It can't run commands or edit files on your PC from the overlay, only Telos's tools.
+If `claude` on your PATH isn't Claude Code itself, set `SCRUFF_CLAUDE_COMMAND` in `.env`.
 
-- *Claude Code:* start Telos (`npm start`), then run once:
+You can also go the other way and use Telos from inside Claude's own apps: Telos is an MCP tool
+server, so you chat in the Claude app, it calls Telos's tools, and every change still shows up
+in the dashboard with undo. The AI menu shows these commands with your paths filled in.
+
+- *Claude Code in a terminal:* start Telos (`npm start`), then run once:
   `claude mcp add --transport http scruff http://localhost:7777/mcp`
 - *Claude Desktop:* Settings → Developer → Edit Config, add the `scruff` entry the AI menu gives
   you, and restart Claude Desktop. It starts Telos by itself whenever it opens.
@@ -271,8 +279,8 @@ in raw memory like a real game, and also connects to Telos as a game adapter. As
   `linux.ts` (`/proc/<pid>/mem`), `scanner.ts` (first scan + refine, ~1.3 GB/s), `session.ts`
   (watch list, freezing, undo log), `safety.ts` (anti-cheat check).
 - `src/hub/` is the local server: `agent.ts` runs the conversation and its tools, `models.ts`
-  picks the AI (`providers/anthropic.ts` for Claude, `providers/openai.ts` for everything
-  OpenAI-compatible), `jev.ts` and `quick.ts` are the Jev client and fast path, `mcp.ts` serves the tools to Claude apps, `game.ts` defines the memory
+  picks the AI (`providers/anthropic.ts` for Claude, `providers/claudecode.ts` for your own
+  Claude Code, `providers/openai.ts` for everything OpenAI-compatible), `jev.ts` and `quick.ts` are the Jev client and fast path, `mcp.ts` serves the tools to Claude apps, `game.ts` defines the memory
   tools, `gamefiles.ts` the game-file tools, `adapters.ts` and `screen.ts` connect adapters and the shared screen, `server.ts`
   serves the dashboard.
 - `src/mcp-stdio.ts` is what Claude Desktop launches: it starts the hub if needed and relays MCP.

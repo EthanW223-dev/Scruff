@@ -582,7 +582,9 @@ function renderChanges(changes) {
 function renderAi() {
   const jevOn = Boolean(state?.jev?.enabled);
   $("ai-chip").querySelector(".dot").className = `dot ${aiInfo.ready || jevOn ? "on" : ""}`;
-  $("ai-label").textContent = (aiInfo.model ? `${aiInfo.providerLabel} · ${aiInfo.model}` : "Pick an AI") + (jevOn ? " + Jev" : "");
+  // "default" (Claude Code's own model setting) isn't worth showing.
+  const model = aiInfo.model && aiInfo.model !== "default" ? ` · ${aiInfo.model}` : "";
+  $("ai-label").textContent = (aiInfo.model ? `${aiInfo.providerLabel}${model}` : "Pick an AI") + (jevOn ? " + Jev" : "");
   if (!aiInfo.ready && jevOn) {
     setBanner("Jev is handling quick commands. For anything else, set up a chat AI in the AI menu.");
   } else if (!aiInfo.ready) {
@@ -596,6 +598,7 @@ function renderAi() {
 
 const PROVIDER_META = {
   claude: { logo: "logos/anthropic.svg" },
+  "claude-code": { logo: "logos/claude-code.svg" },
   openai: { logo: "logos/openai.svg" },
   openrouter: { logo: "logos/openrouter.svg" },
   groq: { logo: "logos/groq.svg" },
@@ -914,10 +917,12 @@ function providerCards() {
           ? ["not running", "warn"]
           : p.id === "custom"
             ? ["not set", "warn"]
-            : ["needs key", "warn"],
-      detail: p.ready ? `${p.detail} · ${p.models.length} model${p.models.length === 1 ? "" : "s"}` : p.detail,
-      // The Claude subscription (Pro/Max, no key) lives under the Claude card, not at the bottom.
-      caption: p.id === "claude" ? "Use your Claude subscription — no key needed" : undefined,
+            : p.id === "claude-code"
+              ? ["not found", "warn"]
+              : ["needs key", "warn"],
+      detail: p.ready && p.id !== "claude-code" ? `${p.detail} · ${p.models.length} model${p.models.length === 1 ? "" : "s"}` : p.detail,
+      // Claude Code is the Claude subscription (Pro/Max) path: no key.
+      caption: p.id === "claude-code" ? "Your Claude subscription, through your own claude command. No key." : undefined,
       selected: modelsMsg.current.provider === p.id,
     };
   });
@@ -1009,7 +1014,8 @@ function claudeSubscriptionDetails() {
   );
   const d1 = el("details");
   d1.append(el("summary", null, "Claude Code"));
-  d1.append(el("p", "small", "Run this once, then start claude and ask it to mod your game:"));
+  d1.append(el("p", "small", "Easiest: pick the Claude Code card in this menu and chat right here in Telos."));
+  d1.append(el("p", "small", "Or use Telos from Claude Code in a terminal: run this once, then start claude and ask it to mod your game:"));
   d1.append(copyBlock(connectCache?.claudeCode ?? ""));
   const d2 = el("details");
   d2.append(el("summary", null, "Claude Desktop"));
@@ -1091,13 +1097,23 @@ function buildProviderPanel(panel, p) {
 
   // The subscription path is Claude-specific; it works with or without an API key.
   if (p.id === "claude") panel.append(claudeSubscriptionDetails());
+  if (p.id === "claude-code") {
+    panel.append(
+      el(
+        "p",
+        "muted small",
+        "Telos runs your own claude command for each message, with Telos's tools plugged in: it answers with your Claude login " +
+          "(Pro/Max) or whatever your claude is set up with. Each reply takes a few seconds to start.",
+      ),
+    );
+  }
 
   if (p.ready) {
     const row = el("div", "model-row");
     row.append(el("label", null, "Model"));
     const sel = el("select");
     for (const m of p.models) {
-      const o = el("option", null, m);
+      const o = el("option", null, p.id === "claude-code" && m === "default" ? "Claude Code's default" : m);
       o.value = m;
       sel.append(o);
     }
@@ -1123,10 +1139,20 @@ function buildProviderPanel(panel, p) {
     return;
   }
 
-  if (p.id === "ollama" || p.id === "lmstudio") {
+  if (p.id === "ollama" || p.id === "lmstudio" || p.id === "claude-code") {
     const steps = el("ol", "connect-steps");
+    if (p.id === "claude-code") {
+      const install = el("li");
+      const a = el("a");
+      a.href = "https://claude.com/claude-code";
+      a.target = "_blank";
+      a.rel = "noreferrer";
+      a.textContent = "Install Claude Code";
+      install.append(a, el("span", null, ", then run claude once in a terminal and log in."));
+      steps.append(install);
+    }
     const li = el("li");
-    li.append(el("span", null, `${p.detail}. `));
+    li.append(el("span", null, `${p.detail.replace(/\.$/, "")}. `));
     const retry = el("button", "primary", "Check again");
     retry.type = "button";
     retry.addEventListener("click", () => {

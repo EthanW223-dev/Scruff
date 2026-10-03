@@ -212,7 +212,8 @@ export async function startServer(opts: ServerOptions): Promise<http.Server> {
         transcript.length = 0;
         broadcast({ type: "hello", ai: aiInfo() });
         broadcast({ type: "history", events: [] });
-        toast(ws, `Now using ${aiInfo().model}. Started a new chat.`, "info");
+        const now = aiInfo();
+        toast(ws, `Now using ${now.model === "default" ? now.providerLabel : now.model}. Started a new chat.`, "info");
         break;
       }
       case "set_jev_key": {

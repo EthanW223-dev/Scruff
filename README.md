@@ -141,11 +141,31 @@ What works depends on the engine (the status note in chat always says which tier
 with Mono (the Game files panel says *Unity (Mono)*); IL2CPP Unity games and other engines get
 memory editing and file editing.
 
+## Other players' mods: the marketplace
+
+Many Unity games have ready-made mods on [Thunderstore](https://thunderstore.io), the community
+mod store (Schedule I, Lethal Company, R.E.P.O., Valheim, Risk of Rain 2, PEAK and 300+ more).
+Open **Player mods → Browse mods** in the panel: Telos finds your game's community and shows its
+mods, most downloaded first. Search, then press **Add**.
+
+- Telos adds the mod with everything it needs: its dependencies, and the mod loader it runs on
+  (BepInEx or MelonLoader) if the game doesn't have it yet. Files go where r2modman would put them.
+- Mods made for the other Unity backend (Mono vs IL2CPP) are flagged. Mod manager apps are left out.
+- BepInEx and MelonLoader don't work together. If a mod needs MelonLoader but the game has the
+  BepInEx that Telos added for its bridge, Telos asks before switching (that takes the bridge out;
+  memory editing still works). A game whose other mods use the other loader is left alone.
+- **remove** takes out exactly what Telos added, and dependencies nothing else needs; your own
+  files that were in the way are put back. A mod the running game has loaded is switched off now
+  and deleted when the game closes.
+- Ask in chat too ("is there a minimap mod?"): the AI searches and shows matches in the
+  marketplace, and you press Add. It can't install mods itself.
+- Mods are other players' code: add ones you trust. Telos only downloads from Thunderstore.
+
 ## Build real mods: the Workshop (universal-modder)
 
 Live changes only go so far. For **new content** (weapons, items, enemies, bosses, mechanics,
-UI, art, sounds) Telos has a **Workshop**: Claude Code builds a real mod for the game you're
-playing, with [universal-modder](https://github.com/rehan-remade/universal-modder) loaded.
+UI, art, sounds) Telos has a **Workshop**: your chat AI builds a real mod for the game you're
+playing, with [universal-modder](https://github.com/rehan-remade/universal-modder).
 universal-modder is a toolkit for AI agents that mod games: engine recon, reverse engineering,
 generated art, in-game testing, and a knowledge base of how other agents modded specific games.
 
@@ -159,9 +179,14 @@ generated art, in-game testing, and a knowledge base of how other agents modded 
   (`.scruff/workshop/<game>`) and the game's folders, and it can take a long time.
 - The window shows each step live (`$ dotnet build …`, `edit Weapons.cs`, …) with a **Stop**
   button, and the overlay tells you when it's done and how to load the mod.
-- It runs your own `claude` command (Claude Code, installed and logged in once). Its rules:
-  single-player games only (online games with anti-cheat are refused), saves backed up before a
-  modded launch, nothing published.
+- It builds with the AI you picked in the AI menu. Claude Code builds as itself, with
+  universal-modder loaded as a plugin. Any other AI (a model on your PC, Claude with an API key,
+  an OpenAI-compatible service) works through Telos's builder: it runs commands (PowerShell on
+  Windows), reads, writes and edits files only in the build's folders, reads web pages and
+  downloads loaders, and follows universal-modder's loop and playbooks. Bigger models build much
+  better mods than small local ones.
+- Its rules: single-player games only (online games with anti-cheat are refused), saves backed up
+  before a modded launch, nothing published.
 - Every AI in Telos, local models included, can read universal-modder's engine playbooks and
   field notes with the `modding_guide` tool, to answer "can this game be modded, and how".
 - Sprites, 3D models and sounds come from [fal](https://fal.ai): put `FAL_KEY` in `.env` to let
@@ -302,8 +327,10 @@ in raw memory like a real game, and also connects to Telos as a game adapter. As
   `bridge-rpgmaker/` is the RPG Maker plugin, and `bridge-ue4ss/` is the UE4SS Lua mod for Unreal
   games. `src/games/rpgmaker.ts` and `src/games/ue4ss.ts` install them, and `src/hub/ue4ssrelay.ts`
   connects to the UE4SS mod through files, since UE4SS's Lua has no network access.
-- `src/hub/modder.ts` reads universal-modder's playbooks and field notes (`modding_guide`), and
-  `src/hub/workshop.ts` runs Workshop builds; `vendor/universal-modder/` is the bundled toolkit.
+- `src/hub/modder.ts` reads universal-modder's playbooks and field notes (`modding_guide`),
+  `src/hub/workshop.ts` runs Workshop builds (`buildtools.ts` is the chat AI's builder tools), and
+  `vendor/universal-modder/` is the bundled toolkit. `src/hub/marketplace.ts` is the Thunderstore
+  marketplace.
 - `src/hub/links.ts` is game links; `src/hub/bridges.ts` works out which connected bridge belongs
   to the attached game.
 - `src/memory/` scans and edits another process's memory: `windows.ts` (Win32 via koffi),
@@ -360,8 +387,10 @@ In `.env` (all optional):
   not yet inside real games. The same goes for model loading in Unity: the file reading is
   tested, but building the mesh in a real game isn't yet. Loaded models are static (no
   animation).
-- The Workshop is tested with the real Claude Code CLI against a stand-in for the AI, not yet on
-  a real mod build. How far a build gets depends on the model behind your `claude`.
+- The Workshop is tested with the real Claude Code CLI and with a scripted model against stand-ins,
+  not yet on a real mod build. How far a build gets depends on the AI building it.
+- The marketplace is tested against Thunderstore itself (Schedule I and Lethal Company mods
+  installed into stand-in game folders), not yet inside a running game.
 - Game links on memory values stop when that game closes. Find the value again and remake the
   link.
 - The Unity bridge's core (networking, JSON, reading and changing objects) is tested against Telos,

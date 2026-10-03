@@ -12,7 +12,9 @@ import { buildProfile } from "../src/games/profile.ts";
 import type { AgentEvent } from "../src/hub/agent.ts";
 import { createHub } from "../src/hub/create.ts";
 import { ModderKnowledge, moddingTools } from "../src/hub/modder.ts";
-import { Workshop, describeTool, workshopTools, type WorkshopJob } from "../src/hub/workshop.ts";
+import { Workshop, describeTool, workshopTools, type BuilderChoice, type WorkshopJob } from "../src/hub/workshop.ts";
+import { builderTools } from "../src/hub/buildtools.ts";
+import { fakeModel, lastToolResult, text, toolUse } from "./fake-model.ts";
 // @ts-ignore: plain JS test fixture
 import { startMockApi } from "./fixtures/claude-code/mock-api.mjs";
 
@@ -50,7 +52,11 @@ function workshop(mode = "ok", stepMs = 5) {
     pluginDir: PLUGIN,
     mcpUrl: "http://127.0.0.1:7777/mcp",
     home: dir,
-    launch: () => ({ command: fakeCommand(dir), env: { ...process.env, FAKE_CLAUDE_MODE: mode, FAKE_CLAUDE_LOG: log, FAKE_CLAUDE_STEP_MS: String(stepMs) } }),
+    builder: () => ({
+      kind: "claude-code",
+      label: "Claude Code",
+      launch: { command: fakeCommand(dir), env: { ...process.env, FAKE_CLAUDE_MODE: mode, FAKE_CLAUDE_LOG: log, FAKE_CLAUDE_STEP_MS: String(stepMs) } },
+    }),
   });
   const notices: string[] = [];
   ws.on("notice", (t: string) => notices.push(t));
@@ -217,7 +223,7 @@ test("in the hub: the overlay's Build button runs it, its state reaches the over
   const brain = { model: "unused", createStream: () => { throw new Error("unused"); } } as any;
   const hub = await createHub({
     root, port, lan: false, token: "t", brain, dataDir: dir, jev: null,
-    workshopLaunch: () => ({ command: fakeCommand(dir), env: { ...process.env, FAKE_CLAUDE_STEP_MS: "5" } }),
+    workshopBuilder: () => ({ kind: "claude-code", label: "Claude Code", launch: { command: fakeCommand(dir), env: { ...process.env, FAKE_CLAUDE_STEP_MS: "5" } } }),
   });
   const clients: Client[] = [];
   try {
@@ -285,10 +291,14 @@ test("with the real claude: universal-modder loads as a plugin and the builder w
     pluginDir: PLUGIN,
     mcpUrl: "http://127.0.0.1:9/mcp",
     home: dir,
-    launch: () => ({
-      command: "claude",
-      // A stand-in API and a throwaway config: no real model, no real account touched.
-      env: { ...process.env, ANTHROPIC_BASE_URL: api.url, ANTHROPIC_API_KEY: "sk-test-key", CLAUDE_CONFIG_DIR: path.join(dir, "cfg"), DISABLE_TELEMETRY: "1", DISABLE_AUTOUPDATER: "1", CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" },
+    builder: () => ({
+      kind: "claude-code",
+      label: "Claude Code",
+      launch: {
+        command: "claude",
+        // A stand-in API and a throwaway config: no real model, no real account touched.
+        env: { ...process.env, ANTHROPIC_BASE_URL: api.url, ANTHROPIC_API_KEY: "sk-test-key", CLAUDE_CONFIG_DIR: path.join(dir, "cfg"), DISABLE_TELEMETRY: "1", DISABLE_AUTOUPDATER: "1", CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" },
+      },
     }),
   });
   try {
@@ -304,5 +314,115 @@ test("with the real claude: universal-modder loads as a plugin and the builder w
   } finally {
     ws.close();
     api.server.close();
+  }
+});
+
+// ---- the chat's own AI as the builder (any provider other than Claude Code) ----
+
+function chatWorkshop(policy: Parameters<typeof fakeModel>[0], extra: Partial<Extract<BuilderChoice, { kind: "chat" }>> = {}) {
+  const { dir, profile } = game();
+  const model = fakeModel(policy);
+  const ws = new Workshop({
+    dataDir: dir,
+    pluginDir: PLUGIN,
+    mcpUrl: "http://127.0.0.1:9/mcp",
+    home: dir,
+    builder: () => ({ kind: "chat", label: "Ollama · qwen3:8b", brain: { model: "qwen3:8b", createStream: model.factory }, ready: true, ...extra }),
+    describeBuilder: () => ({ label: "Ollama · qwen3:8b", ready: true }),
+    extraTools: () => moddingTools(new ModderKnowledge(PLUGIN), () => profile, { workshop: true }),
+  });
+  return { ws, profile, dir, model };
+}
+
+test("the chat AI builds with Telos's builder tools and universal-modder's loop, inside the build's folders", async () => {
+  const outside = path.join(os.tmpdir(), `telos-outside-${process.pid}.txt`);
+  const { ws, profile, model } = chatWorkshop((params) => {
+    const last = lastToolResult(params);
+    if (!last) return { content: [text("Reading the playbook first."), toolUse("modding_guide", {})] };
+    if (last.name === "modding_guide") return { content: [toolUse("run_command", { command: "echo built > built.txt" })] };
+    if (last.name === "run_command") return { content: [toolUse("write_file", { path: "MissileMod/Plugin.cs", content: "class MissileMod {}" })] };
+    if (last.name === "write_file" && !last.isError) return { content: [toolUse("write_file", { path: outside, content: "nope" })] };
+    return { content: [text("Built MissileMod in the workshop folder. Copy it into BepInEx/plugins and start the game.")] };
+  });
+  const job = ws.propose(profile, "Add a homing missile launcher", { by: "player" });
+  await settled(job);
+  assert.equal(job.status, "done", job.error);
+  assert.equal(job.builder, "Ollama · qwen3:8b");
+  assert.match(job.summary ?? "", /^Built MissileMod/);
+  assert.ok(fs.existsSync(path.join(job.folder, "built.txt")), "its command ran in the build folder");
+  assert.equal(fs.readFileSync(path.join(job.folder, "MissileMod", "Plugin.cs"), "utf8"), "class MissileMod {}");
+  assert.ok(!fs.existsSync(outside), "nothing written outside the build's folders");
+  const steps = job.steps.map((s) => s.text);
+  assert.ok(steps.includes("Reading the playbook first."));
+  assert.ok(steps.includes("guide"));
+  assert.ok(steps.includes("$ echo built > built.txt"));
+  assert.ok(steps.includes("write Plugin.cs"));
+  assert.ok(steps.some((t) => /↳ .*outside the folders this build may change/.test(t)), "the refusal shows in the log");
+
+  const first = model.calls[0];
+  const system = String(first.system);
+  assert.match(system, /mod workshop of Telos/);
+  assert.match(system, /universal-modder's loop \(mod-any-game\)[\s\S]*## The loop/);
+  assert.match(system, /python -m um/);
+  const names = (first.tools ?? []).map((t: any) => t.name);
+  for (const n of ["run_command", "read_file", "write_file", "edit_file", "list_files", "search_files", "fetch_url", "download_file", "modding_guide"]) assert.ok(names.includes(n), n);
+  assert.match(JSON.stringify(first.messages[0]), /Mod request from the player: Add a homing missile launcher/);
+
+  // "Now make them faster" continues the same conversation.
+  const more = ws.propose(profile, "Make the missiles faster", { by: "player", continues: true });
+  await settled(more);
+  assert.equal(more.status, "done");
+  const resumed = model.calls.find((c) => JSON.stringify(c.messages.at(-1)).includes("Make the missiles faster"))!;
+  assert.ok(resumed.messages.length > 2, "it remembers the first build");
+  assert.match(JSON.stringify(resumed.messages.at(-1)), /continues your earlier work/);
+});
+
+test("the chat AI's build stops on Stop, and won't start without a working AI", async () => {
+  const { ws, profile } = chatWorkshop(() => ({ content: [toolUse("run_command", { command: process.platform === "win32" ? "Start-Sleep 30" : "sleep 30" })] }));
+  const job = ws.propose(profile, "a nuke", { by: "player" });
+  await new Promise((r) => setTimeout(r, 400));
+  ws.stop(job.id);
+  await settled(job, 10_000);
+  assert.equal(job.status, "stopped");
+
+  const broken = chatWorkshop(() => ({ content: [text("unused")] }), { ready: false, problem: "Ollama isn't running" });
+  const j2 = broken.ws.propose(broken.profile, "a sword", { by: "player" });
+  await settled(j2);
+  assert.equal(j2.status, "failed");
+  assert.match(j2.error ?? "", /Ollama isn't running.*AI menu/);
+});
+
+test("builder tools: files only inside the build's folders, universal-modder readable, careful edits, commands with a time limit", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "telos-bt-"));
+  const work = path.join(root, "work");
+  fs.mkdirSync(work);
+  const tools = Object.fromEntries(builderTools({ cwd: work, roots: [work], readOnlyRoots: [PLUGIN], env: process.env, pluginDir: PLUGIN }).map((t) => [t.name, t]));
+  const run = (name: string, input: unknown) => tools[name].run(input, ctx).then(String);
+
+  assert.match(await run("write_file", { path: "src/a.txt", content: "one\ntwo\ntwo\n" }), /Wrote .*a\.txt/);
+  assert.match(await run("read_file", { path: "src/a.txt" }), /lines 1-4 of 4\)\n {4}1  one\n {4}2  two/);
+  await assert.rejects(run("edit_file", { path: "src/a.txt", old_text: "two", new_text: "2" }), /appears 2 times/);
+  assert.match(await run("edit_file", { path: "src/a.txt", old_text: "one", new_text: "1" }), /1 place/);
+  assert.match(await run("edit_file", { path: "src/a.txt", old_text: "two", new_text: "2", replace_all: true }), /2 places/);
+  assert.equal(fs.readFileSync(path.join(work, "src", "a.txt"), "utf8"), "1\n2\n2\n");
+  assert.match(await run("list_files", {}), /src\/\nsrc\/a\.txt/);
+  assert.match(await run("search_files", { pattern: "^2$", file_glob: "*.txt" }), /src\/a\.txt:2: 2/);
+
+  // universal-modder can be read, not changed; the rest of the disk neither.
+  assert.match(await run("read_file", { path: path.join(PLUGIN, "skills", "mod-any-game", "SKILL.md"), max_lines: 3 }), /name: mod-any-game/);
+  await assert.rejects(run("write_file", { path: path.join(PLUGIN, "x.txt"), content: "x" }), /outside the folders this build may change/);
+  await assert.rejects(run("read_file", { path: path.join(root, "..", "elsewhere.txt") }), /outside the folders this build may read/);
+  await assert.rejects(run("write_file", { path: "../escape.txt", content: "x" }), /outside/);
+
+  assert.match(await run("run_command", { command: "echo hi" }), /^exit code 0\nhi/);
+  assert.match(await run("run_command", { command: "exit 3" }), /^exit code 3/);
+  if (process.platform !== "win32") {
+    const started = Date.now();
+    assert.match(await run("run_command", { command: "sleep 20", timeout_seconds: 5 }), /^timed out after 5 s/);
+    assert.ok(Date.now() - started < 12_000);
+    // universal-modder's CLI is importable as `python -m um` from the build's commands.
+    if (/exit code 0/.test(await run("run_command", { command: "command -v python3" }))) {
+      assert.match(await run("run_command", { command: "python3 -c 'import um; print(\"um-ok\")'" }), /^exit code 0\num-ok/);
+    }
   }
 });

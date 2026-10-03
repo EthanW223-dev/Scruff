@@ -1,7 +1,7 @@
 import path from "node:path";
 import { AdapterRegistry } from "./adapters.ts";
 import { Agent, type Brain } from "./agent.ts";
-import { GameManager, memoryTools } from "./game.ts";
+import { GameManager, exeRunning, memoryTools } from "./game.ts";
 import { gameFileTools } from "./gamefiles.ts";
 import { describeProfile } from "../games/profile.ts";
 import { JevService, JevSettings, type Jev } from "./jev.ts";
@@ -12,7 +12,8 @@ import { ue4ssModDir } from "../games/ue4ss.ts";
 import fs from "node:fs";
 import { McpEndpoint } from "./mcp.ts";
 import { ModderKnowledge, moddingTools } from "./modder.ts";
-import { Workshop, workshopTools, type ClaudeLaunch } from "./workshop.ts";
+import { Marketplace, Thunderstore, marketplaceTools } from "./marketplace.ts";
+import { Workshop, workshopTools, type BuilderChoice } from "./workshop.ts";
 import { engineModSupport } from "./mods.ts";
 import { quickPath } from "./quick.ts";
 import type { ModelRouter } from "./models.ts";
@@ -38,9 +39,14 @@ export interface HubOptions {
   dataDir?: string;
   /** Replaces the Jev client built from the TypeSafe key (tests); null turns the fast path off. */
   jev?: Jev | null;
-  /** How the Workshop runs Claude Code (tests); defaults to the AI menu's Claude Code settings. */
-  workshopLaunch?: () => ClaudeLaunch;
+  /** Which AI builds Workshop mods (tests); defaults to the chat's AI from the AI menu. */
+  workshopBuilder?: () => BuilderChoice;
+  /** The marketplace's mod store (tests point it at a stand-in). */
+  thunderstore?: Thunderstore;
 }
+
+/** Telos tools the chat AI keeps while it builds a Workshop mod. */
+const WORKSHOP_EXTRAS = new Set(["modding_guide", "game_status", "game_info", "search_game_code", "list_game_files", "read_game_file", "look_at_screen", "verify_visual_change"]);
 
 export async function createHub(opts: HubOptions) {
   const games = new GameManager();
@@ -64,13 +70,47 @@ export async function createHub(opts: HubOptions) {
 
   // universal-modder (bundled): its playbooks for every AI, and the Workshop that builds real mods with it.
   const knowledge = new ModderKnowledge(path.join(opts.root, "vendor", "universal-modder"));
+  // The Workshop builds with the chat's own AI: Claude Code as itself, any other AI through Telos's builder tools.
+  const chatAi = () => {
+    const d = opts.router?.describe();
+    if (!d) return { label: brain!.model, ready: true, problem: undefined as string | undefined, claudeCode: false };
+    return {
+      label: d.model && d.model !== "default" ? `${d.providerLabel} · ${d.model}` : d.providerLabel,
+      ready: d.ready,
+      problem: d.problem,
+      claudeCode: d.provider === "claude-code",
+    };
+  };
   const workshop = new Workshop({
     dataDir,
     pluginDir: knowledge.dir,
     mcpUrl: `http://127.0.0.1:${opts.port}/mcp`,
-    launch:
-      opts.workshopLaunch ??
-      (() => opts.router?.claudeCodeLaunch() ?? { command: process.env.SCRUFF_CLAUDE_COMMAND?.trim() || "claude", env: process.env }),
+    env: process.env,
+    builder:
+      opts.workshopBuilder ??
+      ((): BuilderChoice => {
+        const ai = chatAi();
+        if (ai.claudeCode && opts.router) return { kind: "claude-code", label: ai.label, launch: opts.router.claudeCodeLaunch() };
+        // brain is checked right below; builds only start long after.
+        return { kind: "chat", label: ai.label, brain: opts.router?.brain() ?? brain!, ready: ai.ready, problem: ai.problem };
+      }),
+    describeBuilder: () => {
+      if (opts.workshopBuilder) {
+        const b = opts.workshopBuilder();
+        return { label: b.label, ready: b.kind === "claude-code" || b.ready };
+      }
+      const { label, ready, problem } = chatAi();
+      return { label, ready, problem };
+    },
+    // While building, the chat AI also gets Telos's game tools that help it check its work.
+    extraTools: () => tools.filter((t) => WORKSHOP_EXTRAS.has(t.name)),
+  });
+
+  // Other players' mods, ready to add (Thunderstore).
+  const market = new Marketplace({
+    store: opts.thunderstore ?? new Thunderstore({ cacheDir: path.join(dataDir, "market") }),
+    profile: () => games.profile,
+    isRunning: exeRunning,
   });
 
   // Claude Code as the brain calls Telos's tools over this hub's own MCP endpoint.
@@ -139,6 +179,7 @@ export async function createHub(opts: HubOptions) {
     ...modelFileTools(),
     ...moddingTools(knowledge, () => games.profile, { workshop: workshop.pluginReady }),
     ...workshopTools(workshop, () => games.profile),
+    ...marketplaceTools(market, () => games.profile),
   ];
 
   const jev = new JevService(new JevSettings(path.join(dataDir, "typesafe.json")), opts.jev);
@@ -177,6 +218,7 @@ export async function createHub(opts: HubOptions) {
     screen,
     mcp,
     workshop,
+    market,
     version: codeVersion(opts.root),
   });
 
@@ -189,6 +231,7 @@ export async function createHub(opts: HubOptions) {
     links,
     screen,
     workshop,
+    market,
     server,
     close() {
       agent.stop();

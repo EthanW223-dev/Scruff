@@ -138,6 +138,12 @@
         <div class="panel-head"><i data-icon="link"></i><h2>Game links</h2><span class="stripes" aria-hidden="true"></span></div>
         <ul id="links" class="changes links"></ul>
       </div>
+      <!-- Other players' mods (Thunderstore): what's in the game, and the store to add more. -->
+      <div class="panel win" id="market-panel" hidden>
+        <div class="panel-head"><i data-icon="store"></i><h2>Player mods</h2><span class="stripes" aria-hidden="true"></span><span id="market-badge" class="badge" hidden></span></div>
+        <div id="market-installed" class="market-installed"></div>
+        <button type="button" id="market-open" class="primary market-open"><i data-icon="store"></i><span>Browse mods</span></button>
+      </div>
       <!-- The Workshop: real mods (new items, enemies, mechanics) built by Claude Code with
            universal-modder. Nothing starts without the player pressing Build. -->
       <div class="panel win" id="workshop-panel" hidden>
@@ -170,6 +176,33 @@
       </section>
       <div id="provider-grid" class="provider-grid" role="listbox" aria-label="AI providers"></div>
       <div id="connect-panel" class="connect-panel" hidden></div>
+    </form>
+  </dialog>
+
+  <dialog id="market-dialog" class="picker market-dialog">
+    <form method="dialog" class="picker-inner">
+      <div class="picker-head">
+        <h2><span class="term-prompt">&gt;&nbsp;marketplace</span><span class="cursor" aria-hidden="true"></span></h2>
+        <span class="stripes" aria-hidden="true"></span>
+        <button value="close" class="icon-btn" aria-label="Close">✕</button>
+      </div>
+      <div class="market-sub">
+        <span id="market-where" class="muted small"></span>
+        <button type="button" id="market-pick" class="link">Wrong game?</button>
+      </div>
+      <div id="market-communities" class="market-communities" hidden>
+        <input id="market-community-filter" type="search" placeholder="Find the game on Thunderstore…" autocomplete="off">
+        <div id="market-community-list" class="market-community-list"></div>
+      </div>
+      <div class="market-search">
+        <input id="market-query" type="search" placeholder="Search mods: minimap, more money, bigger storage…" autocomplete="off">
+        <button type="button" id="market-go" class="primary">Search</button>
+      </div>
+      <div id="market-pending" class="market-pending" hidden></div>
+      <p id="market-error" class="connect-error" hidden></p>
+      <div id="market-grid" class="market-grid"></div>
+      <button type="button" id="market-more" class="link market-more" hidden>More mods</button>
+      <p class="muted small market-note">Mods are made by other players and come from <a href="https://thunderstore.io" target="_blank" rel="noreferrer">Thunderstore</a>. Telos adds each with everything it needs (and the mod loader), and takes out exactly what it added. Add mods you trust; single-player use only.</p>
     </form>
   </dialog>
 

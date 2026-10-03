@@ -28,6 +28,7 @@ const PATHS = {
   pin: '<path d="M9 3h6l-1 6 4 4H6l4-4z"/><path d="M12 13v8"/>',
   wave: '<path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2"/>',
   hammer: '<path d="M3 21l11-11"/><path d="M10 6l4-4 8 8-4 4z"/>',
+  store: '<path d="M4 9h16l-1.5 11h-13z"/><path d="M8.5 9V7a3.5 3.5 0 0 1 7 0v2"/>',
 };
 
 export const ICONS = Object.keys(PATHS);

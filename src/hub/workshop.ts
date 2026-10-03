@@ -5,15 +5,21 @@ import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import { describeProfile, type GameProfile } from "../games/profile.ts";
+import { Agent, type AgentEvent, type Brain } from "./agent.ts";
+import { SHELL, builderTools } from "./buildtools.ts";
 import { onlineGame } from "../memory/safety.ts";
 import { CHAT_HEADER, MCP_NAME, childEnv, explain, run, stopTree } from "./providers/claudecode.ts";
 import { defineTool, json, type HubTool } from "./tools.ts";
 
 /**
- * The Workshop: real mods, built for the player by Claude Code with universal-modder loaded as
- * a plugin (its mod-any-game loop, engine playbooks, knowledge base and `um` CLI). Telos's live
- * tools change the running game; the Workshop makes new content: items, weapons, enemies,
- * mechanics, art.
+ * The Workshop: real mods, built for the player with universal-modder (its mod-any-game loop,
+ * engine playbooks, knowledge base and `um` CLI). Telos's live tools change the running game;
+ * the Workshop makes new content: items, weapons, enemies, mechanics, art.
+ *
+ * The builder is the chat's own AI. When that's Claude Code, Claude Code builds with
+ * universal-modder loaded as a plugin. Any other AI (a local model, Claude through an API key,
+ * an OpenAI-compatible service) drives Telos's own builder tools (buildtools.ts) with
+ * universal-modder's loop as its instructions.
  *
  * Building a mod means running commands and editing files on the player's PC, for minutes or
  * hours. So nothing starts without the player: the chat AI can only propose a build
@@ -39,8 +45,10 @@ export interface WorkshopJob {
   status: JobStatus;
   /** Who asked: the player in the Workshop window, or the chat AI (which needs the player's OK). */
   by: "player" | "ai";
-  /** Carries on the last build for this game (same Claude Code session). */
+  /** Carries on the last build for this game (same session, same folder). */
   continues: boolean;
+  /** The AI building it ("Claude Code", "Ollama · qwen3:8b"). */
+  builder?: string;
   createdAt: number;
   startedAt?: number;
   endedAt?: number;
@@ -58,15 +66,26 @@ export interface ClaudeLaunch {
   model?: string;
 }
 
+/** Which AI builds: the chat's own choice. */
+export type BuilderChoice =
+  | { kind: "claude-code"; label: string; launch: ClaudeLaunch }
+  | { kind: "chat"; label: string; brain: Brain; ready: boolean; problem?: string };
+
 export interface WorkshopOptions {
   /** Telos's data folder: builds go under <dataDir>/workshop/<game>. */
   dataDir: string;
-  /** universal-modder, loaded into Claude Code with --plugin-dir. */
+  /** universal-modder: Claude Code loads it with --plugin-dir; the chat AI reads it. */
   pluginDir: string;
-  /** Telos's MCP endpoint: the builder can look at the game through Telos. */
+  /** Telos's MCP endpoint: Claude Code can look at the game through Telos. */
   mcpUrl: string;
-  /** How to run Claude Code (the same command the chat's Claude Code choice uses). */
-  launch: () => ClaudeLaunch;
+  /** The AI that builds (the chat's), asked when a build starts. */
+  builder: () => BuilderChoice;
+  /** Who'd build right now, for the overlay (cheap: called on every update). */
+  describeBuilder?: () => { label: string; ready: boolean; problem?: string };
+  /** Telos's own tools the chat AI may use while building (modding_guide, look_at_screen, game_info…). */
+  extraTools?: () => import("./tools.ts").HubTool[];
+  /** The environment its commands run in. */
+  env?: NodeJS.ProcessEnv;
   /** The player's home folder (Documents/My Games is where many games keep mod sources). */
   home?: string;
 }
@@ -101,14 +120,19 @@ const BUILDER_ROLE =
   "summary for the player in plain words: what you built, where it is, and exactly how to load it in the game.";
 
 const MAX_STEPS = 300;
+/** Tool rounds the chat AI gets for one build. */
+const CHAT_BUILD_STEPS = 160;
 
 export class Workshop extends EventEmitter {
   private jobs: WorkshopJob[] = [];
   /** The game each build is for, until it ends. */
   private profiles = new Map<number, GameProfile>();
   private nextId = 1;
-  private child: ChildProcess | null = null;
+  /** The running build: how to stop it. */
+  private active: { stop(): void } | null = null;
   private stopping = false;
+  /** The chat-AI builder per game, so "now make it bigger" continues the same conversation. */
+  private agents = new Map<string, { agent: Agent; model: string }>();
   private sessionsFile: string;
 
   constructor(private opts: WorkshopOptions) {
@@ -134,6 +158,7 @@ export class Workshop extends EventEmitter {
     const live = this.current ?? this.jobs.at(-1) ?? null;
     return {
       available: this.pluginReady,
+      builder: this.opts.describeBuilder?.() ?? null,
       job: live ? view(live) : null,
       history: this.jobs
         .filter((j) => j !== live)
@@ -155,7 +180,7 @@ export class Workshop extends EventEmitter {
     // A newer proposal replaces one still waiting for the player.
     for (const j of this.jobs) if (j.status === "proposed") j.status = "declined";
     const folder = path.join(this.opts.dataDir, "workshop", slug(profile.name));
-    const continues = Boolean(opts.continues && this.sessions()[slug(profile.name)]);
+    const continues = Boolean(opts.continues && (this.sessions()[slug(profile.name)] || this.agents.has(slug(profile.name)) || fs.existsSync(folder)));
     const job: WorkshopJob = {
       id: this.nextId++,
       game: profile.name,
@@ -201,18 +226,140 @@ export class Workshop extends EventEmitter {
     const job = id === undefined ? this.jobs.find((j) => j.status === "running") : this.job(id);
     if (!job) return;
     if (job.status === "proposed") return this.decline(job.id);
-    if (job.status !== "running" || !this.child) return;
+    if (job.status !== "running" || !this.active) return;
     this.stopping = true;
-    stopTree(this.child);
+    this.active.stop();
   }
 
   close(): void {
     this.stop();
   }
 
+  /** The folders a build may work in: its own, the game's, and Documents (My Games). */
+  private dirs(job: WorkshopJob, profile: GameProfile): string[] {
+    const dirs = [job.folder, profile.installDir, ...profile.saveDirs];
+    const docs = path.join(this.opts.home ?? os.homedir(), "Documents");
+    if (fs.existsSync(docs)) dirs.push(docs); // Documents/My Games/<game>/…: where many games keep mod sources
+    return dirs;
+  }
+
   private start(job: WorkshopJob, profile: GameProfile): void {
     fs.mkdirSync(job.folder, { recursive: true });
-    const launch = this.opts.launch();
+    const log = path.join(job.folder, `telos-build-${job.id}.log`);
+    const note = (line: string) => {
+      try {
+        fs.appendFileSync(log, `${new Date().toISOString()} ${line}\n`);
+      } catch {
+        // the log is a convenience
+      }
+    };
+    note(`request: ${job.request}`);
+    const prompt = [
+      `Mod request from the player: ${job.request}`,
+      job.continues ? "This continues your earlier work on this game: build on what's already in this folder (MODLOG.md says what was done)." : "",
+      `Game: ${profile.name} (${profile.engine}). Exe: ${profile.exe}`,
+      describeProfile(profile),
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    this.stopping = false;
+    let choice: BuilderChoice;
+    try {
+      choice = this.opts.builder();
+    } catch (err) {
+      return this.finish(job, "failed", undefined, `No AI to build with: ${(err as Error).message}`);
+    }
+    job.builder = choice.label;
+    note(`builder: ${choice.label}`);
+    this.emit("update");
+    if (choice.kind === "claude-code") this.startClaudeCode(job, profile, choice.launch, prompt, note);
+    else this.startChat(job, profile, choice, prompt, note);
+  }
+
+  /** Records one step of the build (for the overlay and the build's log). */
+  private step(job: WorkshopJob, step: WorkshopStep, note: (line: string) => void): void {
+    job.steps.push(step);
+    if (job.steps.length > MAX_STEPS) job.steps.splice(0, job.steps.length - MAX_STEPS);
+    note(`${step.kind}: ${step.text}`);
+    this.emit("update");
+  }
+
+  /** The chat's AI builds, with Telos's builder tools and universal-modder's loop as its instructions. */
+  private startChat(job: WorkshopJob, profile: GameProfile, choice: Extract<BuilderChoice, { kind: "chat" }>, prompt: string, note: (line: string) => void): void {
+    if (!choice.ready) return this.finish(job, "failed", undefined, `${choice.problem ?? "The chat AI isn't set up"}. Pick an AI in the AI menu, then build again.`);
+    const dirs = this.dirs(job, profile);
+    const key = slug(job.game);
+    let entry = job.continues ? this.agents.get(key) : undefined;
+    if (!entry || entry.model !== `${choice.label}`) {
+      const tools = [
+        ...builderTools({ cwd: job.folder, roots: dirs, readOnlyRoots: [this.opts.pluginDir], env: this.opts.env ?? process.env, pluginDir: this.opts.pluginDir }),
+        ...(this.opts.extraTools?.() ?? []),
+      ];
+      entry = {
+        agent: new Agent({ brain: choice.brain, tools, status: () => ({ note: "", events: [] }), system: this.builderPrompt(job, profile, dirs), maxSteps: CHAT_BUILD_STEPS }),
+        model: choice.label,
+      };
+      this.agents.set(key, entry);
+    }
+    const agent = entry.agent;
+    let said = "";
+    let lastWords = "";
+    let error: string | undefined;
+    const flush = () => {
+      const text = said.trim();
+      if (text) this.step(job, { at: Date.now(), kind: "say", text: text.slice(0, 600) }, note);
+      said = "";
+    };
+    const onEvent = (e: AgentEvent) => {
+      if (job.status !== "running") return;
+      if (e.type === "text") {
+        said += e.text;
+        lastWords += e.text;
+      } else if (e.type === "tool_call") {
+        flush();
+        lastWords = "";
+        this.step(job, { at: Date.now(), kind: "tool", text: describeTool(e.name, (e.input ?? {}) as Record<string, any>) }, note);
+      } else if (e.type === "tool_result" && !e.ok) {
+        this.step(job, { at: Date.now(), kind: "tool", text: `  ↳ ${e.text.split(/\r?\n/)[0].slice(0, 160)}` }, note);
+      } else if (e.type === "error") {
+        error = e.text;
+      } else if (e.type === "turn_end") {
+        flush();
+        agent.off("event", onEvent);
+        this.active = null;
+        if (this.stopping) return this.finish(job, "stopped");
+        if (error) return this.finish(job, "failed", undefined, error);
+        this.finish(job, "done", lastWords.trim() || "The build finished without a summary. MODLOG.md in its folder has the details.");
+      }
+    };
+    agent.on("event", onEvent);
+    this.active = { stop: () => agent.stop() };
+    agent.send(prompt);
+  }
+
+  /** The chat AI's instructions for a build: Telos's rules and universal-modder's loop. */
+  private builderPrompt(job: WorkshopJob, profile: GameProfile, dirs: string[]): string {
+    let loop = "";
+    try {
+      loop = fs.readFileSync(path.join(this.opts.pluginDir, "skills", "mod-any-game", "SKILL.md"), "utf8").replace(/^---\n[\s\S]*?\n---\n/, "");
+    } catch {
+      // modding_guide still has it
+    }
+    return [
+      BUILDER_ROLE.replace("Telos's tools (mcp__telos) can look at the running game if it's open, to check your work.", "look_at_screen shows the running game if it's open, to check your work."),
+      `Your tools: run_command (${SHELL}), read_file, write_file, edit_file, list_files, search_files, fetch_url, download_file, ` +
+        "modding_guide (universal-modder's engine playbooks, skills and field notes: start with it), and Telos's game tools. " +
+        "Work step by step: one tool call, look at the result, then the next. Don't stop to ask the player anything.",
+      `The game: ${profile.name} (${profile.engine}), installed at ${profile.installDir}. The build folder: ${job.folder}. ` +
+        `You can change files in: ${dirs.join("; ")}.`,
+      "universal-modder's CLI is `python -m um <group> ...` (Python 3.10+ with pillow, numpy and pyyaml; if Python is missing, " +
+        "do without it). Where its loop below says `um ...`, run `python -m um ...`. Its fal art commands need FAL_KEY.",
+      `# universal-modder's loop (mod-any-game)\n${loop}`,
+    ].join("\n\n");
+  }
+
+  /** Claude Code builds, with universal-modder loaded as a plugin. */
+  private startClaudeCode(job: WorkshopJob, profile: GameProfile, launch: ClaudeLaunch, prompt: string, note: (line: string) => void): void {
     const config = path.join(job.folder, "telos-mcp.json");
     const servers: Record<string, unknown> = {
       [MCP_NAME]: { type: "http", url: this.opts.mcpUrl, headers: { [CHAT_HEADER]: "workshop" } },
@@ -221,9 +368,7 @@ export class Workshop extends EventEmitter {
     if (launch.env.FAL_KEY) servers.fal = { type: "http", url: "https://mcp.fal.ai/mcp", headers: { Authorization: "Bearer ${FAL_KEY}" } };
     fs.writeFileSync(config, JSON.stringify({ mcpServers: servers }, null, 2));
 
-    const dirs = [profile.installDir, ...profile.saveDirs];
-    const docs = path.join(this.opts.home ?? os.homedir(), "Documents");
-    if (fs.existsSync(docs)) dirs.push(docs); // Documents/My Games/<game>/…: where many games keep mod sources
+    const dirs = this.dirs(job, profile).slice(1); // its own folder is where it starts
     const session = job.continues ? this.sessions()[slug(job.game)] : undefined;
     const args = [
       "-p",
@@ -247,32 +392,13 @@ export class Workshop extends EventEmitter {
       ...(launch.model && launch.model !== "default" ? ["--model", launch.model] : []),
       ...(session ? ["--resume", session] : []),
     ];
-    const prompt = [
-      `Mod request from the player: ${job.request}`,
-      job.continues ? "This continues your earlier work on this game: build on what's already in this folder." : "",
-      `Game: ${profile.name} (${profile.engine}). Exe: ${profile.exe}`,
-      describeProfile(profile),
-    ]
-      .filter(Boolean)
-      .join("\n\n");
-    const log = path.join(job.folder, `telos-build-${job.id}.log`);
-    const note = (line: string) => {
-      try {
-        fs.appendFileSync(log, `${new Date().toISOString()} ${line}\n`);
-      } catch {
-        // the log is a convenience
-      }
-    };
-    note(`request: ${job.request}`);
-
     let child: ChildProcess;
     try {
       child = run(launch.command, args, { cwd: job.folder, env: childEnv(launch.env) });
     } catch (err) {
       return this.finish(job, "failed", undefined, explain((err as Error).message, launch.command));
     }
-    this.child = child;
-    this.stopping = false;
+    this.active = { stop: () => stopTree(child) };
     let result: Record<string, any> | null = null;
     let stderr = "";
     const noise: string[] = [];
@@ -297,11 +423,7 @@ export class Workshop extends EventEmitter {
       for (const b of msg.message?.content ?? []) {
         const step: WorkshopStep | null =
           b.type === "tool_use" ? { at: Date.now(), kind: "tool", text: describeTool(b.name, b.input ?? {}) } : b.type === "text" && b.text?.trim() ? { at: Date.now(), kind: "say", text: b.text.trim().slice(0, 600) } : null;
-        if (!step) continue;
-        job.steps.push(step);
-        if (job.steps.length > MAX_STEPS) job.steps.splice(0, job.steps.length - MAX_STEPS);
-        note(`${step.kind}: ${step.text}`);
-        this.emit("update");
+        if (step) this.step(job, step, note);
       }
     };
     child.stdout!.setEncoding("utf8");
@@ -318,12 +440,12 @@ export class Workshop extends EventEmitter {
       stderr = (stderr + chunk).slice(-4000);
     });
     child.on("error", (err) => {
-      this.child = null;
+      this.active = null;
       this.finish(job, "failed", undefined, explain((err as NodeJS.ErrnoException).code === "ENOENT" ? "not found" : err.message, launch.command));
     });
     child.on("close", (code) => {
       if (job.status !== "running") return;
-      this.child = null;
+      this.active = null;
       if (buf) onLine(buf);
       const r = result as Record<string, any> | null;
       note(`exit ${code}${r ? `, result ${r.subtype}` : ""}`);
@@ -384,7 +506,24 @@ export function describeTool(name: string, input: Record<string, any>): string {
   const file = (p: unknown) => path.basename(String(p ?? ""));
   switch (name) {
     case "Bash":
+    case "run_command":
       return `$ ${short(input.command)}`;
+    case "read_file":
+      return `read ${file(input.path)}`;
+    case "write_file":
+      return `write ${file(input.path)}`;
+    case "edit_file":
+      return `edit ${file(input.path)}`;
+    case "list_files":
+      return `list ${short(input.path ?? ".", 80)}`;
+    case "search_files":
+      return `search ${short(input.pattern, 80)}`;
+    case "fetch_url":
+      return `read ${short(input.url, 100)}`;
+    case "download_file":
+      return `download ${file(input.to)}`;
+    case "modding_guide":
+      return `guide${input.open ? `: ${short(input.open, 80)}` : input.query ? `: ${short(input.query, 80)}` : ""}`;
     case "Read":
       return `read ${file(input.file_path)}`;
     case "Write":
@@ -410,6 +549,8 @@ export function describeTool(name: string, input: Record<string, any>): string {
     default: {
       const m = /^mcp__([^_]+(?:_[^_]+)*)__(.+)$/.exec(name);
       if (m) return `${m[1] === MCP_NAME ? "telos" : m[1]} ${m[2].replace(/_/g, " ")}`;
+      // Telos's own tools, when the chat AI builds.
+      if (/^[a-z][a-z_]+$/.test(name)) return `telos ${name.replace(/_/g, " ")}`;
       return name;
     }
   }
@@ -443,7 +584,7 @@ export function workshopTools(workshop: Workshop, profile: () => GameProfile | n
     defineTool({
       name: "build_mod",
       description:
-        "Propose a REAL mod for the attached game to Telos's Workshop: Claude Code with universal-modder builds it (new " +
+        "Propose a REAL mod for the attached game to Telos's Workshop: the chat's AI builds it with universal-modder (new " +
         "items, weapons, enemies, bosses, mechanics, art, sounds), installs it and tests it. Use it for anything Telos's " +
         "live tools can't do. It runs commands and edits files on the player's PC and can take a long time, so it only " +
         "starts when the player presses Build in the overlay's Workshop window: tell them that. Check modding_guide first " +

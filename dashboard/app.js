@@ -111,6 +111,9 @@ function handle(msg) {
     case "capture":
       captureFrame(msg.id);
       break;
+    case "market_communities":
+      renderCommunities(msg.list);
+      break;
   }
 }
 
@@ -355,6 +358,7 @@ function renderState() {
 
   renderLinks(state.links ?? []);
   renderWorkshop(state.workshop, game.profile ?? null);
+  renderMarket(state.market, game.profile ?? null);
 
   // Scan status
   const scan = attached?.scan;
@@ -559,7 +563,160 @@ function renderLinks(links) {
   );
 }
 
-// ---------- Workshop: real mods built by Claude Code with universal-modder ----------
+// ---------- Player mods: Thunderstore, ready to add ----------
+
+let marketSearchedFor = null; // the game the store last loaded mods for
+let marketCommunities = [];
+
+/** A mod's icon, or a lettered tile when it can't load (offline, blocked). */
+function modIcon(src, name, cls = "") {
+  const tile = () => {
+    const t = el("span", `mod-tile ${cls}`, (name.replace(/[^A-Za-z0-9]/g, "")[0] ?? "?").toUpperCase());
+    return t;
+  };
+  if (!src) return tile();
+  const img = el("img", cls);
+  img.alt = "";
+  img.loading = "lazy";
+  img.addEventListener("error", () => img.replaceWith(tile()), { once: true });
+  img.src = src;
+  return img;
+}
+const compact = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}K` : String(n));
+const LOADER_NAME = { bepinex: "BepInEx", melonloader: "MelonLoader" };
+
+function renderMarket(m, profile) {
+  const panel = $("market-panel");
+  panel.hidden = !m || !profile;
+  if (!m || !profile) return;
+  const mine = m.installed.filter((i) => i.explicit);
+  $("market-badge").hidden = !mine.length;
+  $("market-badge").textContent = String(mine.length);
+  const rows = mine.map((i) => {
+    const row = el("div", "row");
+    row.append(modIcon(i.icon, i.name, "small"));
+    const remove = el("button", "link", "remove");
+    remove.type = "button";
+    remove.addEventListener("click", () => send({ type: "market_remove", id: i.id }));
+    row.append(el("span", "name", i.name), el("span", "ver", i.version), remove);
+    return row;
+  });
+  const loader = m.loader ? `Mod loader: ${LOADER_NAME[m.loader]}` : "No mod loader yet: Telos adds the one a mod needs.";
+  $("market-installed").replaceChildren(...rows, el("div", "loader", mine.length ? loader : `No player mods added yet. ${loader}`));
+
+  // The store dialog.
+  const where = m.community ? `${m.community.name} on Thunderstore · ${m.count.toLocaleString()} mod${m.count === 1 ? "" : "s"}${m.query ? ` for "${m.query}"` : ""}` : `${profile.name}`;
+  $("market-where").textContent = where + (m.loader ? ` · this game uses ${LOADER_NAME[m.loader]}` : "");
+  const err = $("market-error");
+  err.hidden = !m.error;
+  err.textContent = m.error ?? "";
+  const pending = $("market-pending");
+  pending.hidden = !m.pending;
+  if (m.pending) {
+    const row = el("div", "ws-row");
+    const go = el("button", "primary", "Switch loader and add");
+    go.type = "button";
+    go.addEventListener("click", () => send({ type: "market_confirm", id: m.pending.id }));
+    const no = el("button", "link", "Cancel");
+    no.type = "button";
+    no.addEventListener("click", () => send({ type: "market_cancel" }));
+    row.append(go, no);
+    pending.replaceChildren(el("div", null, m.pending.message), row);
+  }
+  const installedIds = new Map(m.installed.map((i) => [i.id, i]));
+  $("market-grid").replaceChildren(
+    ...m.results.map((mod) => {
+      const card = el("div", `market-card${mod.installed ? " installed" : ""}`);
+      const head = el("div", "market-card-head");
+      const img = modIcon(mod.icon, mod.name);
+      const text = el("div");
+      text.append(el("div", "name", mod.name.replace(/_/g, " ")), el("div", "by", `by ${mod.namespace} · ${compact(mod.downloads)} downloads`));
+      head.append(img, text);
+      card.append(head, el("p", "desc", mod.description));
+      if (mod.loader) card.append(el("span", "tag", `${LOADER_NAME[mod.loader]} (mod loader)`));
+      if (mod.warning) card.append(el("p", "warn", mod.warning));
+      const actions = el("div", "actions");
+      if (m.busy?.id === mod.id) {
+        actions.append(el("span", "busy", m.busy.text));
+      } else if (mod.installed) {
+        actions.append(el("span", "tag", `✓ added ${mod.installed}`));
+        if (installedIds.get(mod.id)?.explicit) {
+          const remove = el("button", "link", "remove");
+          remove.type = "button";
+          remove.addEventListener("click", () => send({ type: "market_remove", id: mod.id }));
+          actions.append(remove);
+        }
+      } else {
+        const add = el("button", "primary", "Add");
+        add.type = "button";
+        add.disabled = Boolean(m.busy);
+        add.addEventListener("click", () => send({ type: "market_install", id: mod.id }));
+        actions.append(add);
+      }
+      const link = el("a", null, "page ↗");
+      link.href = mod.url;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      actions.append(link);
+      card.append(actions);
+      return card;
+    }),
+  );
+  $("market-more").hidden = !(m.community && m.results.length && m.results.length < m.count);
+  // A new game: load its most popular mods once the store is open.
+  if ($("market-dialog").open && marketSearchedFor !== profile.installDir) {
+    marketSearchedFor = profile.installDir;
+    send({ type: "market_search", query: "" });
+  }
+}
+
+function renderCommunities(list) {
+  marketCommunities = list ?? [];
+  $("market-communities").hidden = false;
+  filterCommunities();
+  $("market-community-filter").focus();
+}
+
+function filterCommunities() {
+  const q = $("market-community-filter").value.trim().toLowerCase();
+  const hits = marketCommunities.filter((c) => !q || c.name.toLowerCase().includes(q)).slice(0, 60);
+  $("market-community-list").replaceChildren(
+    ...hits.map((c) => {
+      const b = el("button", null, c.name);
+      b.type = "button";
+      b.addEventListener("click", () => {
+        $("market-communities").hidden = true;
+        send({ type: "market_community", identifier: c.identifier });
+      });
+      return b;
+    }),
+  );
+}
+
+$("market-open").addEventListener("click", () => {
+  $("market-dialog").showModal();
+  const profile = state?.game?.profile;
+  if (profile && marketSearchedFor !== profile.installDir) {
+    marketSearchedFor = profile.installDir;
+    send({ type: "market_search", query: "" });
+  }
+  setTimeout(() => $("market-query").focus(), 30);
+});
+const marketSearch = () => send({ type: "market_search", query: $("market-query").value });
+$("market-go").addEventListener("click", marketSearch);
+$("market-query").addEventListener("keydown", (e) => {
+  // The dialog is a form: Enter would close it.
+  if (e.key === "Enter") {
+    e.preventDefault();
+    marketSearch();
+  }
+});
+$("market-more").addEventListener("click", () => send({ type: "market_search", query: state?.market?.query ?? "", page: (state?.market?.page ?? 1) + 1 }));
+$("market-pick").addEventListener("click", () => send({ type: "market_communities" }));
+$("market-community-filter").addEventListener("input", filterCommunities);
+$("market-community-filter").addEventListener("keydown", (e) => e.key === "Enter" && e.preventDefault());
+
+// ---------- Workshop: real mods built by the chat's AI with universal-modder ----------
 
 const WS_STATUS = {
   proposed: ["needs your OK", "warn"],
@@ -569,9 +726,15 @@ const WS_STATUS = {
   stopped: ["stopped", ""],
   declined: ["not built", ""],
 };
-const WS_CONSENT =
-  "Claude Code builds it with universal-modder: it runs commands and edits files on this PC (in its workshop folder and the " +
-  "game's folders) and can take a long time. Needs Claude Code installed; it runs your own claude command.";
+/** Who builds (the chat's AI) and what building means. */
+function wsConsent(builder) {
+  const who = builder ? `Your chat AI (${builder.label})` : "Your chat AI";
+  return (
+    `${who} builds it with universal-modder: it runs commands and edits files on this PC (in its workshop folder and the ` +
+    "game's folders) and can take a long time. Change the AI in the AI menu." +
+    (builder && !builder.ready ? ` ⚠ ${builder.problem ?? "That AI isn't set up yet"}.` : "")
+  );
+}
 let wsParts = null; // the window's pieces: the request form stays put while the rest re-renders
 
 /** The request form, made once so typing survives live updates. */
@@ -594,8 +757,9 @@ function workshopForm() {
     cont.checked = false;
   });
   row.append(build, contLabel);
-  form.append(input, row, el("p", "ws-note", WS_CONSENT));
-  return { form, input, build, contLabel };
+  const consent = el("p", "ws-note", wsConsent(null));
+  form.append(input, row, consent);
+  return { form, input, build, contLabel, consent };
 }
 
 function renderWorkshop(ws, profile) {
@@ -617,10 +781,10 @@ function renderWorkshop(ws, profile) {
     const box = el("div", "ws-job");
     const [label, cls] = WS_STATUS[job.status] ?? [job.status, ""];
     const head = el("div", "ws-job-head");
-    head.append(el("span", null, job.game), el("span", `pill ${cls}`, label));
+    head.append(el("span", null, job.builder ? `${job.game} · ${job.builder}` : job.game), el("span", `pill ${cls}`, label));
     box.append(head, el("div", "ws-request", job.request));
     if (job.status === "proposed") {
-      box.append(el("p", "ws-note", `The AI suggested this build. ${WS_CONSENT}`));
+      box.append(el("p", "ws-note", `The AI suggested this build. ${wsConsent(ws.builder)}`));
       const row = el("div", "ws-row");
       const go = el("button", "primary", "Build");
       go.type = "button";
@@ -662,6 +826,7 @@ function renderWorkshop(ws, profile) {
   wsParts.build.disabled = !game;
   wsParts.input.placeholder = game ? `Describe a mod for ${game}: "add a homing missile launcher", "a boss that…"` : "Attach to a game to build mods for it.";
   wsParts.contLabel.hidden = !(job && job.game === game && job.status === "done");
+  wsParts.consent.textContent = wsConsent(ws.builder);
 
   wsParts.history.replaceChildren(
     ...(ws.history ?? []).map((h) => {

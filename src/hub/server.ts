@@ -13,6 +13,7 @@ import { exeRunning, type GameManager } from "./game.ts";
 import type { JevService } from "./jev.ts";
 import type { McpEndpoint } from "./mcp.ts";
 import type { Workshop } from "./workshop.ts";
+import type { Marketplace } from "./marketplace.ts";
 import type { ModelRouter, ProviderId } from "./models.ts";
 import type { ScreenBridge } from "./screen.ts";
 import { transcribe } from "./speech.ts";
@@ -49,8 +50,10 @@ export interface ServerOptions {
   links: LinkManager;
   screen: ScreenBridge;
   mcp: McpEndpoint;
-  /** Real mods built by Claude Code with universal-modder. */
+  /** Real mods built by the chat's AI with universal-modder. */
   workshop?: Workshop;
+  /** Other players' mods, ready to add. */
+  market?: Marketplace;
   /** Short git commit of the serving code; lets the overlay spot a stale hub. */
   version?: string;
 }
@@ -113,7 +116,7 @@ function connectInfo(root: string, port: number) {
 }
 
 export async function startServer(opts: ServerOptions): Promise<http.Server> {
-  const { agent, games, adapters, links, screen, mcp, router, themes, jev, workshop } = opts;
+  const { agent, games, adapters, links, screen, mcp, router, themes, jev, workshop, market } = opts;
   const aiInfo = () =>
     router?.describe() ?? { provider: "custom", model: agent.brain.model, providerLabel: "Custom", ready: true, problem: undefined };
   // Keep the dashboard's voice section honest about whether edge-tts is installed.
@@ -144,6 +147,7 @@ export async function startServer(opts: ServerOptions): Promise<http.Server> {
     theme: themes.current(),
     jev: jev.info(),
     workshop: workshop?.snapshot() ?? null,
+    market: market?.snapshot() ?? null,
     busy: agent.busy,
   });
 
@@ -166,6 +170,8 @@ export async function startServer(opts: ServerOptions): Promise<http.Server> {
   jev.on("change", pushState);
   workshop?.on("update", pushState);
   workshop?.on("notice", (text: string) => broadcast({ type: "toast", text, level: "info" }));
+  market?.on("update", pushState);
+  market?.on("notice", (text: string) => broadcast({ type: "toast", text, level: "info" }));
   adapters.on("event", (event) => broadcast({ type: "game_event", event }));
   setInterval(() => {
     if (dashboards.size && games.session?.watch.size) pushState();
@@ -318,6 +324,29 @@ export async function startServer(opts: ServerOptions): Promise<http.Server> {
         workshop.propose(games.profile, String(msg.request ?? ""), { by: "player", continues: msg.continue === true });
         break;
       }
+      case "market_search":
+        if (!market) throw new Error("This Telos has no marketplace.");
+        await market.search(String(msg.query ?? ""), Number(msg.page) > 1 ? Number(msg.page) : 1);
+        break;
+      case "market_install":
+        // The player pressed Add: their go-ahead to install other people's code.
+        await market?.install(String(msg.id ?? ""));
+        break;
+      case "market_confirm":
+        await market?.confirmSwitch(String(msg.id ?? ""));
+        break;
+      case "market_cancel":
+        market?.cancelPending();
+        break;
+      case "market_remove":
+        market?.remove(String(msg.id ?? ""));
+        break;
+      case "market_communities":
+        ws.send(JSON.stringify({ type: "market_communities", list: market ? await market.communities() : [] }));
+        break;
+      case "market_community":
+        await market?.setCommunity(String(msg.identifier ?? ""));
+        break;
       case "workshop_approve":
         workshop?.approve(Number(msg.id));
         break;

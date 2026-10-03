@@ -1,0 +1,99 @@
+{
+ "count": 456,
+ "next": null,
+ "previous": null,
+ "results": [
+  {
+   "categories": [
+    {
+     "id": "1251",
+     "name": "Tools",
+     "slug": "tools"
+    }
+   ],
+   "community_identifier": "schedule-i",
+   "description": "A simple and easy to use mod manager for many games using Thunderstore",
+   "download_count": 10613160,
+   "icon_url": "https://ccdn.thunderstore.io/live/repository/icons/ebkr-r2modman-3.2.20.png",
+   "is_deprecated": false,
+   "is_nsfw": false,
+   "is_pinned": true,
+   "last_updated": "2026-09-22T12:21:53.845179Z",
+   "name": "r2modman",
+   "namespace": "ebkr",
+   "rating_count": 1432,
+   "size": 363105843,
+   "datetime_created": "2025-04-17T19:45:03.484400Z"
+  },
+  {
+   "categories": [],
+   "community_identifier": "schedule-i",
+   "description": "The World's First Universal Mod Loader for Unity Games compatible with both Il2Cpp and Mono",
+   "download_count": 1371382,
+   "icon_url": "https://ccdn.thunderstore.io/live/repository/icons/LavaGang-MelonLoader-0.7.3.png",
+   "is_deprecated": false,
+   "is_nsfw": false,
+   "is_pinned": true,
+   "last_updated": "2026-05-14T20:20:40.481223Z",
+   "name": "MelonLoader",
+   "namespace": "LavaGang",
+   "rating_count": 177,
+   "size": 20179248,
+   "datetime_created": "2025-03-27T14:50:05.481707Z"
+  },
+  {
+   "categories": [
+    {
+     "id": "1249",
+     "name": "Mods",
+     "slug": "mods"
+    },
+    {
+     "id": "1287",
+     "name": "IL2CPP",
+     "slug": "il2cpp"
+    }
+   ],
+   "community_identifier": "schedule-i",
+   "description": "Manage money laundering from your phone. Track progress at every business, start new operations remotely, or enable auto-launder to handle it for you.",
+   "download_count": 34552,
+   "icon_url": "https://ccdn.thunderstore.io/live/repository/icons/DazUki-LaundryApp-1.1.8.png",
+   "is_deprecated": false,
+   "is_nsfw": false,
+   "is_pinned": false,
+   "last_updated": "2026-08-01T02:37:26.318481Z",
+   "name": "LaundryApp",
+   "namespace": "DazUki",
+   "rating_count": 1,
+   "size": 82584,
+   "datetime_created": "2026-01-12T19:41:27.134526Z"
+  },
+  {
+   "categories": [
+    {
+     "id": "1249",
+     "name": "Mods",
+     "slug": "mods"
+    },
+    {
+     "id": "1280",
+     "name": "Mono",
+     "slug": "mono"
+    }
+   ],
+   "community_identifier": "schedule-i",
+   "description": "Adds in new guns to the game",
+   "download_count": 51007,
+   "icon_url": "https://ccdn.thunderstore.io/live/repository/icons/Universal-MoreGuns-1.3.0.png",
+   "is_deprecated": false,
+   "is_nsfw": false,
+   "is_pinned": false,
+   "last_updated": "2025-06-04T17:19:04.748773Z",
+   "name": "MoreGuns",
+   "namespace": "Universal",
+   "rating_count": 5,
+   "size": 3409056,
+   "datetime_created": "2025-05-04T20:50:33.155239Z"
+  }
+ ]
+}

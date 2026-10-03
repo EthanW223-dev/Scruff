@@ -34,6 +34,10 @@ export interface AgentOptions {
   status: () => { note: string; events: string[] };
   /** Tried before the model on every message (the Jev fast path); may handle it outright. */
   quick?: QuickHandler;
+  /** Another job than the chat (the Workshop's builder): its own system prompt. */
+  system?: string;
+  /** Tool rounds per message before it stops (a mod build takes many). */
+  maxSteps?: number;
 }
 
 /** Events for the dashboard. */
@@ -171,7 +175,8 @@ export class Agent extends EventEmitter {
     messages.push({ role: "user", content: this.userContent(text, quickNote) });
     let jsonRetries = 0;
 
-    for (let step = 0; step < MAX_STEPS; step++) {
+    const maxSteps = this.opts.maxSteps ?? MAX_STEPS;
+    for (let step = 0; step < maxSteps; step++) {
       const stream = this.opts.brain.createStream(this.params(messages), signal);
       stream.on("text", (delta) => this.emitEvent({ type: "text", text: delta }));
       stream.on("thinking", (delta) => this.emitEvent({ type: "thinking", text: delta }));
@@ -223,7 +228,7 @@ export class Agent extends EventEmitter {
       messages.push({ role: "user", content: results });
       if (signal.aborted) return;
     }
-    this.emitEvent({ type: "error", text: `Stopped after ${MAX_STEPS} steps.` });
+    this.emitEvent({ type: "error", text: `Stopped after ${maxSteps} steps.` });
   }
 
   private async runTool(
@@ -263,7 +268,7 @@ export class Agent extends EventEmitter {
     return {
       model: this.opts.brain.model,
       max_tokens: MAX_TOKENS,
-      system: SYSTEM_PROMPT,
+      system: this.opts.system ?? SYSTEM_PROMPT,
       tools: this.apiTools,
       messages,
     };

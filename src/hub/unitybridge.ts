@@ -1,10 +1,9 @@
 import { z } from "zod";
 import { bridgeState, unityFlavor, installBridge, removeBridge } from "../games/bepinex.ts";
-import { listProcesses } from "../memory/platform.ts";
 import type { GameProfile } from "../games/profile.ts";
 import type { AdapterRegistry } from "./adapters.ts";
 import { connectedBridge } from "./bridges.ts";
-import type { GameManager } from "./game.ts";
+import { exeRunning, type GameManager } from "./game.ts";
 import { defineTool, json, type HubTool } from "./tools.ts";
 
 /**
@@ -45,7 +44,7 @@ export function unityBridgeTools(games: GameManager, adapters: AdapterRegistry, 
         const p = profile();
         const backend = unityFlavor(p);
         const dll = backend === "il2cpp" ? opts.il2cppBridgeDll : opts.bridgeDll;
-        const state = bridgeState(p, dll);
+        const state = bridgeState(p, dll, { runningSince: games.runningSince() });
         const connected = unityBridgeConnected(adapters, p);
         return json({
           ...state,
@@ -55,7 +54,7 @@ export function unityBridgeTools(games: GameManager, adapters: AdapterRegistry, 
             : state.bepinexTooOld
               ? `${state.reason} Ask the player to quit the game fully, then install_unity_bridge: it updates BepInEx and the bridge together.`
             : state.outdated
-              ? "A newer bridge is ready. Ask the player to quit the game, then install_unity_bridge to update it and start the game again." +
+              ? "A newer bridge is ready: install_unity_bridge updates it, even while the game runs. Then the player restarts the game to load it." +
                 (connected ? " The current one works meanwhile." : "")
               : connected
               ? `Connected: use use_game_adapter with the ${connectedBridge(p, adapters)}__ tools.`
@@ -73,26 +72,19 @@ export function unityBridgeTools(games: GameManager, adapters: AdapterRegistry, 
       description:
         "Install Telos's Unity bridge into the attached game's folder: the BepInEx mod loader (downloaded, unless the " +
         "game already has it) and the bridge plugin. Only after the player agreed. Everything added is recorded, so " +
-        "remove_unity_bridge takes it out again. The game must be restarted afterwards.",
+        "remove_unity_bridge takes it out again. Also updates an older bridge, even while the game runs. The game " +
+        "must be restarted afterwards.",
       input: z.object({}),
       async run(_input, ctx) {
-        // Only the game's folder is needed: this works while the game runs (first install) or
-        // after it closed (updates), since Telos keeps the profile of the last attached game.
+        // Only the game's folder is needed: this works while the game runs (the loaded bridge is
+        // moved aside, not overwritten) or after it closed, since Telos keeps the last game's profile.
         const p = profile();
         const dll = unityFlavor(p) === "il2cpp" ? opts.il2cppBridgeDll : opts.bridgeDll;
         const report = await installBridge(p, {
           bridgeDll: dll,
           port: opts.port,
           onProgress: ctx.progress,
-          isRunning: async (exePath) => {
-            const want = exePath.toLowerCase();
-            const base = want.split(/[/\\]/).pop();
-            const procs = await listProcesses().catch(() => []);
-            return procs.some((pr) => {
-              const have = (pr.exe ?? "").toLowerCase();
-              return have === want || have.split(/[/\\]/).pop() === base;
-            });
-          },
+          isRunning: exeRunning,
         });
         games.emit("update");
         return json(report);

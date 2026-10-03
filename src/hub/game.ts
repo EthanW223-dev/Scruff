@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import path from "node:path";
-import { bridgeState, installBridge, readManifest } from "../games/bepinex.ts";
+import { bridgeState, clearOldBridges, installBridge, readManifest } from "../games/bepinex.ts";
 import { installRpgMakerBridge, rpgMakerBridgeState } from "../games/rpgmaker.ts";
 import { installUe4ssBridge, ue4ssBridgeState } from "../games/ue4ss.ts";
 import { installUnrealBridge, unrealBridgeState } from "../games/unreal.ts";
@@ -30,6 +30,17 @@ function baseName(name: string): string {
   return name.toLowerCase().replace(/\.exe$/, "");
 }
 
+/** Whether a game's exe is running (by path, or by file name when the path isn't visible). */
+export async function exeRunning(exePath: string): Promise<boolean> {
+  const want = exePath.toLowerCase();
+  const base = want.split(/[/\\]/).pop();
+  const procs = await listProcesses().catch(() => []);
+  return procs.some((p) => {
+    const have = (p.exe ?? "").toLowerCase();
+    return have === want || have.split(/[/\\]/).pop() === base;
+  });
+}
+
 /** Owns the attached game (if any). Emits "update" whenever the dashboard should refresh. */
 export class GameManager extends EventEmitter {
   session: GameSession | null = null;
@@ -46,6 +57,8 @@ export class GameManager extends EventEmitter {
   /** The UE4SS mod's script Telos ships. */
   ue4ssBridgeMain: string | null = null;
   scanProgress: number | null = null;
+  /** When Telos attached to the current game: it started before this. */
+  private attachedAt = 0;
 
   async listGames(search?: string): Promise<ProcessInfo[]> {
     const all = await listProcesses();
@@ -98,22 +111,33 @@ export class GameManager extends EventEmitter {
       if (reason === "exited") void this.updateBridge();
     });
     this.session = session;
+    this.attachedAt = Date.now();
     this.emit("update");
+    // An older bridge in the game is replaced now, not just when the game quits: it loads at the next start.
+    void this.updateBridge({ running: true }).then((updated) => updated && this.emit("update"));
     return session;
   }
 
+  /** When Telos attached to the game, while it's still running. */
+  runningSince(): number | undefined {
+    return this.session && !this.session.isClosed ? this.attachedAt : undefined;
+  }
+
   /**
-   * The game just quit, so its bridge files are free: if the installed bridge is older than
-   * the one Telos ships, put the new one in now, ready for the next start. Emits "notice"
-   * with the outcome. Covers Unity (Mono/IL2CPP) and the staged Unreal DLL.
+   * If the installed bridge is older than the one Telos ships, put the new one in, ready for the
+   * game's next start. Runs when Telos attaches (`running`: the game has the old one loaded, which
+   * is moved aside rather than overwritten) and when the game quits. Emits "notice" with the
+   * outcome. Covers Unity (Mono/IL2CPP), RPG Maker, UE4SS and the staged Unreal DLL.
    */
-  async updateBridge(tries = 4): Promise<boolean> {
+  async updateBridge(opts: { tries?: number; running?: boolean } = {}): Promise<boolean> {
+    const { tries = 4, running = false } = opts;
     const profile = this.profile;
     if (!profile) return false;
+    const restart = running ? "quit the game fully and start it again to load it." : "it loads the next time you start it.";
     if (profile.engine === "Unreal Engine" && this.ue4ssBridgeMain && ue4ssBridgeState(profile, this.ue4ssBridgeMain).outdated) {
       try {
         installUe4ssBridge(profile, { modSource: path.dirname(path.dirname(this.ue4ssBridgeMain)) });
-        this.emit("notice", "Updated Telos's UE4SS mod in the game; it loads the next time you start it.");
+        this.emit("notice", `Updated Telos's UE4SS mod in ${profile.name}; ${restart}`);
         return true;
       } catch (err) {
         this.emit("notice", `Couldn't update Telos's UE4SS mod: ${(err as Error).message}`);
@@ -121,6 +145,8 @@ export class GameManager extends EventEmitter {
       }
     }
     if (profile.engine === "Unreal Engine") {
+      // The staged DLL may be injected into the running game: that one waits for it to quit.
+      if (running) return false;
       if (!this.unrealBridgeDll || !unrealBridgeState(profile, this.unrealBridgeDll).outdated) return false;
       try {
         installUnrealBridge(profile, { bridgeDll: this.unrealBridgeDll });
@@ -136,7 +162,7 @@ export class GameManager extends EventEmitter {
       if (!this.rpgMakerBridgeJs || !rpgMakerBridgeState(profile, this.rpgMakerBridgeJs).outdated) return false;
       try {
         installRpgMakerBridge(profile, { pluginJs: this.rpgMakerBridgeJs });
-        this.emit("notice", "Updated the Telos bridge in the game; it loads the next time you start it.");
+        this.emit("notice", `Updated the Telos bridge in ${profile.name}; ${restart}`);
         return true;
       } catch (err) {
         this.emit("notice", `Couldn't update the Telos bridge: ${(err as Error).message}`);
@@ -145,24 +171,28 @@ export class GameManager extends EventEmitter {
     }
     const bundled = profile.engine === "Unity (IL2CPP)" ? this.il2cppBridgeDll : this.bridgeDll;
     const state = bundled ? bridgeState(profile, bundled) : null;
+    // Copies of the bridge an update moved aside while the game ran are free once it has quit
+    // (and Windows has let go of its files).
+    if (!running) setTimeout(() => clearOldBridges(profile), 3000).unref();
     // A BepInEx Telos brought that turned out too old for the game (it won't start): update it now
     // that the game has closed. A player's own BepInEx is the player's call (the dashboard offers it).
-    const fixBepInEx = Boolean(state?.bepinexTooOld && readManifest(profile.installDir)?.bepinexByScruff);
-    if (!bundled || !state || (!state.outdated && !fixBepInEx)) return false;
-    for (let attempt = 1; attempt <= tries; attempt++) {
+    const fixBepInEx = !running && Boolean(state?.bepinexTooOld && readManifest(profile.installDir)?.bepinexByScruff);
+    // With BepInEx too old the bridge never loads, and BepInEx can't be swapped while the game runs.
+    if (!bundled || !state || (running && state.bepinexTooOld) || (!state.outdated && !fixBepInEx)) return false;
+    for (let attempt = 1; attempt <= (running ? 1 : tries); attempt++) {
       // Windows can take a moment to let go of a closed game's files.
-      await new Promise((r) => setTimeout(r, 1500));
+      if (!running) await new Promise((r) => setTimeout(r, 1500));
       try {
         await installBridge(profile, { bridgeDll: bundled });
         this.emit(
           "notice",
           fixBepInEx
             ? "Updated BepInEx in the game so it can read this Unity version. Start the game again: the first start takes a minute or two."
-            : "Updated the Telos bridge in the game; it loads the next time you start it.",
+            : `Updated the Telos bridge in ${profile.name}; ${restart}`,
         );
         return true;
       } catch (err) {
-        if (attempt === tries) this.emit("notice", `Couldn't update the Telos bridge: ${(err as Error).message}`);
+        if (attempt === (running ? 1 : tries)) this.emit("notice", `Couldn't update the Telos bridge: ${(err as Error).message}`);
       }
     }
     return false;
@@ -193,7 +223,7 @@ export class GameManager extends EventEmitter {
         : p && p.engine.startsWith("RPG Maker")
           ? rpgMakerBridgeState(p, this.rpgMakerBridgeJs ?? undefined)
           : p
-          ? bridgeState(p, (p.engine === "Unity (IL2CPP)" ? this.il2cppBridgeDll : this.bridgeDll) ?? undefined)
+          ? bridgeState(p, (p.engine === "Unity (IL2CPP)" ? this.il2cppBridgeDll : this.bridgeDll) ?? undefined, { runningSince: this.runningSince() })
           : null;
     return {
       supported: memorySupported(),

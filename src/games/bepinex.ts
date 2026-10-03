@@ -53,11 +53,12 @@ export interface BridgeState {
 
 export interface BridgeLog {
   /**
-   * no-log: BepInEx hasn't run since the install. setup-failed: BepInEx couldn't prepare itself
-   * for this game. not-loaded: BepInEx ran but didn't load the bridge. failed: the bridge crashed
-   * on start. waiting: the bridge runs but can't reach Telos. connected: it reached Telos.
+   * no-log: BepInEx hasn't run since the install. restart: the bridge was put in or updated after
+   * the game's last start, so the log is about the old one. setup-failed: BepInEx couldn't prepare
+   * itself for this game. not-loaded: BepInEx ran but didn't load the bridge. failed: the bridge
+   * crashed on start. waiting: the bridge runs but can't reach Telos. connected: it reached Telos.
    */
-  state: "no-log" | "setup-failed" | "not-loaded" | "failed" | "waiting" | "connected";
+  state: "no-log" | "restart" | "setup-failed" | "not-loaded" | "failed" | "waiting" | "connected";
   message: string;
 }
 
@@ -82,7 +83,12 @@ export interface InstallOptions {
   onProgress?: (text: string) => void;
   /** Tests: pretend the game exe is this bitness. */
   archOverride?: "x64" | "x86";
-  /** True when the game's exe is running. Only matters for updates: a loaded bridge's file is locked. */
+  /** Tests: stand-in file calls, to act like Windows with the bridge loaded. */
+  io?: FileIo;
+  /**
+   * True when the game's exe is running. Only matters when BepInEx itself has to be replaced: its
+   * files are locked while the game runs. The bridge alone updates fine (see replaceLoadedFile).
+   */
   isRunning?: (exePath: string) => Promise<boolean>;
 }
 
@@ -161,15 +167,50 @@ export function bepinexInfo(dir: string): BepInExInfo {
   };
 }
 
+/** The version in a bridge DLL's [BepInPlugin] ("1.2.0"), or null. */
+export function pluginVersion(dll: string): string | null {
+  try {
+    // The attribute's arguments are length-prefixed UTF-8 strings: "Scruff Bridge", then the version.
+    return /\x0dScruff Bridge[\x01-\x20](\d+(?:\.\d+){1,3})/.exec(fs.readFileSync(dll).toString("latin1"))?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export interface LogOptions {
+  /** The installed bridge DLL: a log older than it (or from another version of it) is about the old one. */
+  plugin?: string;
+  /** When Telos attached to the running game (so the game started before this). */
+  runningSince?: number;
+}
+
 /**
  * What happened to the bridge at the game's last start, from BepInEx/LogOutput.log (rewritten
  * every start). Turns "installed, restart the game" into the actual reason it isn't connected.
  */
-export function bridgeLog(dir: string): BridgeLog {
+export function bridgeLog(dir: string, opts: LogOptions = {}): BridgeLog {
+  const mtime = (p: string) => {
+    try {
+      return fs.statSync(p).mtimeMs;
+    } catch {
+      return null;
+    }
+  };
+  const pluginAt = opts.plugin ? mtime(opts.plugin) : null;
+  if (pluginAt !== null && opts.runningSince !== undefined && pluginAt > opts.runningSince) {
+    return {
+      state: "restart",
+      message: "The bridge was put in or updated after this game started, so the game hasn't loaded it yet. Quit the game fully, then start it again.",
+    };
+  }
   let log: string;
   try {
     const file = path.join(dir, "BepInEx", "LogOutput.log");
     const size = fs.statSync(file).size;
+    const logAt = mtime(file);
+    if (pluginAt !== null && logAt !== null && pluginAt > logAt) {
+      return { state: "restart", message: "The bridge was put in or updated after the game last ran. Start the game to load it." };
+    }
     // The end is what matters; the start of a big log is BepInEx's own setup chatter.
     const fd = fs.openSync(file, "r");
     try {
@@ -189,6 +230,15 @@ export function bridgeLog(dir: string): BridgeLog {
     };
   }
   const line = (re: RegExp) => re.exec(log)?.[1]?.trim();
+  // Updated while the game ran: the log is still the old bridge's (a crash it no longer has, say).
+  const ran = line(/Loading \[Scruff Bridge ([\d.]+)\]/);
+  const installed = opts.plugin ? pluginVersion(opts.plugin) : null;
+  if (ran && installed && ran !== installed) {
+    return {
+      state: "restart",
+      message: `The game last ran an older bridge (${ran}). This one (${installed}) loads the next time the game starts: quit it fully, then start it again.`,
+    };
+  }
   if (/Connected to Telos\./.test(log)) {
     return { state: "connected", message: "The bridge reached Telos at the game's last start. If it isn't connected now, start the game again." };
   }
@@ -210,7 +260,12 @@ export function bridgeLog(dir: string): BridgeLog {
   if (setup !== undefined) return { state: "setup-failed", message: `BepInEx couldn't set itself up for this game: ${setup.slice(0, 300)}` };
   if (/Chainloader startup complete/.test(log) || /Chainloader initialized/.test(log)) {
     if (!/Loading \[Scruff Bridge/.test(log)) {
-      return { state: "not-loaded", message: "BepInEx started but didn't load the Telos bridge. Install the bridge again (it may have been moved or blocked)." };
+      return {
+        state: "not-loaded",
+        message:
+          "BepInEx started but didn't load the Telos bridge. If it was installed while the game was running, quit the game fully and start it again; " +
+          "otherwise install the bridge again (it may have been moved or blocked).",
+      };
     }
   }
   return {
@@ -269,8 +324,11 @@ const MELON_CONFLICT =
   "so Telos won't. Memory editing and the game's files still work. To use the bridge, remove MelonLoader (its " +
   "MelonLoader folder and version.dll) first, then install the bridge again.";
 
-/** `bundledDll`: the bridge Telos ships, to tell whether the installed one is older. */
-export function bridgeState(profile: GameProfile, bundledDll?: string): BridgeState {
+/**
+ * `bundledDll`: the bridge Telos ships, to tell whether the installed one is older.
+ * `runningSince`: when Telos attached to the game, if it's running now.
+ */
+export function bridgeState(profile: GameProfile, bundledDll?: string, opts: { runningSince?: number } = {}): BridgeState {
   const flavor = unityFlavor(profile);
   if (!flavor) {
     return {
@@ -293,7 +351,7 @@ export function bridgeState(profile: GameProfile, bundledDll?: string): BridgeSt
     supported: true,
     installed,
     ...(outdated ? { outdated } : {}),
-    ...(installed && !tooOld ? { log: bridgeLog(dir) } : {}),
+    ...(installed && !tooOld ? { log: bridgeLog(dir, { plugin, runningSince: opts.runningSince }) } : {}),
     existingBepInEx: existing && !readManifest(dir)?.bepinexByScruff,
     ...(tooOld
       ? {
@@ -355,17 +413,13 @@ export async function installBridge(profile: GameProfile, opts: InstallOptions):
   if (!flavor) throw new Error(`The bridge is for Unity games; this one is ${profile.engine}.`);
   if (!fs.existsSync(opts.bridgeDll)) throw new Error(`The bridge isn't built (${opts.bridgeDll} is missing); run npm run build:bridge.`);
   const { coreZipPath, coreRel, pluginDll, loader, notThis } = FLAVORS[flavor];
-  // A first install into a running game is fine: nothing new loads until the restart. Updating is
-  // not: Windows locks the bridge the game has loaded, so say so up front instead of failing halfway.
-  const updating = fs.existsSync(path.join(profile.installDir, PLUGIN_DIR, pluginDll));
-  // An IL2CPP game whose BepInEx is too old for it: replace BepInEx with a current build.
+  // Installing or updating the bridge works while the game runs: nothing new loads until the next
+  // start, and the loaded bridge is moved aside rather than overwritten (replaceLoadedFile).
+  // An IL2CPP game whose BepInEx is too old for it: replace BepInEx with a current build. Those
+  // files can't be moved aside (BepInEx loads from its own folder), so that waits for the game to close.
   const tooOld = flavor === "il2cpp" ? bepinexTooOld(profile) : undefined;
-  if ((updating || tooOld) && opts.isRunning && (await opts.isRunning(profile.exe))) {
-    if (tooOld) throw new Error(`${profile.name} is running, so its BepInEx files are locked. Quit the game fully, then install again to update BepInEx.`);
-    throw new Error(
-      `${profile.name} is running with the bridge loaded, so its file is locked. Quit the game fully: Telos updates ` +
-        `the bridge by itself when the game closes (or run install_unity_bridge again then).`,
-    );
+  if (tooOld && opts.isRunning && (await opts.isRunning(profile.exe))) {
+    throw new Error(`${profile.name} is running, so its BepInEx files are locked. Quit the game fully, then install again to update BepInEx.`);
   }
   const dir = profile.installDir;
   const previous = readManifest(dir);
@@ -380,7 +434,7 @@ export async function installBridge(profile: GameProfile, opts: InstallOptions):
     files: [],
     backups: [],
   };
-  const add = (rel: string, data: Buffer | string) => {
+  const add = (rel: string, data: Buffer | string, loaded = false) => {
     const full = safeJoin(dir, rel);
     fs.mkdirSync(path.dirname(full), { recursive: true });
     if (fs.existsSync(full) && !record.files.includes(rel)) {
@@ -389,14 +443,15 @@ export async function installBridge(profile: GameProfile, opts: InstallOptions):
       fs.renameSync(full, safeJoin(dir, backup));
       record.backups.push({ file: rel, backup });
     }
-    try {
-      fs.writeFileSync(full, data);
-    } catch (err) {
-      // Windows keeps a loaded plugin's file locked while the game runs.
-      if (["EBUSY", "EPERM", "EACCES"].includes((err as NodeJS.ErrnoException).code ?? "")) {
-        throw new Error(`The game has ${path.basename(rel)} open. Quit the game fully, then try again.`);
+    if (loaded) {
+      replaceLoadedFile(full, data, opts.io);
+    } else {
+      try {
+        fs.writeFileSync(full, data);
+      } catch (err) {
+        if (isLocked(err)) throw new Error(`The game has ${path.basename(rel)} open. Quit the game fully, then try again.`);
+        throw err;
       }
-      throw err;
     }
     if (!record.files.includes(rel)) record.files.push(rel);
   };
@@ -452,9 +507,7 @@ export async function installBridge(profile: GameProfile, opts: InstallOptions):
         try {
           fs.writeFileSync(full, e.data());
         } catch (err) {
-          if (["EBUSY", "EPERM", "EACCES"].includes((err as NodeJS.ErrnoException).code ?? "")) {
-            throw new Error(`The game has ${path.basename(e.name)} open. Quit the game fully, then try again.`);
-          }
+          if (isLocked(err)) throw new Error(`The game has ${path.basename(e.name)} open. Quit the game fully, then try again.`);
           throw err;
         }
         // Files Telos brought (its own BepInEx) stay recorded, so removing still takes them out.
@@ -469,7 +522,7 @@ export async function installBridge(profile: GameProfile, opts: InstallOptions):
     }
 
     opts.onProgress?.("Adding the Telos bridge…");
-    add(path.join(PLUGIN_DIR, pluginDll).replace(/\\/g, "/"), fs.readFileSync(opts.bridgeDll));
+    add(path.join(PLUGIN_DIR, pluginDll).replace(/\\/g, "/"), fs.readFileSync(opts.bridgeDll), true);
     // Some games destroy BepInEx's manager object; hiding it keeps plugins alive. BepInEx keeps
     // settings already in the file when it fills in the rest on first start.
     const cfg = path.join(dir, "BepInEx", "config", "BepInEx.cfg");
@@ -545,6 +598,89 @@ async function getBepInEx(
   }
   const url = (flavor === "mono" ? FALLBACK : FALLBACK_IL2CPP).replace("{arch}", arch);
   return { zip: await download(url), from: url };
+}
+
+/** Windows' answer when a running program has the file open. */
+function isLocked(err: unknown): boolean {
+  return ["EBUSY", "EPERM", "EACCES"].includes((err as NodeJS.ErrnoException).code ?? "");
+}
+
+export type FileIo = Pick<typeof fs, "existsSync" | "readdirSync" | "renameSync" | "rmSync" | "writeFileSync">;
+
+const ASIDE = ".old-";
+
+/**
+ * Puts a new version of a file a running game may have loaded (the bridge DLL). Windows won't let
+ * anyone overwrite or delete a DLL that a running program has loaded, but it does let it be
+ * renamed: the loaded one moves aside (the game keeps running it), the new one takes its name and
+ * loads at the next start. The old copy is deleted right away when it's free, or by a later
+ * install once the game has let go of it. BepInEx only loads *.dll, so "X.dll.old-…" stays inert.
+ */
+export function replaceLoadedFile(full: string, data: Buffer | string, io: FileIo = fs): void {
+  clearSetAside(full, io);
+  if (!io.existsSync(full)) {
+    io.writeFileSync(full, data);
+    return;
+  }
+  // A name of its own: the game may still have an earlier set-aside copy loaded.
+  let aside = `${full}${ASIDE}${Date.now()}`;
+  for (let n = 2; io.existsSync(aside); n++) aside = `${full}${ASIDE}${Date.now()}-${n}`;
+  try {
+    io.renameSync(full, aside);
+  } catch (err) {
+    if (!isLocked(err)) throw err;
+    // It can't even be moved: a plain write is the last thing to try.
+    try {
+      io.writeFileSync(full, data);
+      return;
+    } catch (e) {
+      if (isLocked(e)) throw new Error(`The game has ${path.basename(full)} open and Windows won't let Telos replace it. Quit the game fully, then try again.`);
+      throw e;
+    }
+  }
+  try {
+    io.writeFileSync(full, data);
+  } catch (err) {
+    try {
+      io.renameSync(aside, full);
+    } catch {
+      // The new one isn't there either way; the error below says why.
+    }
+    throw err;
+  }
+  try {
+    io.rmSync(aside, { force: true });
+  } catch {
+    // Still loaded by the running game: the next install (or the game closing) clears it.
+  }
+}
+
+/** Deletes copies of a file that earlier updates moved aside, where nothing has them loaded any more. */
+export function clearSetAside(full: string, io: FileIo = fs): number {
+  const prefix = path.basename(full) + ASIDE;
+  let names: string[];
+  try {
+    names = io.readdirSync(path.dirname(full)) as string[];
+  } catch {
+    return 0;
+  }
+  let cleared = 0;
+  for (const name of names) {
+    if (!name.startsWith(prefix)) continue;
+    try {
+      io.rmSync(path.join(path.dirname(full), name), { force: true });
+      cleared++;
+    } catch {
+      // Still loaded.
+    }
+  }
+  return cleared;
+}
+
+/** Clears the bridge copies earlier updates moved aside (called once the game has quit). */
+export function clearOldBridges(profile: GameProfile): number {
+  const flavor = unityFlavor(profile);
+  return flavor ? clearSetAside(path.join(profile.installDir, PLUGIN_DIR, FLAVORS[flavor].pluginDll)) : 0;
 }
 
 export interface RemoveReport {

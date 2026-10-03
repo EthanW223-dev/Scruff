@@ -9,7 +9,7 @@ import { connectedBridge } from "./bridges.ts";
 import { installRpgMakerBridge, removeRpgMakerBridge } from "../games/rpgmaker.ts";
 import { installUe4ssBridge, removeUe4ssBridge, ue4ssBridgeState } from "../games/ue4ss.ts";
 import type { Agent, AgentEvent } from "./agent.ts";
-import type { GameManager } from "./game.ts";
+import { exeRunning, type GameManager } from "./game.ts";
 import type { JevService } from "./jev.ts";
 import type { McpEndpoint } from "./mcp.ts";
 import type { ModelRouter, ProviderId } from "./models.ts";
@@ -289,6 +289,7 @@ export async function startServer(opts: ServerOptions): Promise<http.Server> {
           bridgeDll: path.join(opts.root, "bridge", flavor === "il2cpp" ? "TelosBridge.IL2CPP.dll" : "ScruffBridge.dll"),
           port,
           onProgress: (text) => toast(ws, text, "info"),
+          isRunning: exeRunning,
         });
         games.emit("update");
         toast(
@@ -297,7 +298,7 @@ export async function startServer(opts: ServerOptions): Promise<http.Server> {
             ? `Updated BepInEx (${report.updatedBepInEx.from ?? "old build"} → ${report.updatedBepInEx.to ?? "current"}) so it can read this game, and added the Telos bridge. ` +
                 "Start the game: the first start takes a minute or two while BepInEx sets itself up."
             : updating
-              ? "Updated the Telos bridge. Start the game again to load it."
+              ? "Updated the Telos bridge. Quit the game fully and start it again to load it."
               : `Installed${report.installedBepInEx ? " BepInEx and" : ""} the Telos bridge. Restart the game to load it.`,
           "info",
         );

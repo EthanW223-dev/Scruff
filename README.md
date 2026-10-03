@@ -114,7 +114,9 @@ What works depends on the engine (the status note in chat always says which tier
 - **Unity — full.** Attach, click **install** next to *Bridge* in the Game files panel (or just
   ask for a mod and the AI offers it). Telos adds the [BepInEx](https://github.com/BepInEx/BepInEx)
   mod loader and its bridge plugin to the game folder. Restart the game once, then everything
-  above works through the live bridge.
+  above works through the live bridge. When Telos ships a newer bridge, it puts it in as soon as
+  it attaches, even with the game running (Windows won't let the loaded file be overwritten, so the
+  old one is moved aside); restart the game to load it.
   If the game already uses MelonLoader for its mods, Telos leaves it alone (BepInEx next to
   MelonLoader usually stops a game from starting) and says so.
 - **Unreal Engine — numbers, plus a UE4SS bridge.** Number changes work via memory editing.

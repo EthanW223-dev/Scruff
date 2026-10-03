@@ -408,6 +408,7 @@ function bridgeRow(bridge, engine) {
   // Installed but not connected: what BepInEx's log says happened at the last start.
   const LOG_STATUS = {
     "no-log": "installed · start the game",
+    restart: "ready · restart the game",
     "setup-failed": "BepInEx couldn't set up",
     "not-loaded": "installed · not loaded yet",
     failed: "bridge crashed on start",
@@ -444,7 +445,7 @@ function bridgeRow(bridge, engine) {
           : "Add BepInEx and the Telos bridge to the game folder, so the AI can change anything in it (needs a game restart)",
     );
   } else {
-    if (bridge.outdated) action("update", "install_bridge", "Quit the game first (it keeps the bridge file open), then update and start it again");
+    if (bridge.outdated) action("update", "install_bridge", "Put the new bridge in (works while the game runs); it loads the next time the game starts");
     if (!connected) {
       action(
         "remove",

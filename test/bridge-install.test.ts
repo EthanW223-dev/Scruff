@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { bridgeState, exeArch, installBridge, removeBridge } from "../src/games/bepinex.ts";
+import { bridgeState, clearOldBridges, exeArch, installBridge, removeBridge, replaceLoadedFile, type FileIo } from "../src/games/bepinex.ts";
 import { buildProfile, type UserDirs } from "../src/games/profile.ts";
 import { readZip, writeZip } from "../src/games/zip.ts";
 
@@ -343,11 +343,11 @@ test("an older installed bridge is spotted and updated once the game has quit", 
   games.bridgeDll = BRIDGE;
   const notices: string[] = [];
   games.on("notice", (t: string) => notices.push(t));
-  assert.equal(await games.updateBridge(1), true);
+  assert.equal(await games.updateBridge({ tries: 1 }), true);
   assert.match(notices[0], /Updated the Telos bridge/);
   assert.equal(bridgeState(profile, BRIDGE).outdated, undefined);
   assert.ok(fs.readFileSync(path.join(install, "BepInEx/plugins/ScruffBridge/ScruffBridge.dll")).equals(fs.readFileSync(BRIDGE)));
-  assert.equal(await games.updateBridge(1), false, "nothing to do when current");
+  assert.equal(await games.updateBridge({ tries: 1 }), false, "nothing to do when current");
   // Removal still takes everything out: the update didn't lose the record.
   removeBridge(profile);
   assert.ok(!fs.existsSync(path.join(install, "BepInEx")));
@@ -363,19 +363,118 @@ test("a first install works while the game runs (the bridge loads at the next st
   assert.equal(bridgeState(profile).installed, true);
 });
 
-test("updating a bridge the running game has loaded is refused up front, without touching files", async () => {
+/**
+ * File calls that act like Windows while the game has the bridge loaded: the loaded file can't be
+ * written or deleted, but it can be renamed (and stays loaded under its new name).
+ */
+function windowsWithLoaded(loaded: Set<string>, opts: { renameToo?: boolean } = {}): FileIo {
+  const busy = (p: string, call: string) => Object.assign(new Error(`${call} '${p}': resource busy or locked`), { code: "EBUSY" });
+  return {
+    existsSync: fs.existsSync,
+    readdirSync: fs.readdirSync,
+    writeFileSync: ((p: string, data: Buffer | string) => {
+      if (loaded.has(path.resolve(p))) throw busy(p, "open");
+      fs.writeFileSync(p, data);
+    }) as FileIo["writeFileSync"],
+    rmSync: ((p: string, o?: fs.RmOptions) => {
+      if (loaded.has(path.resolve(p))) throw Object.assign(new Error(`unlink '${p}'`), { code: "EPERM" });
+      fs.rmSync(p, o);
+    }) as FileIo["rmSync"],
+    renameSync: ((from: string, to: string) => {
+      if (loaded.has(path.resolve(from))) {
+        if (opts.renameToo) throw busy(from, "rename");
+        loaded.delete(path.resolve(from));
+        loaded.add(path.resolve(to));
+      }
+      fs.renameSync(from, to);
+    }) as FileIo["renameSync"],
+  };
+}
+
+test("updating the bridge while the game has it loaded: the old one moves aside, the new one waits for the next start", async () => {
   const { install, profile } = fakeGame();
   const zipFile = path.join(install, "..", "bepinex.zip");
   fs.writeFileSync(zipFile, bepinexZip());
   const old = path.join(install, "..", "OldBridge.dll");
   fs.writeFileSync(old, "bridge 1.0");
   await installBridge(profile, { bridgeDll: old, bepinexZip: zipFile });
-  await assert.rejects(
-    installBridge(profile, { bridgeDll: BRIDGE, isRunning: async () => true }),
-    /running with the bridge loaded.*Quit the game fully/,
-  );
+  const pluginDir = path.join(install, "BepInEx", "plugins", "ScruffBridge");
+  const plugin = path.join(pluginDir, "ScruffBridge.dll");
+  const loaded = new Set([path.resolve(plugin)]);
+
+  // Windows refuses an overwrite here; this used to make Telos refuse the update until the game quit.
+  const report = await installBridge(profile, { bridgeDll: BRIDGE, isRunning: async () => true, io: windowsWithLoaded(loaded) });
+  assert.equal(report.installedBepInEx, false);
+  assert.ok(fs.readFileSync(plugin).equals(fs.readFileSync(BRIDGE)), "the new bridge has the plugin's name");
+  const aside = fs.readdirSync(pluginDir).filter((f) => f !== "ScruffBridge.dll");
+  assert.equal(aside.length, 1, "the loaded one was moved aside, not lost");
+  assert.match(aside[0], /^ScruffBridge\.dll\.old-[\d-]+$/, "BepInEx only loads *.dll, so it stays inert");
+  assert.equal(fs.readFileSync(path.join(pluginDir, aside[0]), "utf8"), "bridge 1.0");
+  assert.equal(bridgeState(profile, BRIDGE).outdated, undefined, "no longer offered as an update");
+
+  // Once the game has quit, the set-aside copy goes.
+  loaded.clear();
+  assert.equal(clearOldBridges(profile), 1);
+  assert.deepEqual(fs.readdirSync(pluginDir), ["ScruffBridge.dll"]);
+
+  // Removal still takes everything out.
+  removeBridge(profile);
+  assert.ok(!fs.existsSync(path.join(install, "BepInEx")));
+});
+
+test("a loaded bridge that Windows won't even let be moved: a plain answer, and the old one is untouched", async () => {
+  const { install, profile } = fakeGame();
+  const zipFile = path.join(install, "..", "bepinex.zip");
+  fs.writeFileSync(zipFile, bepinexZip());
+  const old = path.join(install, "..", "OldBridge.dll");
+  fs.writeFileSync(old, "bridge 1.0");
+  await installBridge(profile, { bridgeDll: old, bepinexZip: zipFile });
   const plugin = path.join(install, "BepInEx", "plugins", "ScruffBridge", "ScruffBridge.dll");
-  assert.equal(fs.readFileSync(plugin, "utf8"), "bridge 1.0", "the old one is untouched");
+  await assert.rejects(
+    installBridge(profile, { bridgeDll: BRIDGE, io: windowsWithLoaded(new Set([path.resolve(plugin)]), { renameToo: true }) }),
+    /The game has ScruffBridge\.dll open.*Quit the game fully/,
+  );
+  assert.equal(fs.readFileSync(plugin, "utf8"), "bridge 1.0");
+});
+
+test("replacing a loaded file: leftovers still loaded stay, the rest go; a failed write puts the old one back", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "scruff-aside-"));
+  const file = path.join(dir, "Bridge.dll");
+  fs.writeFileSync(file, "v1");
+  const loaded = new Set([path.resolve(file)]);
+  replaceLoadedFile(file, "v2", windowsWithLoaded(loaded));
+  replaceLoadedFile(file, "v3", windowsWithLoaded(loaded)); // v2 isn't loaded: deleted outright
+  assert.equal(fs.readFileSync(file, "utf8"), "v3");
+  const left = fs.readdirSync(dir).filter((f) => f !== "Bridge.dll");
+  assert.equal(left.length, 1, "only the copy the game still has loaded is left");
+  assert.equal(fs.readFileSync(path.join(dir, left[0]), "utf8"), "v1");
+
+  const failing: FileIo = { ...windowsWithLoaded(new Set()), writeFileSync: (() => { throw Object.assign(new Error("disk full"), { code: "ENOSPC" }); }) as FileIo["writeFileSync"] };
+  assert.throws(() => replaceLoadedFile(file, "v4", failing), /disk full/);
+  assert.equal(fs.readFileSync(file, "utf8"), "v3", "the old one is back in place");
+});
+
+test("Telos updates an older bridge as soon as it attaches to the running game", async () => {
+  const { GameManager } = await import("../src/hub/game.ts");
+  const { install, profile } = fakeGame();
+  const zipFile = path.join(install, "..", "bepinex.zip");
+  fs.writeFileSync(zipFile, bepinexZip());
+  const old = path.join(install, "..", "OldBridge.dll");
+  fs.writeFileSync(old, "bridge 1.0");
+  await installBridge(profile, { bridgeDll: old, bepinexZip: zipFile });
+
+  const games = new GameManager();
+  games.profile = profile;
+  games.bridgeDll = BRIDGE;
+  const notices: string[] = [];
+  games.on("notice", (t: string) => notices.push(t));
+  const started = Date.now();
+  assert.equal(await games.updateBridge({ running: true }), true);
+  assert.ok(Date.now() - started < 1000, "no waiting for a game to let go of files");
+  assert.match(notices[0], /Updated the Telos bridge in .*quit the game fully and start it again/);
+  assert.equal(bridgeState(profile, BRIDGE).outdated, undefined);
+  // The game started before the update, so its log is about the old bridge.
+  assert.equal(bridgeState(profile, BRIDGE, { runningSince: started - 60_000 }).log?.state, "restart");
 });
 
 test("installs fine when the game is not running", async () => {
@@ -409,7 +508,7 @@ test("a game that runs MelonLoader is left alone: no BepInEx next to it, with th
 });
 
 test("an installed bridge that isn't connected says why, from BepInEx's log", async () => {
-  const { bridgeLog } = await import("../src/games/bepinex.ts");
+  const { bridgeLog, pluginVersion } = await import("../src/games/bepinex.ts");
   const { install, profile } = fakeGame({ il2cpp: true });
   const IL2CPP_BRIDGE = path.resolve(import.meta.dirname, "..", "bridge", "TelosBridge.IL2CPP.dll");
   const zip = path.join(install, "..", "be6.zip");
@@ -426,13 +525,32 @@ test("an installed bridge that isn't connected says why, from BepInEx's log", as
   assert.equal(bridgeState(profile, IL2CPP_BRIDGE).log?.state, "no-log", "the dashboard gets it too");
 
   // What the old bridge did in Schedule I: a Unity call that doesn't exist in IL2CPP games.
-  const crash = said(
-    "[Message:   BepInEx] Chainloader initialized\n[Info   :   BepInEx] Loading [Scruff Bridge 1.1.0]\n" +
-      "[Error  :   BepInEx] Error loading [Scruff Bridge 1.1.0]: System.MissingMethodException: Method not found: 'Void UnityEngine.Events.UnityAction`2..ctor(System.Object, IntPtr)'.\n" +
-      "   at ScruffBridge.Runner.Begin(String hubUrl, ManualLogSource log)\n",
-  );
+  const crashLog = (version: string) =>
+    `[Message:   BepInEx] Chainloader initialized\n[Info   :   BepInEx] Loading [Scruff Bridge ${version}]\n` +
+    `[Error  :   BepInEx] Error loading [Scruff Bridge ${version}]: System.MissingMethodException: Method not found: 'Void UnityEngine.Events.UnityAction\`2..ctor(System.Object, IntPtr)'.\n` +
+    "   at ScruffBridge.Runner.Begin(String hubUrl, ManualLogSource log)\n";
+  const plugin = path.join(install, "BepInEx", "plugins", "ScruffBridge", "TelosBridge.IL2CPP.dll");
+  assert.equal(pluginVersion(plugin), "1.2.0");
+  const crash = said(crashLog("1.2.0"));
   assert.equal(crash.state, "failed");
   assert.match(crash.message, /crashed.*MissingMethodException: Method not found/);
+
+  // The same crash from the bridge the game ran before an update is old news: restart to load the new one.
+  fs.writeFileSync(logFile, crashLog("1.1.0"));
+  const stale = bridgeLog(install, { plugin });
+  assert.equal(stale.state, "restart");
+  assert.match(stale.message, /older bridge \(1\.1\.0\).*\(1\.2\.0\) loads the next time/);
+  assert.equal(bridgeState(profile, IL2CPP_BRIDGE).log?.state, "restart", "the dashboard shows that, not the crash");
+  // A log from before the bridge was put in, whatever it says.
+  fs.writeFileSync(logFile, crashLog("1.2.0"));
+  const past = new Date(Date.now() - 3_600_000);
+  fs.utimesSync(logFile, past, past);
+  assert.equal(bridgeLog(install, { plugin }).state, "restart");
+  fs.utimesSync(logFile, new Date(), new Date());
+  assert.equal(bridgeLog(install, { plugin }).state, "failed");
+  // The running game started before the bridge changed (Telos attached an hour ago).
+  assert.equal(bridgeLog(install, { plugin, runningSince: Date.now() - 3_600_000 }).state, "restart");
+  assert.equal(bridgeLog(install, { plugin, runningSince: Date.now() + 1000 }).state, "failed");
 
   const failedStart = said("[Error  :Scruff Bridge] Telos bridge failed to start: System.TypeLoadException: Could not load type 'X'\n");
   assert.equal(failedStart.state, "failed");

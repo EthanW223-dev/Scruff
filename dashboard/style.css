@@ -661,7 +661,7 @@ textarea:focus { box-shadow: 3px 3px 0 var(--accent); }
   .cursor, .spin { animation: none; }
   .provider-card, .connect-panel { animation: none; transition: none; }
   .hud-button, .orb, .orb-canvas { animation: none !important; }
-  #hud[data-mode="busy"] .hud-unit .orb::after { animation: none !important; display: none; }
+  #hud[data-mode="busy"] .hud-button::after { animation: none !important; }
   .hud-unit, .hud-reply, .hud-light, .hud-state::after { transition: none !important; animation: none !important; }
   .voice-acc-body { transition: none !important; }
   .msg.fresh, .msg.fresh .bubble, .turn.active .text, .thinking summary,
@@ -844,7 +844,7 @@ body.hud-only[data-corner^="bottom"] .hud { min-height: 100vh; }
 .hud-light { width: 8px; height: 8px; flex: none; background: var(--ok); box-shadow: 0 0 0 1px var(--bar-ink); }
 #hud[data-mode="listening"] .hud-light { background: var(--danger); animation: blink 0.8s steps(2) infinite; }
 #hud[data-mode="busy"] .hud-light { background: var(--accent); animation: blink 0.5s steps(2) infinite; }
-.hud-button { grid-area: orb; margin: 8px 0 8px 8px; }
+.hud-button { grid-area: orb; margin: 7px 0 7px 7px; }
 .hud-info { grid-area: info; align-self: center; min-width: 0; padding: 6px 10px 6px 10px; }
 .hud-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; font-size: 14px; line-height: 1.25; }
 .hud-state { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; font: 11px/1.35 var(--mono); color: var(--muted); }
@@ -865,54 +865,57 @@ body.hud-only[data-corner^="bottom"] .hud { min-height: 100vh; }
 @keyframes hud-reply-in { from { opacity: 0; transform: translateY(-6px); } }
 
 /* Tucked away: just the orb in a framed tile, in its corner. */
-.hud-unit.compact { width: 60px; grid-template-columns: auto; grid-template-areas: "orb"; }
+.hud-unit.compact { width: 62px; grid-template-columns: auto; grid-template-areas: "orb"; }
 .hud-unit.compact .hud-bar, .hud-unit.compact .hud-info { display: none; }
 .hud-unit.compact .hud-button { margin: 5px; }
 body[data-corner$="right"] .hud-unit { justify-self: end; }
 
-/* Busy (tools / thinking): an activity ring orbits the orb. Unmistakable even
-   at a glance, in the game's accent color. */
-#hud[data-mode="busy"] .hud-unit .orb::after {
-  content: ""; position: absolute; inset: -5px; border-radius: 50%;
-  background: conic-gradient(from 0deg, transparent 0turn, var(--accent) 0.1turn, transparent 0.22turn);
-  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 3px));
-  mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 3px));
-  animation: hud-busy-ring 1.1s linear infinite;
+/* Busy (tools / thinking): marching ants run round the orb's tile, like an old paint
+   program's selection. Unmistakable even at a glance, in the game's accent color. */
+#hud[data-mode="busy"] .hud-button::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  background:
+    linear-gradient(90deg, var(--accent) 50%, transparent 0) 0 0 / 6px 2px repeat-x,
+    linear-gradient(90deg, var(--accent) 50%, transparent 0) 0 100% / 6px 2px repeat-x,
+    linear-gradient(0deg, var(--accent) 50%, transparent 0) 0 0 / 2px 6px repeat-y,
+    linear-gradient(0deg, var(--accent) 50%, transparent 0) 100% 0 / 2px 6px repeat-y;
+  animation: hud-ants 0.5s steps(3) infinite;
   pointer-events: none;
 }
-@keyframes hud-busy-ring { to { transform: rotate(1turn); } }
+@keyframes hud-ants { to { background-position: 6px 0, -6px 100%, 0 -6px, 100% 6px; } }
 body[data-corner$="right"] .hud { right: 16px; align-items: flex-end; }
 body[data-corner$="left"] .hud { left: 16px; align-items: flex-start; }
 body[data-corner^="top"] .hud { top: 16px; }
 body[data-corner^="bottom"] .hud { bottom: 16px; flex-direction: column-reverse; }
 
-/* Telos's HUD icon: a thinking-orbs canvas (see dashboard/orb.js). The canvas paints
-   nine hand-tuned dot animations that crossfade as the agent's state changes.
-   Black & white ink by default; the game's accent when one is attached.
-   Hovering wakes the orb itself (brighter, quicker) — no halo, no cursor glow.
-   Draggable in overlay.js. */
+/* Telos's HUD icon: a 16×16 pixel sprite of the spark (see dashboard/orb.js), shown at 3×
+   on a small screen tile. Nine stepped animations, one per state, dissolving into each
+   other. The page's ink by default; the game's accent when one is attached. Hovering
+   wakes the sprite (fuller, quicker) and lights the tile's frame. */
 .hud-button {
   position: relative;
   pointer-events: auto;
-  width: 48px;
-  height: 48px;
+  width: 50px;
+  height: 50px;
   padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: transparent;
+  border: 1px solid var(--soft);
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--text);
   cursor: pointer;
 }
-.hud-button:active { transform: scale(0.94); }
-.hud-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
-.orb { position: relative; display: block; width: 100%; height: 100%; }
-.orb-canvas { display: block; width: 100%; height: 100%; border-radius: 50%; }
+.hud-button:hover { border-color: var(--line); }
+.hud-button:active { transform: translate(1px, 1px); }
+.hud-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.orb { position: relative; display: block; width: 48px; height: 48px; }
+.orb-canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
 
-/* Reply arrival: JS re-triggers this on the canvas so each chunk lands with a pulse. */
-.hud-button.pop .orb-canvas { animation: hud-pop 0.45s ease; }
+/* Reply arrival: JS re-triggers this so each chunk lands with a little hop. */
+.hud-button.pop .orb-canvas { animation: hud-pop 0.3s steps(3); }
 @keyframes hud-pop {
-  0% { transform: scale(1); }
-  35% { transform: scale(1.2); }
-  100% { transform: scale(1); }
+  40% { transform: translateY(-3px); }
 }
 
 /* Pinned values: the frozen ones stay on screen, like a game bar's pinned widget. */

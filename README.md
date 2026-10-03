@@ -80,7 +80,9 @@ access to the game, run the terminal as administrator.
   on your PC with Whisper; the first use downloads an ~80 MB voice model.
 - While you play, Telos is a small tray in the corner: a retro title bar with a status light
   (green ready, red listening, blinking while it works), its orb, the game, and what it's doing
-  right now. Replies open underneath. When nothing's happening it tucks away to just the orb;
+  right now. The orb is a little pixel version of Telos's spark that animates for each thing it
+  does (a level meter while it listens, a page typing itself while it replies, a flare when a
+  change lands in the game), in the game's accent color. Replies open underneath. When nothing's happening it tucks away to just the orb;
   activity or your mouse brings it back. Frozen values stay on screen in a small *Pinned* widget,
   and notifications slide in with a bar counting down, so you can keep playing.
 - The tray sits in the corner the game's theme leaves free of the game's own HUD. Drag it

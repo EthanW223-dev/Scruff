@@ -8,14 +8,13 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- In-game HUD: Telos's icon is a thinking-orbs canvas (dashboard/orb.js wraps
-       the vendored thinking-orbs engine). Nine hand-tuned animations melt into
-       each other as the agent's state changes: breathing idle, listening mic,
-       composing thinking, weaving reply, working/searching/solving tools,
-       shaping mods, connecting boot. The ink is black & white by default and
-       takes the active game's accent color when one is attached. Hovering the
-       button wakes the orb itself (it brightens and quickens) — there is no
-       shiny halo or cursor glow around it.
+  <!-- In-game HUD: Telos's icon is a 16×16 pixel sprite of its spark mark (dashboard/orb.js),
+       shown at 3× on a small screen tile. Nine stepped animations, one per agent state,
+       dissolve into each other: the resting spark, a level meter while listening, orbiting
+       dots while thinking, a typing page while replying, a throbber / magnifier / turning gem
+       for tools, a flare when a change lands, rays lighting in turn while connecting. Its
+       ink is the page's text color by default and the game's accent when one is attached;
+       hovering wakes it (fuller, quicker). While busy, marching ants run round the tile.
        The orb and its reply are ONE component (#hud-unit): the unit expands
        to show reply text beside the live orb, then collapses back. In the
        standalone HUD window (?hud=1) this is the whole UI; the main overlay

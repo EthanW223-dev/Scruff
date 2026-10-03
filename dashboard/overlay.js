@@ -1,4 +1,4 @@
-// The HUD: Telos's icon (a thinking-orbs canvas, see orb.js) combined with its
+// The HUD: Telos's icon (a pixel sprite of the spark, see orb.js) combined with its
 // reply text into ONE component (#hud-unit). The unit is just the orb at rest;
 // when a reply streams in it expands to orb + text, then collapses back. The
 // orb itself never leaves, so mic state (listening…) is always readable.
@@ -60,12 +60,11 @@ function startHudWindow({ bridge, toolLabel, speak }) {
     if (node) node.textContent = text;
   };
   hud.hidden = false;
-  // Telos's icon: a thinking-orbs canvas. Black & white ink by default; the
+  // Telos's icon: a pixel sprite of the spark. The page's ink by default; the
   // "state" handler below tints it with the active game's accent color.
   const orb = new AgentOrb($("hud-orb"), { size: 64, dark: true });
   orb.setState("connecting");
-  // Hovering wakes the orb itself (it brightens and quickens) instead of
-  // putting a shiny glow around it.
+  // Hovering wakes the sprite itself (it fills in and quickens).
   button.addEventListener("mouseenter", () => orb.setHover(true));
   button.addEventListener("mouseleave", () => orb.setHover(false));
 
@@ -117,8 +116,8 @@ function startHudWindow({ bridge, toolLabel, speak }) {
     wake();
   });
 
-  // Each mode melts the orb into its matching thinking-orbs animation; busy
-  // also lights the activity ring around the orb (see style.css).
+  // Each mode dissolves the orb into its matching animation; busy also runs
+  // marching ants round its tile (see style.css).
   const ORB_FOR_MODE = { idle: "breathing", listening: "listening", busy: "composing" };
   function status(text, mode = "idle", orbState = null) {
     const was = hud.dataset.mode;
@@ -136,7 +135,7 @@ function startHudWindow({ bridge, toolLabel, speak }) {
     if (voice) return status(voice, "busy");
     // Busy with background work: keep the tool's own animation (searching /
     // solving / working) instead of falling back to composing, and keep the
-    // weaving melt while reply text is streaming in.
+    // weaving animation while reply text is streaming in.
     if (busy) return status(replyOpen ? "Replying…" : working || "Thinking…", "busy", replyOpen ? "weaving" : toolOrb);
     status(game ? `Telos · ${game}` : "Telos");
   }
@@ -255,7 +254,7 @@ function startHudWindow({ bridge, toolLabel, speak }) {
       case "text":
         if (!replyOpen) {
           openReply();
-          // The reply is being woven together: melt into the weaving orb.
+          // The reply is being written: the orb types it out.
           orb.setState("weaving");
           // Speak the reply as it streams.
           const speakChecked = document.getElementById("speak")?.checked !== false;
@@ -280,7 +279,7 @@ function startHudWindow({ bridge, toolLabel, speak }) {
         working = "";
         toolOrb = null;
         if (replyOpen) {
-          // Let him read it, then collapse the unit back to just the orb.
+          // Leave time to read it, then collapse the unit back to just the orb.
           clearTimeout(collapseTimer);
           collapseTimer = setTimeout(closeReply, 8000 + Math.min(12000, replyText.length * 40));
         }

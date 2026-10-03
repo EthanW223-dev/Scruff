@@ -55,6 +55,8 @@ export function builderTools(o: BuilderToolOptions): HubTool[] {
     ...o.env,
     PATH: [path.join(o.pluginDir, "bin"), o.env.PATH ?? o.env.Path ?? ""].join(path.delimiter),
     PYTHONPATH: [o.pluginDir, o.env.PYTHONPATH ?? ""].filter(Boolean).join(path.delimiter),
+    // universal-modder is bundled read-only: no bytecode caches written into it.
+    PYTHONDONTWRITEBYTECODE: "1",
   });
 
   return [

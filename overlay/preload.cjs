@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld("scruffOverlay", {
   onListening: (callback) => ipcRenderer.on("listening", (_e, on) => callback(on)),
   // The standalone HUD window moves when its orb unit is dragged.
   moveHud: (x, y) => ipcRenderer.send("hud-move", { x, y }),
+  // Until it's dragged, the tray sits in the corner the game's theme leaves free.
+  placeHud: (corner) => ipcRenderer.send("hud-corner", String(corner)),
   getHudBounds: () => ipcRenderer.invoke("hud-bounds"),
   // Where the overlay window sits on screen; the HUD button's spot is stored in
   // screen coordinates so the game window moving never moves the button.

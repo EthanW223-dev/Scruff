@@ -78,10 +78,13 @@ access to the game, run the terminal as administrator.
   hands control back to the game.
 - **Ctrl+Shift+Space** is push-to-talk: press, speak, press again. Speech is turned into text
   on your PC with Whisper; the first use downloads an ~80 MB voice model.
-- While you play, the overlay is just Telos's orb. A ring around it means Telos is working; hover
-  it for details. Replies show up next to the orb. Frozen values stay on screen in a small
-  *Pinned* widget, and notifications slide in under it with a bar counting down, so you can keep
-  playing.
+- While you play, Telos is a small tray in the corner: a retro title bar with a status light
+  (green ready, red listening, blinking while it works), its orb, the game, and what it's doing
+  right now. Replies open underneath. When nothing's happening it tucks away to just the orb;
+  activity or your mouse brings it back. Frozen values stay on screen in a small *Pinned* widget,
+  and notifications slide in with a bar counting down, so you can keep playing.
+- The tray sits in the corner the game's theme leaves free of the game's own HUD. Drag it
+  anywhere and it stays there instead.
 - To use your own button art, save it over `dashboard/button.svg` (keep it square).
 - Run the game in **windowed or borderless fullscreen**. No overlay app can draw over
   *exclusive* fullscreen without hooking into the game, which is exactly what anti-cheat looks

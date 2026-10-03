@@ -174,8 +174,9 @@ function saveHudPos(p) {
 
 /**
  * The HUD as its own separate thing: a small transparent always-on-top window
- * holding just the orb unit. It never follows the game window and never docks
- * to a game corner — it stays exactly where he drags it.
+ * holding the tray (the orb unit). It never follows the game window. Until the
+ * player drags it, it sits in the corner the game's theme leaves free (hud-corner);
+ * once dragged, it stays exactly where it was put.
  */
 const HUD_W = 520;
 const HUD_H = 300;
@@ -336,6 +337,16 @@ ipcMain.on("hud-move", (_e, p) => {
   }
 });
 ipcMain.handle("hud-bounds", () => (hudWin && !hudWin.isDestroyed() ? hudWin.getBounds() : null));
+// A game's theme picks the corner its HUD leaves free: until the player drags the tray
+// somewhere, it sits in that corner (once dragged, it stays where it was put).
+ipcMain.on("hud-corner", (_e, corner) => {
+  if (!hudWin || hudWin.isDestroyed() || loadHudPos() || typeof corner !== "string") return;
+  const { bounds } = screen.getPrimaryDisplay();
+  const margin = 24;
+  const x = corner.endsWith("left") ? bounds.x + margin : bounds.x + bounds.width - HUD_W - margin;
+  const y = corner.startsWith("bottom") ? bounds.y + bounds.height - HUD_H - margin : bounds.y + margin;
+  hudWin.setPosition(Math.round(x), Math.round(y));
+});
 ipcMain.on("track", (_e, pid) => {
   gamePid = Number.isInteger(pid) ? pid : null;
   gameHwnd = null;

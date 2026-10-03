@@ -53,6 +53,12 @@ function startHudWindow({ bridge, toolLabel, speak }) {
   const unit = $("hud-unit");
   const button = $("hud-button");
   const replyEl = $("hud-reply");
+  // The tray's text lines (absent in stripped-down test DOMs: every write is guarded).
+  const nameEl = $("hud-name");
+  const stateEl = $("hud-state");
+  const setText = (node, text) => {
+    if (node) node.textContent = text;
+  };
   hud.hidden = false;
   // Telos's icon: a thinking-orbs canvas. Black & white ink by default; the
   // "state" handler below tints it with the active game's accent color.
@@ -75,25 +81,55 @@ function startHudWindow({ bridge, toolLabel, speak }) {
   let collapseTimer = 0;
   let keys = "";
   let shapeTimer = 0; // reverts the shaping flash after a mod lands
+  let placedCorner = null; // the theme corner the tray was last sent to
   // Spoken replies: which neural engine + voice, and whether they're on (from the hello/models message).
   let voiceEnabled = false;
   let voiceEngine = "edge";
   let voiceName = "en-US-AndrewNeural";
   let voiceReady = true; // older hubs don't send it; don't nag when it's absent
 
+  let openKey = "";
   bridge.hotkeys().then(({ panel, talk }) => {
     keys = `Open: ${pretty(panel)}  ·  Talk: ${pretty(talk)}`;
+    openKey = pretty(panel);
     idle();
+  });
+
+  // Idle, the tray tucks away to just the orb in its corner; activity or the mouse brings it back.
+  const TUCK_MS = 9000;
+  let hovering = false;
+  let tuckTimer = 0;
+  function wake() {
+    unit.classList.remove("compact");
+    clearTimeout(tuckTimer);
+    tuckTimer = setTimeout(tuck, TUCK_MS);
+  }
+  function tuck() {
+    if (hovering || busy || listening || replyOpen || voice) return;
+    unit.classList.add("compact");
+  }
+  unit.addEventListener("mouseenter", () => {
+    hovering = true;
+    wake();
+  });
+  unit.addEventListener("mouseleave", () => {
+    hovering = false;
+    wake();
   });
 
   // Each mode melts the orb into its matching thinking-orbs animation; busy
   // also lights the activity ring around the orb (see style.css).
   const ORB_FOR_MODE = { idle: "breathing", listening: "listening", busy: "composing" };
   function status(text, mode = "idle", orbState = null) {
+    const was = hud.dataset.mode;
     hud.dataset.mode = mode;
     orb.setState(orbState ?? ORB_FOR_MODE[mode] ?? "breathing");
     button.title = [text, keys].filter(Boolean).join("\n");
     button.setAttribute("aria-label", text);
+    // The tray's status line: what Telos is doing, or how to open it.
+    setText(stateEl, mode === "idle" ? (openKey ? `Ready · ${openKey} to open` : "Ready") : text);
+    setText(nameEl, game ?? "No game yet");
+    if (mode !== "idle" || was !== mode) wake();
   }
   function idle() {
     if (listening) return status("Listening…", "listening");
@@ -101,12 +137,13 @@ function startHudWindow({ bridge, toolLabel, speak }) {
     // Busy with background work: keep the tool's own animation (searching /
     // solving / working) instead of falling back to composing, and keep the
     // weaving melt while reply text is streaming in.
-    if (busy) return status(working || "Thinking…", "busy", replyOpen ? "weaving" : toolOrb);
+    if (busy) return status(replyOpen ? "Replying…" : working || "Thinking…", "busy", replyOpen ? "weaving" : toolOrb);
     status(game ? `Telos · ${game}` : "Telos");
   }
 
   // A notification: an icon tile, a title, the text, and a bar counting down until it goes.
   function toast(text, kind = "", ms = 6000) {
+    wake();
     const part = (tag, cls, content) => {
       const n = document.createElement(tag);
       n.className = cls;
@@ -177,6 +214,7 @@ function startHudWindow({ bridge, toolLabel, speak }) {
 
   /** The orb becomes the text: the unit expands to orb + reply as one piece. */
   function openReply() {
+    wake();
     replyOpen = true;
     clearTimeout(collapseTimer);
     unit.classList.add("expanded");
@@ -302,6 +340,15 @@ function startHudWindow({ bridge, toolLabel, speak }) {
       // color once the game has a theme of its own. (The page's --accent is
       // already handled by applyTheme in app.js; this is the canvas ink.)
       if (msg.theme) orb.setColor(msg.theme.source === "default" ? null : msg.theme.accent);
+      // A game's own theme says which corner its HUD leaves free: the tray goes there
+      // (unless the player has dragged it somewhere).
+      const corner = msg.theme && msg.theme.source !== "default" ? msg.theme.corner : null;
+      if (corner && corner !== placedCorner) {
+        placedCorner = corner;
+        try {
+          bridge.placeHud?.(corner);
+        } catch {}
+      }
       idle();
     } else if (msg.type === "voice_status") {
       voice = msg.text;

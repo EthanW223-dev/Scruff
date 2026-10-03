@@ -21,12 +21,22 @@
        standalone HUD window (?hud=1) this is the whole UI; the main overlay
        window keeps the panel. -->
   <div id="hud" class="hud" hidden>
+    <!-- The tray: a small retro window in the corner. Title bar with a status light, the orb, the
+         game and what Telos is doing; replies open underneath. Idle, it tucks away to just the
+         orb, hugging its corner; any activity (or the mouse) brings it back. -->
     <div id="hud-unit" class="hud-unit interactive">
+      <div class="hud-bar" aria-hidden="true">
+        <span class="hud-bar-name">Telos</span><span class="stripes"></span><span id="hud-light" class="hud-light"></span>
+      </div>
       <button id="hud-button" class="hud-button" type="button" aria-label="Telos voice control" title="Telos">
         <span class="orb" aria-hidden="true">
           <canvas id="hud-orb" class="orb-canvas" width="64" height="64"></canvas>
         </span>
       </button>
+      <div class="hud-info">
+        <div id="hud-name" class="hud-name">Telos</div>
+        <div id="hud-state" class="hud-state">Starting…</div>
+      </div>
       <div id="hud-reply" class="hud-reply" hidden></div>
     </div>
     <div id="hud-mods" class="hud-mods"></div>

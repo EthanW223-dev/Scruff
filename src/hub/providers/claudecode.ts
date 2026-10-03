@@ -260,10 +260,13 @@ export async function probeClaudeCode(command: string, env: NodeJS.ProcessEnv, t
 /** Turns what went wrong into something the player can act on. */
 export function explain(text: string, command: string): string {
   const line = errorLine(text);
-  if (text === "not found" || /is not recognized as an internal or external command|command not found|ENOENT/i.test(text)) {
+  // Only when it's the command itself that's missing: a build's own "dotnet: command not found" is something else.
+  const name = (command.split(/[\\/]/).pop() ?? command).replace(/\.(cmd|exe|bat)$/i, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const missing = new RegExp(`'${name}(\\.\\w+)?' is not recognized as an internal or external command|(^|[\\s/\\\\])${name}(\\.\\w+)?: (command )?not found`, "i");
+  if (text === "not found" || /ENOENT/.test(text) || missing.test(text)) {
     return `Telos couldn't find Claude Code (the \`${command}\` command). Install it from claude.com/claude-code, or set SCRUFF_CLAUDE_COMMAND in .env to where it is.`;
   }
-  if (/\/login|not logged in|invalid api key|authentication|OAuth/i.test(text)) {
+  if (/\/login|not logged in|invalid api key|authentication_error|oauth token/i.test(text)) {
     return "Claude Code isn't logged in. Run `claude` in a terminal once and log in, then try again.";
   }
   if (/unknown option|unrecognized/i.test(text)) {
@@ -308,6 +311,7 @@ const PARENT_SESSION = [
   "CLAUDECODE",
   "CLAUDE_CODE_ENTRYPOINT",
   "CLAUDE_CODE_SESSION_ID",
+  "CLAUDE_CODE_REMOTE_SESSION_ID",
   "CLAUDE_CODE_CHILD_SESSION",
   "CLAUDE_CODE_SSE_PORT",
   "CLAUDE_CODE_MESSAGING_SOCKET",
@@ -315,14 +319,14 @@ const PARENT_SESSION = [
   "CLAUDE_CODE_TEE_SDK_STDOUT",
   "CLAUDE_PID",
 ];
-function childEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+export function childEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const out = { ...env };
   for (const k of PARENT_SESSION) delete out[k];
   return out;
 }
 
 /** Only what Telos itself puts on the command line (flags, paths, model names): nothing a shell would act on. */
-function safeArg(arg: string): string {
+export function safeArg(arg: string): string {
   return arg.replace(/["%^&|<>\r\n]/g, " ");
 }
 
@@ -330,7 +334,7 @@ function safeArg(arg: string): string {
  * Starts the command. On Windows `claude` is usually a .cmd shim, which only a shell can
  * run, so it goes through cmd.exe with every argument quoted (and no window flashing up).
  */
-function run(command: string, args: string[], opts: { cwd?: string; env: NodeJS.ProcessEnv }): ChildProcess {
+export function run(command: string, args: string[], opts: { cwd?: string; env: NodeJS.ProcessEnv }): ChildProcess {
   if (process.platform === "win32") {
     const quote = (a: string) => (/^[\w\-.:\\/=@,]+$/.test(a) ? a : `"${safeArg(a)}"`);
     return spawn([command, ...args].map(quote).join(" "), [], { ...opts, shell: true, windowsHide: true, stdio: "pipe" });
@@ -339,7 +343,7 @@ function run(command: string, args: string[], opts: { cwd?: string; env: NodeJS.
 }
 
 /** Ends the run, including what the shell started on Windows. */
-function stopTree(child: ChildProcess): void {
+export function stopTree(child: ChildProcess): void {
   if (child.exitCode !== null || child.pid === undefined) return;
   if (process.platform === "win32") {
     spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" }).on("error", () => {});

@@ -68,6 +68,11 @@ function normalize(name: string): string {
 const antiCheat = new Map(Object.entries(ANTI_CHEAT_PROCESSES).map(([k, v]) => [normalize(k), v]));
 const onlineGames = new Map(Object.entries(ONLINE_GAMES).map(([k, v]) => [normalize(k), v]));
 
+/** The online game an exe belongs to (its anti-cheat lives in the game itself), or undefined. */
+export function onlineGame(exeName: string): string | undefined {
+  return onlineGames.get(normalize(exeName.split(/[\\/]/).pop() ?? exeName));
+}
+
 export function checkAttachSafety(target: ProcessInfo, running: ProcessInfo[]): SafetyVerdict {
   const game = onlineGames.get(normalize(target.name));
   if (game) {

@@ -488,6 +488,32 @@ textarea:focus { box-shadow: 3px 3px 0 var(--accent); }
 .game-info .bridge .warn { background: var(--danger); color: #fff; padding: 0 4px; }
 .game-info .bridge-why { margin-top: 5px; color: var(--muted); font-size: 11.5px; line-height: 1.45; }
 
+/* The Workshop: a mod request, then the build's live log. */
+.workshop { display: flex; flex-direction: column; gap: 9px; font-size: 13px; }
+.ws-form { display: flex; flex-direction: column; gap: 9px; }
+.ws-form[hidden] { display: none; }
+.workshop textarea { flex: none; min-height: 62px; max-height: 140px; padding: 8px 10px; overflow-y: auto; resize: vertical; font: 13px/1.45 var(--font); }
+.workshop textarea:disabled { opacity: 0.55; }
+.ws-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ws-row .primary, .ws-row .danger { height: 32px; padding: 0 12px; font-size: 19px; }
+.ws-row label { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.ws-note { margin: 0; color: var(--muted); font-size: 11.5px; line-height: 1.45; }
+.ws-job { display: flex; flex-direction: column; gap: 7px; padding: 9px 10px; border: 1px solid var(--soft); background: var(--surface); }
+.ws-job-head { display: flex; align-items: center; gap: 8px; font: 12px var(--mono); color: var(--muted); }
+.ws-job-head .pill { margin-left: auto; }
+.ws-job-head .pill.busy::after { content: "_"; animation: blink 0.8s steps(2) infinite; }
+.ws-request { font-weight: 600; line-height: 1.4; }
+.ws-log { margin: 0; padding: 7px 8px; max-height: 190px; overflow: auto; list-style: none; background: var(--bg); border: 1px dashed var(--soft); font: 11.5px/1.5 var(--mono); }
+.ws-log li { overflow-wrap: anywhere; }
+.ws-log li.say { color: var(--text); }
+.ws-log li.tool { color: var(--muted); }
+.ws-summary { margin: 0; line-height: 1.5; white-space: pre-wrap; }
+.ws-error { margin: 0; color: var(--danger); line-height: 1.45; }
+.ws-folder { font: 11px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.ws-history { margin: 0; padding: 0; list-style: none; font: 11.5px var(--mono); color: var(--muted); }
+.ws-history li { display: flex; gap: 8px; padding: 4px 0; border-top: 1px dashed var(--soft); }
+.ws-history li span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ---------- hotkey strip ---------- */
 .dock {
   flex: none;

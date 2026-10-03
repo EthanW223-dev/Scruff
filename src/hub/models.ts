@@ -290,6 +290,12 @@ export class ModelRouter {
     return env;
   }
 
+  /** How the Workshop runs Claude Code: the same command and environment, and the chat's model when Claude Code is the chat's choice. */
+  claudeCodeLaunch(): { command: string; env: NodeJS.ProcessEnv; model?: string } {
+    const model = this.selection.provider === "claude-code" ? this.selection.model : undefined;
+    return { command: this.claudeCommand(), env: this.claudeCodeEnv(), model };
+  }
+
   /** Whether Claude Code runs here (cached: it starts a process). */
   private async probeClaudeCode(): Promise<{ ok: boolean; detail: string }> {
     const fresh = this.claudeCodeProbe && Date.now() - this.claudeCodeProbe.at < (this.claudeCodeProbe.ok ? 60_000 : 5_000);

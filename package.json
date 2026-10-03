@@ -15,6 +15,7 @@
     "demo-game": "node examples/demo-game/game.mjs",
     "typecheck": "tsc --noEmit",
     "build:bridge": "sh bridge/build.sh",
+    "update:modder": "node scripts/update-universal-modder.mjs",
     "test": "tsx --test \"test/*.test.ts\""
   },
   "dependencies": {

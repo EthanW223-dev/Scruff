@@ -354,6 +354,7 @@ function renderState() {
   );
 
   renderLinks(state.links ?? []);
+  renderWorkshop(state.workshop, game.profile ?? null);
 
   // Scan status
   const scan = attached?.scan;
@@ -553,6 +554,120 @@ function renderLinks(links) {
       const remove = el("button", "link", "remove");
       remove.addEventListener("click", () => send({ type: "remove_link", id: l.id }));
       li.append(toggle, remove);
+      return li;
+    }),
+  );
+}
+
+// ---------- Workshop: real mods built by Claude Code with universal-modder ----------
+
+const WS_STATUS = {
+  proposed: ["needs your OK", "warn"],
+  running: ["building", "on busy"],
+  done: ["built", "on"],
+  failed: ["problem", "warn"],
+  stopped: ["stopped", ""],
+  declined: ["not built", ""],
+};
+const WS_CONSENT =
+  "Claude Code builds it with universal-modder: it runs commands and edits files on this PC (in its workshop folder and the " +
+  "game's folders) and can take a long time. Needs Claude Code installed; it runs your own claude command.";
+let wsParts = null; // the window's pieces: the request form stays put while the rest re-renders
+
+/** The request form, made once so typing survives live updates. */
+function workshopForm() {
+  const form = el("div", "ws-form");
+  const input = el("textarea");
+  input.rows = 3;
+  const row = el("div", "ws-row");
+  const build = el("button", "primary", "Build");
+  build.type = "button";
+  const contLabel = el("label");
+  const cont = el("input");
+  cont.type = "checkbox";
+  contLabel.append(cont, "Build on the last mod");
+  build.addEventListener("click", () => {
+    const request = input.value.trim();
+    if (!request) return input.focus();
+    send({ type: "workshop_build", request, continue: cont.checked && !contLabel.hidden });
+    input.value = "";
+    cont.checked = false;
+  });
+  row.append(build, contLabel);
+  form.append(input, row, el("p", "ws-note", WS_CONSENT));
+  return { form, input, build, contLabel };
+}
+
+function renderWorkshop(ws, profile) {
+  const panel = $("workshop-panel");
+  panel.hidden = !ws?.available;
+  if (!ws?.available) return;
+  if (!wsParts) {
+    wsParts = { jobBox: el("div"), history: el("ul", "ws-history"), ...workshopForm() };
+    $("workshop").replaceChildren(wsParts.jobBox, wsParts.form, wsParts.history);
+  }
+  const job = ws.job;
+  const live = job && (job.status === "running" || job.status === "proposed");
+  $("workshop-badge").hidden = !live;
+  $("workshop-badge").textContent = job?.status === "proposed" ? "!" : "…";
+
+  // The current (or latest) build.
+  const card = [];
+  if (job) {
+    const box = el("div", "ws-job");
+    const [label, cls] = WS_STATUS[job.status] ?? [job.status, ""];
+    const head = el("div", "ws-job-head");
+    head.append(el("span", null, job.game), el("span", `pill ${cls}`, label));
+    box.append(head, el("div", "ws-request", job.request));
+    if (job.status === "proposed") {
+      box.append(el("p", "ws-note", `The AI suggested this build. ${WS_CONSENT}`));
+      const row = el("div", "ws-row");
+      const go = el("button", "primary", "Build");
+      go.type = "button";
+      go.addEventListener("click", () => send({ type: "workshop_approve", id: job.id }));
+      const no = el("button", "link", "No thanks");
+      no.type = "button";
+      no.addEventListener("click", () => send({ type: "workshop_decline", id: job.id }));
+      row.append(go, no);
+      box.append(row);
+    }
+    // The closing words are the summary below: no need to show them twice.
+    const steps = (job.steps ?? []).filter((s) => !(job.summary && s.kind === "say" && job.summary.startsWith(s.text.slice(0, 200))));
+    if (steps.length) {
+      const log = el("ol", "ws-log");
+      for (const s of steps.slice(-14)) log.append(el("li", s.kind, s.kind === "say" ? s.text : `› ${s.text}`));
+      box.append(log);
+      requestAnimationFrame(() => (log.scrollTop = log.scrollHeight));
+    }
+    if (job.status === "running") {
+      const row = el("div", "ws-row");
+      const mins = Math.max(0, Math.round((Date.now() - job.startedAt) / 60000));
+      const stop = el("button", "danger", "Stop");
+      stop.type = "button";
+      stop.addEventListener("click", () => send({ type: "workshop_stop", id: job.id }));
+      row.append(stop, el("span", "ws-note", `${mins ? `${mins} min` : "Just started"} · ${job.stepCount} step${job.stepCount === 1 ? "" : "s"} · Telos tells you when it's done`));
+      box.append(row);
+    }
+    if (job.summary && job.status !== "running") box.append(el("p", "ws-summary", job.summary));
+    if (job.error) box.append(el("p", "ws-error", job.error));
+    if (job.status !== "proposed") box.append(el("div", "ws-folder", job.folder));
+    card.push(box);
+  }
+  wsParts.jobBox.replaceChildren(...card);
+
+  // A new request: not while one is building or waiting for the player.
+  const game = profile?.name;
+  wsParts.form.hidden = Boolean(live);
+  wsParts.input.disabled = !game;
+  wsParts.build.disabled = !game;
+  wsParts.input.placeholder = game ? `Describe a mod for ${game}: "add a homing missile launcher", "a boss that…"` : "Attach to a game to build mods for it.";
+  wsParts.contLabel.hidden = !(job && job.game === game && job.status === "done");
+
+  wsParts.history.replaceChildren(
+    ...(ws.history ?? []).map((h) => {
+      const li = el("li");
+      li.title = h.summary ?? h.error ?? "";
+      li.append(el("span", null, (WS_STATUS[h.status] ?? [h.status])[0]), el("span", null, `${h.game}: ${h.request}`));
       return li;
     }),
   );

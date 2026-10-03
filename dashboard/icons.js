@@ -27,6 +27,7 @@ const PATHS = {
   refresh: '<path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v5h-5"/>',
   pin: '<path d="M9 3h6l-1 6 4 4H6l4-4z"/><path d="M12 13v8"/>',
   wave: '<path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2"/>',
+  hammer: '<path d="M3 21l11-11"/><path d="M10 6l4-4 8 8-4 4z"/>',
 };
 
 export const ICONS = Object.keys(PATHS);

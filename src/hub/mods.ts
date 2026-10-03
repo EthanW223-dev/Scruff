@@ -14,7 +14,7 @@
  *   live gold, items, party stats, switches, variables, teleporting and encounters; the
  *   database itself (items, enemies, prices) is plain JSON the file tools edit.
  * - numbers-only (Godot, GameMaker, Ren'Py, Source, unknown): memory editing.
- *   Structural mods there need per-game reverse engineering, which Telos doesn't do.
+ *   Structural mods there need a real mod, which the Workshop builds (workshop.ts).
  */
 
 export type ModTier = "full" | "unreal" | "rpgmaker" | "numbers";
@@ -56,8 +56,9 @@ const RPGMAKER_MISSING =
 const RPGMAKER_READY = "The RPG Maker bridge is connected: use the rpgmaker__ tools (start with rpgmaker__status). ";
 
 const NUMBERS_NOTE =
-  "Only number changes work on this engine (memory editing). Colors, models, spawning and " +
-  "removing things need per-game reverse engineering, which Telos doesn't do — say so plainly. ";
+  "Only number changes work live on this engine (memory editing). Colors, models, spawning, new " +
+  "content and mechanics need a real mod: modding_guide has the route for this engine, and build_mod " +
+  "has the Workshop build it (after the player approves). ";
 
 /** Engine strings come from src/games/profile.ts. */
 export function engineModSupport(engine: string, bridgeConnected: boolean, unrealConnected = false): EngineModSupport {

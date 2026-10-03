@@ -8,7 +8,7 @@ import { test } from "node:test";
 import type { AgentEvent } from "../src/hub/agent.ts";
 import { createHub } from "../src/hub/create.ts";
 import { ModelRouter } from "../src/hub/models.ts";
-import { CLAUDE_CODE_MODELS, claudeCodeStreamFactory, probeClaudeCode } from "../src/hub/providers/claudecode.ts";
+import { CLAUDE_CODE_MODELS, claudeCodeStreamFactory, explain, probeClaudeCode } from "../src/hub/providers/claudecode.ts";
 // @ts-ignore: plain JS test fixture
 import { startMockApi } from "./fixtures/claude-code/mock-api.mjs";
 
@@ -115,6 +115,18 @@ test("what went wrong is said plainly: not logged in, a wrapper that rejects the
   );
   const missing = claudeCodeStreamFactory({ ...setup().opts, command: path.join(os.tmpdir(), "no-such-claude-here") });
   await assert.rejects(turn(missing, params([{ role: "user", content: "hi" }])), /couldn't find Claude Code.*SCRUFF_CLAUDE_COMMAND/);
+});
+
+test("only a missing claude reads as 'not installed': a build's own missing tool is its own problem", () => {
+  const notFound = /couldn't find Claude Code/;
+  assert.match(explain("'claude' is not recognized as an internal or external command,", "claude"), notFound);
+  assert.match(explain("sh: 1: claude: not found", "claude"), notFound);
+  assert.match(explain("bash: /usr/local/bin/claude: No such file or directory\nENOENT", "/usr/local/bin/claude"), notFound);
+  assert.match(explain("'claude.cmd' is not recognized as an internal or external command", "C:\\npm\\claude.cmd"), notFound);
+  assert.doesNotMatch(explain("dotnet: command not found", "claude"), notFound);
+  assert.match(explain("dotnet: command not found", "claude"), /^Claude Code: dotnet: command not found/);
+  assert.doesNotMatch(explain("git: authentication failed for repo", "claude"), /isn't logged in/);
+  assert.match(explain("Invalid API key · Please run /login", "claude"), /isn't logged in/);
 });
 
 test("a session Claude Code no longer has: carries on in a new one", async () => {

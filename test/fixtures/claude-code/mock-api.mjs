@@ -30,8 +30,14 @@ export function startMockApi() {
         .flatMap((m) => blocksOf(m).filter((b) => b.type === "text").map((b) => b.text));
       const asked = texts.filter((t) => !t.startsWith("<") && !t.startsWith("#")).join(" ");
       const tool = (json.tools ?? []).find((t) => t.name === "mcp__telos__game_status");
+      const bash = (json.tools ?? []).find((t) => t.name === "Bash");
       let content;
-      if (toolResult) {
+      if (/Mod request from the player/.test(asked) && bash && !toolResult) {
+        // The Workshop: build something on disk, then report.
+        content = [{ type: "tool_use", id: "toolu_build_1", name: "Bash", input: { command: "echo built > built-mod.txt", description: "Build the mod" } }];
+      } else if (/Mod request from the player/.test(asked) && toolResult) {
+        content = [{ type: "text", text: "Built a test mod in built-mod.txt. Restart the game to load it." }];
+      } else if (toolResult) {
         const text = typeof toolResult.content === "string" ? toolResult.content : (toolResult.content ?? []).map((c) => c.text ?? "").join(" ");
         content = [{ type: "text", text: `Telos says: ${text.slice(0, 80)}` }];
       } else if (tool && /check the game/i.test(asked)) {

@@ -42,7 +42,9 @@ export class McpEndpoint extends EventEmitter {
       return;
     }
     // Claude Code running as Telos's own chat brain: its tool calls are part of the chat turn.
-    const server = this.server(req.headers[CHAT_HEADER] === "1");
+    // The Workshop's builder logs its own steps; its calls stay out of the chat.
+    const client = req.headers[CHAT_HEADER];
+    const server = this.server(client === "1" ? "chat" : client === "workshop" ? "workshop" : "app");
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on("close", () => {
       void transport.close();
@@ -52,7 +54,7 @@ export class McpEndpoint extends EventEmitter {
     await transport.handleRequest(req, res);
   }
 
-  server(ownChat = false): McpServer {
+  server(client: "chat" | "workshop" | "app" = "app"): McpServer {
     const server = new McpServer(
       { name: "scruff", version: "0.2.0" },
       { instructions: mcpInstructions(this.opts.dashboardUrl) },
@@ -72,32 +74,33 @@ export class McpEndpoint extends EventEmitter {
             openWorldHint: false,
           },
         },
-        (args: unknown, extra: { signal: AbortSignal }) => this.call(tool, args, extra.signal, ownChat),
+        (args: unknown, extra: { signal: AbortSignal }) => this.call(tool, args, extra.signal, client),
       );
     }
     return server;
   }
 
-  private async call(tool: HubTool, args: unknown, signal: AbortSignal, ownChat = false): Promise<CallToolResult> {
+  private async call(tool: HubTool, args: unknown, signal: AbortSignal, client: "chat" | "workshop" | "app" = "app"): Promise<CallToolResult> {
     const id = `mcp_${this.nextId++}`;
-    if (!ownChat) {
+    const report = client === "workshop" ? () => {} : (event: AgentEvent) => this.onEvent(event);
+    if (client === "app") {
       if (Date.now() - this.lastActivity > QUIET_MS) {
         this.onEvent({ type: "notice", text: "Your Claude app is using Telos." });
       }
       this.lastActivity = Date.now();
     }
-    this.onEvent({ type: "tool_call", id, name: tool.name, input: args });
+    report({ type: "tool_call", id, name: tool.name, input: args });
     try {
       const content = await tool.run(args, {
         signal,
-        progress: (text) => this.onEvent({ type: "tool_progress", id, text }),
+        progress: (text) => report({ type: "tool_progress", id, text }),
       });
       const result = toMcpContent(content);
-      this.onEvent({ type: "tool_result", id, ok: true, text: summary(result) });
+      report({ type: "tool_result", id, ok: true, text: summary(result) });
       return { content: result };
     } catch (err) {
       const text = (err as Error).message;
-      this.onEvent({ type: "tool_result", id, ok: false, text });
+      report({ type: "tool_result", id, ok: false, text });
       return { content: [{ type: "text", text }], isError: true };
     }
   }

@@ -134,12 +134,41 @@ What works depends on the engine (the status note in chat always says which tier
   ([bridge-rpgmaker/](bridge-rpgmaker/README.md)) for live changes: gold, items, party HP and
   levels, switches and variables by name, teleporting, walking through walls, random
   encounters.
-- **Everything else (Godot, GameMaker, Source, ...) — numbers only.** Colors, models, spawning
-  and removing things need per-game reverse engineering, which Telos doesn't do.
+- **Everything else (Godot, GameMaker, Source, ...) — numbers only, live.** Colors, models,
+  spawning and new content there need a real mod: see the Workshop below.
 
 **remove** in the same place takes out exactly what Telos added. It works for Unity games built
 with Mono (the Game files panel says *Unity (Mono)*); IL2CPP Unity games and other engines get
 memory editing and file editing.
+
+## Build real mods: the Workshop (universal-modder)
+
+Live changes only go so far. For **new content** (weapons, items, enemies, bosses, mechanics,
+UI, art, sounds) Telos has a **Workshop**: Claude Code builds a real mod for the game you're
+playing, with [universal-modder](https://github.com/rehan-remade/universal-modder) loaded.
+universal-modder is a toolkit for AI agents that mod games: engine recon, reverse engineering,
+generated art, in-game testing, and a knowledge base of how other agents modded specific games.
+
+> "Add a homing missile launcher to Terraria."
+> "A boss that spawns at night and drops a jetpack."
+> "Now make the missiles faster." (it carries on from the last build for that game)
+
+- Ask in chat, or type it in the *Workshop* window of the panel and press **Build**. When the AI
+  suggests a build, it waits in the Workshop window until you press Build: building means
+  running commands and editing files on your PC, in its workshop folder
+  (`.scruff/workshop/<game>`) and the game's folders, and it can take a long time.
+- The window shows each step live (`$ dotnet build …`, `edit Weapons.cs`, …) with a **Stop**
+  button, and the overlay tells you when it's done and how to load the mod.
+- It runs your own `claude` command (Claude Code, installed and logged in once). Its rules:
+  single-player games only (online games with anti-cheat are refused), saves backed up before a
+  modded launch, nothing published.
+- Every AI in Telos, local models included, can read universal-modder's engine playbooks and
+  field notes with the `modding_guide` tool, to answer "can this game be modded, and how".
+- Sprites, 3D models and sounds come from [fal](https://fal.ai): put `FAL_KEY` in `.env` to let
+  the Workshop use it. Its `um` CLI needs Python 3.10+ (and `uv`, recommended); without them the
+  Workshop still builds, just without those helpers.
+- universal-modder is bundled in `vendor/universal-modder` (MIT, by Rehan and contributors);
+  `npm run update:modder` updates it from GitHub.
 
 ## Merge games
 
@@ -273,6 +302,8 @@ in raw memory like a real game, and also connects to Telos as a game adapter. As
   `bridge-rpgmaker/` is the RPG Maker plugin, and `bridge-ue4ss/` is the UE4SS Lua mod for Unreal
   games. `src/games/rpgmaker.ts` and `src/games/ue4ss.ts` install them, and `src/hub/ue4ssrelay.ts`
   connects to the UE4SS mod through files, since UE4SS's Lua has no network access.
+- `src/hub/modder.ts` reads universal-modder's playbooks and field notes (`modding_guide`), and
+  `src/hub/workshop.ts` runs Workshop builds; `vendor/universal-modder/` is the bundled toolkit.
 - `src/hub/links.ts` is game links; `src/hub/bridges.ts` works out which connected bridge belongs
   to the attached game.
 - `src/memory/` scans and edits another process's memory: `windows.ts` (Win32 via koffi),
@@ -329,6 +360,8 @@ In `.env` (all optional):
   not yet inside real games. The same goes for model loading in Unity: the file reading is
   tested, but building the mesh in a real game isn't yet. Loaded models are static (no
   animation).
+- The Workshop is tested with the real Claude Code CLI against a stand-in for the AI, not yet on
+  a real mod build. How far a build gets depends on the model behind your `claude`.
 - Game links on memory values stop when that game closes. Find the value again and remake the
   link.
 - The Unity bridge's core (networking, JSON, reading and changing objects) is tested against Telos,
@@ -355,4 +388,5 @@ fine; Linux: root or `kernel.yama.ptrace_scope=0`). On Linux, install with
 `ONNXRUNTIME_NODE_INSTALL=skip npm install` to skip a 400 MB CUDA download Telos doesn't use.
 
 The interface bundles Inter Tight, JetBrains Mono and VT323 under the SIL Open Font License
-(`dashboard/fonts/`).
+(`dashboard/fonts/`). [universal-modder](https://github.com/rehan-remade/universal-modder) is
+bundled under the MIT license (`vendor/universal-modder/`).

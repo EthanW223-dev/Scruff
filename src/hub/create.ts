@@ -11,6 +11,8 @@ import { Ue4ssRelays } from "./ue4ssrelay.ts";
 import { ue4ssModDir } from "../games/ue4ss.ts";
 import fs from "node:fs";
 import { McpEndpoint } from "./mcp.ts";
+import { ModderKnowledge, moddingTools } from "./modder.ts";
+import { Workshop, workshopTools, type ClaudeLaunch } from "./workshop.ts";
 import { engineModSupport } from "./mods.ts";
 import { quickPath } from "./quick.ts";
 import type { ModelRouter } from "./models.ts";
@@ -36,6 +38,8 @@ export interface HubOptions {
   dataDir?: string;
   /** Replaces the Jev client built from the TypeSafe key (tests); null turns the fast path off. */
   jev?: Jev | null;
+  /** How the Workshop runs Claude Code (tests); defaults to the AI menu's Claude Code settings. */
+  workshopLaunch?: () => ClaudeLaunch;
 }
 
 export async function createHub(opts: HubOptions) {
@@ -56,6 +60,17 @@ export async function createHub(opts: HubOptions) {
     const p = games.profile;
     const modDir = p && p.engine === "Unreal Engine" ? ue4ssModDir(p) : null;
     if (p && modDir && fs.existsSync(path.join(modDir, "Scripts", "main.lua"))) ue4ssRelays.ensure(modDir, p.name);
+  });
+
+  // universal-modder (bundled): its playbooks for every AI, and the Workshop that builds real mods with it.
+  const knowledge = new ModderKnowledge(path.join(opts.root, "vendor", "universal-modder"));
+  const workshop = new Workshop({
+    dataDir,
+    pluginDir: knowledge.dir,
+    mcpUrl: `http://127.0.0.1:${opts.port}/mcp`,
+    launch:
+      opts.workshopLaunch ??
+      (() => opts.router?.claudeCodeLaunch() ?? { command: process.env.SCRUFF_CLAUDE_COMMAND?.trim() || "claude", env: process.env }),
   });
 
   // Claude Code as the brain calls Telos's tools over this hub's own MCP endpoint.
@@ -122,6 +137,8 @@ export async function createHub(opts: HubOptions) {
     adapters.dispatchTool(),
     ...linkTools(links, games, adapters),
     ...modelFileTools(),
+    ...moddingTools(knowledge, () => games.profile, { workshop: workshop.pluginReady }),
+    ...workshopTools(workshop, () => games.profile),
   ];
 
   const jev = new JevService(new JevSettings(path.join(dataDir, "typesafe.json")), opts.jev);
@@ -159,6 +176,7 @@ export async function createHub(opts: HubOptions) {
     links,
     screen,
     mcp,
+    workshop,
     version: codeVersion(opts.root),
   });
 
@@ -170,9 +188,11 @@ export async function createHub(opts: HubOptions) {
     adapters,
     links,
     screen,
+    workshop,
     server,
     close() {
       agent.stop();
+      workshop.close();
       links.close();
       ue4ssRelays.close();
       games.detach();

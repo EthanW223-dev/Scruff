@@ -12,6 +12,7 @@ import type { Agent, AgentEvent } from "./agent.ts";
 import { exeRunning, type GameManager } from "./game.ts";
 import type { JevService } from "./jev.ts";
 import type { McpEndpoint } from "./mcp.ts";
+import type { Workshop } from "./workshop.ts";
 import type { ModelRouter, ProviderId } from "./models.ts";
 import type { ScreenBridge } from "./screen.ts";
 import { transcribe } from "./speech.ts";
@@ -48,6 +49,8 @@ export interface ServerOptions {
   links: LinkManager;
   screen: ScreenBridge;
   mcp: McpEndpoint;
+  /** Real mods built by Claude Code with universal-modder. */
+  workshop?: Workshop;
   /** Short git commit of the serving code; lets the overlay spot a stale hub. */
   version?: string;
 }
@@ -110,7 +113,7 @@ function connectInfo(root: string, port: number) {
 }
 
 export async function startServer(opts: ServerOptions): Promise<http.Server> {
-  const { agent, games, adapters, links, screen, mcp, router, themes, jev } = opts;
+  const { agent, games, adapters, links, screen, mcp, router, themes, jev, workshop } = opts;
   const aiInfo = () =>
     router?.describe() ?? { provider: "custom", model: agent.brain.model, providerLabel: "Custom", ready: true, problem: undefined };
   // Keep the dashboard's voice section honest about whether edge-tts is installed.
@@ -140,6 +143,7 @@ export async function startServer(opts: ServerOptions): Promise<http.Server> {
     screen: { active: screen.active },
     theme: themes.current(),
     jev: jev.info(),
+    workshop: workshop?.snapshot() ?? null,
     busy: agent.busy,
   });
 
@@ -160,6 +164,8 @@ export async function startServer(opts: ServerOptions): Promise<http.Server> {
   screen.on("update", pushState);
   themes.on("change", pushState);
   jev.on("change", pushState);
+  workshop?.on("update", pushState);
+  workshop?.on("notice", (text: string) => broadcast({ type: "toast", text, level: "info" }));
   adapters.on("event", (event) => broadcast({ type: "game_event", event }));
   setInterval(() => {
     if (dashboards.size && games.session?.watch.size) pushState();
@@ -305,6 +311,22 @@ export async function startServer(opts: ServerOptions): Promise<http.Server> {
         );
         break;
       }
+      case "workshop_build": {
+        // The player typed the mod and pressed Build: that's their go-ahead.
+        if (!workshop) throw new Error("This Telos has no Workshop.");
+        if (!games.profile) throw new Error("Attach to the game first: the Workshop needs to know which game it's building for.");
+        workshop.propose(games.profile, String(msg.request ?? ""), { by: "player", continues: msg.continue === true });
+        break;
+      }
+      case "workshop_approve":
+        workshop?.approve(Number(msg.id));
+        break;
+      case "workshop_decline":
+        workshop?.decline(Number(msg.id));
+        break;
+      case "workshop_stop":
+        workshop?.stop(Number(msg.id));
+        break;
       case "remove_link":
         links.remove(Number(msg.id));
         break;

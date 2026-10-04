@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { checkOpenRouterKey, ModelRouter } from "../src/hub/models.ts";
+import { checkOpenRouterKey, KeyRejectedError, ModelRouter } from "../src/hub/models.ts";
 
 function tmpSettings(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "scruff-keys-"));
@@ -145,4 +145,29 @@ test("OpenRouter key check sends the key as a Bearer token to /auth/key", async 
   await checkOpenRouterKey("sk-or-v1-realkey123", stub);
   assert.equal(gotUrl, "https://openrouter.ai/api/v1/auth/key");
   assert.equal(gotAuth, "Bearer sk-or-v1-realkey123");
+});
+
+test("OpenRouter rejection is a KeyRejectedError so status() can tell it apart", async () => {
+  const denied = { status: 401, ok: false } as Response;
+  let err: unknown;
+  try {
+    await checkOpenRouterKey("sk-or-v1-x", stubFetch(denied));
+  } catch (e) {
+    err = e;
+  }
+  assert.ok(err instanceof KeyRejectedError);
+});
+
+test("status() marks OpenRouter not-ready when its saved key is rejected", async () => {
+  const settings = tmpSettings();
+  fs.writeFileSync(
+    path.join(path.dirname(settings), "keys.json"),
+    JSON.stringify({ openrouter: "sk-or-v1-boguskey123" }),
+  );
+  const denied = { status: 401, ok: false } as Response;
+  const router = new ModelRouter({}, settings, "medium", stubFetch(denied));
+  const or = (await router.status()).find((p) => p.id === "openrouter")!;
+  // A rejected key must surface the paste-a-key form, not a fake "ready".
+  assert.equal(or.ready, false);
+  assert.match(or.detail, /rejected/);
 });

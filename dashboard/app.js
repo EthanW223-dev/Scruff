@@ -1028,6 +1028,20 @@ function buildProviderPanel(panel, p) {
       forget.addEventListener("click", () => send({ type: "set_provider_key", provider: p.id, key: null }));
       actions.append(forget);
     }
+    if (p.keyUrl) {
+      // A working key can still be the wrong key (or an env key shadowing the
+      // dashboard). Always offer a way to paste a replacement.
+      const change = el("button", "link", "Use a different key");
+      change.type = "button";
+      change.addEventListener("click", () => {
+        panel.replaceChildren();
+        panel.append(connectHead(p.label, meta.logo, p.ready ? ["ready", "on"] : ["not ready", "warn"]));
+        if (p.id === "claude") panel.append(claudeSubscriptionDetails());
+        buildKeyForm(panel, p, meta);
+        panel.querySelector("input")?.focus({ preventScroll: true });
+      });
+      actions.append(change);
+    }
     panel.append(row, actions);
     return;
   }
@@ -1056,7 +1070,15 @@ function buildProviderPanel(panel, p) {
   }
 
   // Cloud provider without a key: guided connect instead of a bare key field.
-  // Key links come from the hub so the dashboard never hardcodes providers.
+  buildKeyForm(panel, p, meta);
+}
+
+/**
+ * The guided key-entry form: link to get a key, paste field, Connect button.
+ * Used for keyless cloud providers and when replacing an existing key.
+ * Key links come from the hub so the dashboard never hardcodes providers.
+ */
+function buildKeyForm(panel, p, meta) {
   const keyUrl = p.keyUrl ?? meta.keyUrl;
   const keyKind = p.keyKind ?? meta.keyKind ?? p.label;
   const steps = el("ol", "connect-steps");

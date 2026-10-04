@@ -130,6 +130,13 @@ function hostLabel(baseURL: string): string {
 }
 
 /**
+ * Thrown when a provider says the API key itself is bad, as opposed to the
+ * provider being unreachable. Lets callers tell "paste a valid key" apart from
+ * "try again later".
+ */
+export class KeyRejectedError extends Error {}
+
+/**
  * OpenRouter serves GET /models without checking the key at all, so a models-list
  * "check" would accept any garbage string and save it as "Connected". /auth/key
  * actually verifies the key: 200 means it's good, 401/403 means it was rejected.
@@ -141,7 +148,7 @@ export async function checkOpenRouterKey(key: string, fetchFn: typeof fetch = fe
     signal: AbortSignal.timeout(10000),
   });
   if (res.status === 401 || res.status === 403) {
-    throw new Error("That key was rejected. Double-check you copied the whole thing.");
+    throw new KeyRejectedError("That key was rejected. Double-check you copied the whole thing.");
   }
   if (!res.ok) throw new Error(`OpenRouter answered ${res.status}; try again in a bit.`);
 }
@@ -170,6 +177,7 @@ export class ModelRouter {
     private env: NodeJS.ProcessEnv,
     private settingsFile: string,
     private effort: Effort,
+    private fetchFn: typeof fetch = fetch,
   ) {
     this.keysFile = path.join(path.dirname(settingsFile), "keys.json");
     this.loadKeys();
@@ -322,6 +330,19 @@ export class ModelRouter {
           return { ...base, ready: false, detail: def.missing, models: def.id === "claude" ? CLAUDE_MODELS : [] };
         }
         try {
+          // OpenRouter's model list is public, so a working probe says nothing about
+          // the key. Verify the key itself, or a bad saved/env key would show "ready"
+          // with no way to replace it from the dashboard.
+          if (def.id === "openrouter" && def.apiKey) {
+            try {
+              await checkOpenRouterKey(def.apiKey, this.fetchFn);
+            } catch (err) {
+              if (err instanceof KeyRejectedError) {
+                return { ...base, ready: false, detail: "That API key was rejected — paste a valid key below", models: [] };
+              }
+              // Unreachable: fall through to the normal probe rather than crying wolf.
+            }
+          }
           const models = await this.models(def.id);
           const where = def.baseURL ? new URL(def.baseURL).host : "api.anthropic.com";
           if (!models.length && (def.id === "ollama" || def.id === "lmstudio")) {
@@ -423,7 +444,7 @@ export class ModelRouter {
       if (id === "claude") {
         await listClaudeModels(new Anthropic({ apiKey: key, timeout: 10000, maxRetries: 0 }));
       } else if (id === "openrouter") {
-        await checkOpenRouterKey(key);
+        await checkOpenRouterKey(key, this.fetchFn);
       } else {
         const baseURL =
           id === "custom"

@@ -68,6 +68,98 @@ function startHudWindow({ bridge, toolLabel, speak }) {
   button.addEventListener("mouseenter", () => orb.setHover(true));
   button.addEventListener("mouseleave", () => orb.setHover(false));
 
+  // The mod builder (a background helper the chat AI starts): a hammering tile next to the orb
+  // while it works, and for a little while after. Clicking it shows its steps in the tray.
+  const buildBtn = $("hud-build");
+  const buildView = $("hud-buildview");
+  const buildOrb = buildBtn ? new AgentOrb($("hud-build-sprite"), { size: 32, dark: true }) : null;
+  buildOrb?.setState("building");
+  let build = null; // the hub's latest build
+  let buildOpen = false; // its steps are showing in the tray
+  const BUILD_LINGER_MS = 120_000; // a finished build's tile stays this long
+  let lingerTimer = 0;
+  function showBuild() {
+    if (!buildBtn) return;
+    const recent = build && (build.status === "running" || Date.now() - (build.endedAt ?? 0) < BUILD_LINGER_MS);
+    buildBtn.hidden = !recent;
+    // While the tile shows, check back now and then: a finished build's tile goes away by itself.
+    if (recent && !lingerTimer) lingerTimer = setInterval(showBuild, 15_000);
+    if (!recent && lingerTimer) {
+      clearInterval(lingerTimer);
+      lingerTimer = 0;
+    }
+    if (!recent && buildOpen) closeBuild();
+    if (!build) return;
+    buildOrb.setState(build.status === "running" ? "building" : build.status === "done" ? "breathing" : "connecting");
+    buildBtn.title = `Mod builder: ${build.request} (${build.status === "running" ? "building, click to see what it's doing" : build.status})`;
+    if (buildOpen) fillBuild();
+  }
+  function fillBuild() {
+    if (!buildView || !build) return;
+    const label = { running: "building", done: "built", failed: "problem", stopped: "stopped" }[build.status] ?? build.status;
+    const head = document.createElement("div");
+    head.className = "bv-head";
+    const who = document.createElement("span");
+    who.textContent = `Mod builder · ${build.game}`;
+    const pill = document.createElement("span");
+    pill.className = `pill ${build.status === "running" ? "on" : build.status === "failed" ? "warn" : ""}`;
+    pill.textContent = label;
+    head.append(who, pill);
+    const req = document.createElement("div");
+    req.className = "bv-req";
+    req.textContent = build.request;
+    const list = document.createElement("ol");
+    for (const step of (build.steps ?? []).slice(-6)) {
+      const li = document.createElement("li");
+      li.className = step.kind;
+      li.textContent = step.kind === "say" ? step.text : `› ${step.text}`;
+      list.append(li);
+    }
+    const parts = [head, req, list];
+    if (build.status === "running") {
+      const stop = document.createElement("button");
+      stop.type = "button";
+      stop.className = "danger";
+      stop.textContent = "Stop";
+      stop.addEventListener("click", (e) => {
+        e.stopPropagation();
+        window.dispatchEvent(new CustomEvent("scruff:send", { detail: { type: "workshop_stop", id: build.id } }));
+      });
+      parts.push(stop);
+    } else if (build.summary || build.error) {
+      const end = document.createElement("div");
+      end.className = `bv-end ${build.error ? "warn" : ""}`;
+      end.textContent = build.error ?? build.summary;
+      parts.push(end);
+    }
+    buildView.replaceChildren(...parts);
+  }
+  function openBuild() {
+    if (!buildView) return;
+    if (replyOpen) closeReply();
+    buildOpen = true;
+    wake();
+    unit.classList.add("expanded");
+    buildView.hidden = false;
+    fillBuild();
+  }
+  function closeBuild() {
+    buildOpen = false;
+    if (buildView) buildView.hidden = true;
+    if (!replyOpen) unit.classList.remove("expanded");
+  }
+  buildBtn?.addEventListener("click", (e) => {
+    // Not the tray's own click (that opens the panel), and not the end of a drag.
+    e.stopPropagation();
+    if (suppressClick) {
+      suppressClick = false;
+      return;
+    }
+    if (buildOpen) closeBuild();
+    else openBuild();
+  });
+  buildView?.addEventListener("click", (e) => e.stopPropagation());
+
   let game = null;
   let busy = false;
   let working = "";
@@ -104,7 +196,7 @@ function startHudWindow({ bridge, toolLabel, speak }) {
     tuckTimer = setTimeout(tuck, TUCK_MS);
   }
   function tuck() {
-    if (hovering || busy || listening || replyOpen || voice) return;
+    if (hovering || busy || listening || replyOpen || voice || buildOpen) return;
     unit.classList.add("compact");
   }
   unit.addEventListener("mouseenter", () => {
@@ -213,6 +305,7 @@ function startHudWindow({ bridge, toolLabel, speak }) {
 
   /** The orb becomes the text: the unit expands to orb + reply as one piece. */
   function openReply() {
+    if (buildOpen) closeBuild();
     wake();
     replyOpen = true;
     clearTimeout(collapseTimer);
@@ -339,6 +432,12 @@ function startHudWindow({ bridge, toolLabel, speak }) {
       // color once the game has a theme of its own. (The page's --accent is
       // already handled by applyTheme in app.js; this is the canvas ink.)
       if (msg.theme) orb.setColor(msg.theme.source === "default" ? null : msg.theme.accent);
+      if (msg.theme) buildOrb?.setColor(msg.theme.source === "default" ? null : msg.theme.accent);
+      // The mod builder: a new build brings the tray out; its tile shows while it works.
+      const nextBuild = msg.workshop?.job ?? null;
+      if (nextBuild && nextBuild.status === "running" && (!build || build.id !== nextBuild.id)) wake();
+      build = nextBuild;
+      showBuild();
       // A game's own theme says which corner its HUD leaves free: the tray goes there
       // (unless the player has dragged it somewhere).
       const corner = msg.theme && msg.theme.source !== "default" ? msg.theme.corner : null;
@@ -382,6 +481,9 @@ function startHudWindow({ bridge, toolLabel, speak }) {
   let suppressClick = false;
   const HUD_POS_KEY = "telos-hud-pos-v2"; // pre-separate-window spot; migrated once, then retired
   unit.addEventListener("pointerdown", async (e) => {
+    // The build tile and its steps are buttons of their own: capturing the pointer for a drag
+    // would hand their click to the tray (which opens the panel).
+    if (e.target.closest?.("#hud-build, #hud-buildview")) return;
     drag = { x0: e.clientX, y0: e.clientY, moved: false };
     try {
       const b = await bridge.getHudBounds?.();

@@ -58,7 +58,7 @@ const RPGMAKER_READY = "The RPG Maker bridge is connected: use the rpgmaker__ to
 const NUMBERS_NOTE =
   "Only number changes work live on this engine (memory editing). Colors, models, spawning, new " +
   "content and mechanics need a real mod: modding_guide has the route for this engine, and build_mod " +
-  "has the Workshop build it (after the player approves). ";
+  "starts your mod builder on it in the background. ";
 
 /** Engine strings come from src/games/profile.ts. */
 export function engineModSupport(engine: string, bridgeConnected: boolean, unrealConnected = false): EngineModSupport {

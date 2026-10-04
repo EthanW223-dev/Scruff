@@ -529,31 +529,41 @@ textarea:focus { box-shadow: 3px 3px 0 var(--accent); }
 .market-more { align-self: center; }
 .market-note { margin-top: 2px; }
 
-/* The Workshop: a mod request, then the build's live log. */
-.workshop { display: flex; flex-direction: column; gap: 9px; font-size: 13px; }
-.ws-form { display: flex; flex-direction: column; gap: 9px; }
-.ws-form[hidden] { display: none; }
-.workshop textarea { flex: none; min-height: 62px; max-height: 140px; padding: 8px 10px; overflow-y: auto; resize: vertical; font: 13px/1.45 var(--font); }
-.workshop textarea:disabled { opacity: 0.55; }
+/* The mod builder: a card in the chat, a dialog with its steps, a tile in the tray. */
 .ws-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .ws-row .primary, .ws-row .danger { height: 32px; padding: 0 12px; font-size: 19px; }
-.ws-row label { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
-.ws-note { margin: 0; color: var(--muted); font-size: 11.5px; line-height: 1.45; }
-.ws-job { display: flex; flex-direction: column; gap: 7px; padding: 9px 10px; border: 1px solid var(--soft); background: var(--surface); }
-.ws-job-head { display: flex; align-items: center; gap: 8px; font: 12px var(--mono); color: var(--muted); }
-.ws-job-head .pill { margin-left: auto; }
-.ws-job-head .pill.busy::after { content: "_"; animation: blink 0.8s steps(2) infinite; }
-.ws-request { font-weight: 600; line-height: 1.4; }
-.ws-log { margin: 0; padding: 7px 8px; max-height: 190px; overflow: auto; list-style: none; background: var(--bg); border: 1px dashed var(--soft); font: 11.5px/1.5 var(--mono); }
-.ws-log li { overflow-wrap: anywhere; }
-.ws-log li.say { color: var(--text); }
-.ws-log li.tool { color: var(--muted); }
-.ws-summary { margin: 0; line-height: 1.5; white-space: pre-wrap; }
-.ws-error { margin: 0; color: var(--danger); line-height: 1.45; }
-.ws-folder { font: 11px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
-.ws-history { margin: 0; padding: 0; list-style: none; font: 11.5px var(--mono); color: var(--muted); }
-.ws-history li { display: flex; gap: 8px; padding: 4px 0; border-top: 1px dashed var(--soft); }
-.ws-history li span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg.subagent {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  max-width: 560px;
+  padding: 9px 12px 9px 9px;
+  border: 1px solid var(--soft);
+  background: var(--surface);
+  cursor: pointer;
+  transition: transform .12s steps(2), box-shadow .12s steps(2);
+}
+.msg.subagent:hover, .msg.subagent:focus-visible { transform: translate(-2px, -2px); box-shadow: 4px 4px 0 var(--text); border-color: var(--line); outline: none; }
+.msg.subagent.running { border-color: var(--accent); }
+.sub-tile, .build-tile { display: block; width: 40px; height: 40px; border: 1px solid var(--soft); background: var(--bg); }
+.sub-tile canvas, .build-tile canvas { display: block; width: 32px; height: 32px; margin: 3px; image-rendering: pixelated; }
+.sub-title { display: flex; align-items: center; gap: 8px; font: 11.5px var(--mono); color: var(--muted); }
+.sub-title .pill.busy::after, .build-head .pill.busy::after { content: "_"; animation: blink 0.8s steps(2) infinite; }
+.sub-req { margin-top: 2px; font-weight: 650; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sub-last { margin-top: 2px; font: 11.5px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sub-open { font: 18px/1 var(--pixel); color: var(--muted); letter-spacing: 0.5px; }
+.build-dialog { width: min(720px, calc(100vw - 32px)); }
+.build-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+.build-title { font-weight: 700; line-height: 1.35; }
+.build-log { margin: 0; padding: 8px 10px; min-height: 120px; max-height: 46vh; overflow: auto; list-style: none; background: var(--bg); border: 1px dashed var(--soft); font: 12px/1.55 var(--mono); }
+.build-log li { overflow-wrap: anywhere; }
+.build-log li.say { color: var(--text); margin: 4px 0; }
+.build-log li.tool { color: var(--muted); }
+.build-log li.empty { color: var(--muted); font-style: italic; }
+.build-summary { margin: 0; line-height: 1.5; white-space: pre-wrap; }
+.build-error { margin: 0; color: var(--danger); line-height: 1.45; }
+.build-folder { font: 11px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
 
 /* ---------- hotkey strip ---------- */
 .dock {
@@ -882,8 +892,8 @@ body.hud-only[data-corner^="bottom"] .hud { min-height: 100vh; }
 .hud-unit {
   pointer-events: auto;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  grid-template-areas: "bar bar" "orb info" "reply reply";
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "bar bar bar" "orb info build" "reply reply reply";
   width: 270px;
   max-width: calc(100vw - 32px);
   background: var(--bg);
@@ -932,9 +942,26 @@ body.hud-only[data-corner^="bottom"] .hud { min-height: 100vh; }
 @keyframes hud-reply-in { from { opacity: 0; transform: translateY(-6px); } }
 
 /* Tucked away: just the orb in a framed tile, in its corner. */
-.hud-unit.compact { width: 62px; grid-template-columns: auto; grid-template-areas: "orb"; }
+.hud-unit.compact { width: max-content; grid-template-columns: auto auto; grid-template-areas: "orb build"; }
 .hud-unit.compact .hud-bar, .hud-unit.compact .hud-info { display: none; }
 .hud-unit.compact .hud-button { margin: 5px; }
+/* The mod builder at work: a hammering tile next to the orb (it stays when the tray tucks away). */
+.hud-build { grid-area: build; align-self: center; width: 40px; height: 40px; margin: 0 8px 0 0; padding: 0; border: 1px solid var(--accent); background: var(--surface); cursor: pointer; }
+.hud-build:hover { border-color: var(--line); }
+.hud-build:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.hud-build canvas { display: block; width: 32px; height: 32px; margin: 3px; image-rendering: pixelated; }
+.hud-unit.compact .hud-build { margin: 5px 5px 5px 0; }
+.hud-buildview { display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
+.hud-buildview .bv-head { display: flex; align-items: center; gap: 8px; font: 11px var(--mono); color: var(--muted); }
+.hud-buildview .bv-head .pill { margin-left: auto; }
+.hud-buildview .bv-req { font-weight: 650; line-height: 1.35; }
+.hud-buildview ol { margin: 0; padding: 0; list-style: none; font: 11.5px/1.5 var(--mono); color: var(--muted); }
+.hud-buildview ol li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hud-buildview ol li.say { color: var(--text); white-space: normal; }
+.hud-buildview .bv-end { line-height: 1.45; }
+.hud-buildview .bv-end.warn { color: var(--danger); }
+.hud-buildview .danger { align-self: flex-start; height: 28px; padding: 0 10px; font-size: 17px; }
+.hud-buildview[hidden] { display: none; }
 body[data-corner$="right"] .hud-unit { justify-self: end; }
 
 /* Busy (tools / thinking): marching ants run round the orb's tile, like an old paint

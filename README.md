@@ -135,7 +135,7 @@ What works depends on the engine (the status note in chat always says which tier
   levels, switches and variables by name, teleporting, walking through walls, random
   encounters.
 - **Everything else (Godot, GameMaker, Source, ...) — numbers only, live.** Colors, models,
-  spawning and new content there need a real mod: see the Workshop below.
+  spawning and new content there need a real mod: see the mod builder below.
 
 **remove** in the same place takes out exactly what Telos added. It works for Unity games built
 with Mono (the Game files panel says *Unity (Mono)*); IL2CPP Unity games and other engines get
@@ -161,24 +161,27 @@ mods, most downloaded first. Search, then press **Add**.
   marketplace, and you press Add. It can't install mods itself.
 - Mods are other players' code: add ones you trust. Telos only downloads from Thunderstore.
 
-## Build real mods: the Workshop (universal-modder)
+## Build real mods: the mod builder (universal-modder)
 
 Live changes only go so far. For **new content** (weapons, items, enemies, bosses, mechanics,
-UI, art, sounds) Telos has a **Workshop**: your chat AI builds a real mod for the game you're
-playing, with [universal-modder](https://github.com/rehan-remade/universal-modder).
+UI, art, sounds), ask Telos to make it a mod: your chat AI starts its **mod builder**, which
+builds a real mod for the game you're playing with
+[universal-modder](https://github.com/rehan-remade/universal-modder).
 universal-modder is a toolkit for AI agents that mod games: engine recon, reverse engineering,
 generated art, in-game testing, and a knowledge base of how other agents modded specific games.
 
-> "Add a homing missile launcher to Terraria."
+> "Make me a mod that adds a homing missile launcher to Terraria."
 > "A boss that spawns at night and drops a jetpack."
 > "Now make the missiles faster." (it carries on from the last build for that game)
 
-- Ask in chat, or type it in the *Workshop* window of the panel and press **Build**. When the AI
-  suggests a build, it waits in the Workshop window until you press Build: building means
-  running commands and editing files on your PC, in its workshop folder
-  (`.scruff/workshop/<game>`) and the game's folders, and it can take a long time.
-- The window shows each step live (`$ dotnet build …`, `edit Weapons.cs`, …) with a **Stop**
-  button, and the overlay tells you when it's done and how to load the mod.
+- Ask in chat and the build starts right away, in the background, like a subagent. You can
+  keep playing and keep chatting while it works. It runs commands and edits files on your PC,
+  in its workshop folder (`.scruff/workshop/<game>`) and the game's folders, and it can take a
+  long time.
+- A **hammer** shows while it works: a card in the chat and a tile next to the orb in the in-game
+  tray. Click either to see what it's doing, step by step (`$ dotnet build …`, `edit
+  Weapons.cs`, …), with a **Stop** button. Telos tells you when it's done and how to load the mod.
+  One build runs at a time.
 - It builds with the AI you picked in the AI menu. Claude Code builds as itself, with
   universal-modder loaded as a plugin. Any other AI (a model on your PC, Claude with an API key,
   an OpenAI-compatible service) works through Telos's builder: it runs commands (PowerShell on
@@ -190,8 +193,8 @@ generated art, in-game testing, and a knowledge base of how other agents modded 
 - Every AI in Telos, local models included, can read universal-modder's engine playbooks and
   field notes with the `modding_guide` tool, to answer "can this game be modded, and how".
 - Sprites, 3D models and sounds come from [fal](https://fal.ai): put `FAL_KEY` in `.env` to let
-  the Workshop use it. Its `um` CLI needs Python 3.10+ (and `uv`, recommended); without them the
-  Workshop still builds, just without those helpers.
+  the mod builder use it. Its `um` CLI needs Python 3.10+ (and `uv`, recommended); without them
+  the mod builder still builds, just without those helpers.
 - universal-modder is bundled in `vendor/universal-modder` (MIT, by Rehan and contributors);
   `npm run update:modder` updates it from GitHub.
 
@@ -328,9 +331,9 @@ in raw memory like a real game, and also connects to Telos as a game adapter. As
   games. `src/games/rpgmaker.ts` and `src/games/ue4ss.ts` install them, and `src/hub/ue4ssrelay.ts`
   connects to the UE4SS mod through files, since UE4SS's Lua has no network access.
 - `src/hub/modder.ts` reads universal-modder's playbooks and field notes (`modding_guide`),
-  `src/hub/workshop.ts` runs Workshop builds (`buildtools.ts` is the chat AI's builder tools), and
-  `vendor/universal-modder/` is the bundled toolkit. `src/hub/marketplace.ts` is the Thunderstore
-  marketplace.
+  `src/hub/workshop.ts` runs the mod builder (`buildtools.ts` is its tools when the chat AI
+  isn't Claude Code), and `vendor/universal-modder/` is the bundled toolkit.
+  `src/hub/marketplace.ts` is the Thunderstore marketplace.
 - `src/hub/links.ts` is game links; `src/hub/bridges.ts` works out which connected bridge belongs
   to the attached game.
 - `src/memory/` scans and edits another process's memory: `windows.ts` (Win32 via koffi),
@@ -387,8 +390,8 @@ In `.env` (all optional):
   not yet inside real games. The same goes for model loading in Unity: the file reading is
   tested, but building the mesh in a real game isn't yet. Loaded models are static (no
   animation).
-- The Workshop is tested with the real Claude Code CLI and with a scripted model against stand-ins,
-  not yet on a real mod build. How far a build gets depends on the AI building it.
+- The mod builder is tested with the real Claude Code CLI and with a scripted model against
+  stand-ins, not yet on a real mod build. How far a build gets depends on the AI building it.
 - The marketplace is tested against Thunderstore itself (Schedule I and Lethal Company mods
   installed into stand-in game folders), not yet inside a running game.
 - Game links on memory values stop when that game closes. Find the value again and remake the

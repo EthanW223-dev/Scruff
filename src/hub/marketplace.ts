@@ -407,7 +407,7 @@ export class Marketplace extends EventEmitter {
       if (!c) {
         this.results = [];
         this.count = 0;
-        this.error = `${p.name} has no community on Thunderstore yet. Pick the game from the list if it's there under another name, or have the Workshop build a mod.`;
+        this.error = `${p.name} has no community on Thunderstore yet. Pick the game from the list if it's there under another name, or ask Telos to build a mod.`;
         return [];
       }
       this.query = query.trim();
@@ -728,7 +728,7 @@ export function marketplaceTools(market: Marketplace, profile: () => GameProfile
         "Find other players' ready-made mods for the attached game on Thunderstore (the community mod store for Unity " +
         "games), most downloaded first, and show them in the overlay's Marketplace window. The player adds one with its " +
         "Add button (Telos installs it with everything it needs); you can't install mods yourself. Empty query: the most " +
-        "popular mods. Prefer an existing mod over building one in the Workshop.",
+        "popular mods. Prefer an existing mod over building one with build_mod.",
       input: z.object({ query: z.string().optional().describe("What the mod should do, in a few words: 'minimap', 'more money', 'bigger storage'") }),
       readOnly: true,
       async run({ query }) {

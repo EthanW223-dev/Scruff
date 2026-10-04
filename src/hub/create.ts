@@ -129,6 +129,15 @@ export async function createHub(opts: HubOptions) {
     }
   };
 
+  /** The mod builder, for the chat AI: working on what, or how the last build ended. */
+  const buildNote = (): string => {
+    const j = workshop.latest;
+    if (!j) return "";
+    if (j.status === "running") return `Your mod builder is working on "${j.request}" for ${j.game} (${j.steps.length} steps so far).`;
+    const how = j.status === "done" ? `finished: ${(j.summary ?? "").slice(0, 300)}` : j.status === "failed" ? `stopped with a problem: ${j.error ?? ""}` : "was stopped by the player";
+    return `Your mod builder's last build ("${j.request}" for ${j.game}) ${how}`;
+  };
+
   const statusNote = (): string => {
     const game = games.state();
     const attached = game.attached;
@@ -143,6 +152,7 @@ export async function createHub(opts: HubOptions) {
       attached ? (themes.hasSaved() ? "The overlay is already styled for this game." : "The overlay isn't styled for this game yet.") : "",
       adapters.describe(),
       links.describe(),
+      buildNote(),
       attached && games.profile
         ? `Mod support: ${engineModSupport(games.profile.engine, connectedBridge(games.profile, adapters) !== null).note}`
         : "",

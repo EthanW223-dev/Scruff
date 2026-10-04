@@ -22,7 +22,8 @@ const { ORB_STATES, GRID, parseTint, AgentOrb } = (await import("../dashboard/or
   };
 };
 
-// The HUD icon: a 16×16 pixel sprite of the spark, one stepped animation per agent state.
+// The HUD icon: a 16×16 pixel sprite of the spark, one stepped animation per agent state
+// (and the mod builder's hammer).
 
 /** A canvas whose 2d context records every fill. Node has no canvas or rAF. */
 function fakeCanvas() {
@@ -44,12 +45,12 @@ function fakeCanvas() {
 
 const lit = (f: Float32Array) => [...f].filter((v) => v > 0.1).length;
 
-test("all nine states draw an animated sprite inside the grid", () => {
+test("all ten states draw an animated sprite inside the grid", () => {
   const { canvas } = fakeCanvas();
   const orb = new AgentOrb(canvas, { size: 64 });
   try {
     assert.equal(canvas.width, GRID, "the canvas is the sprite's own size; CSS scales it up crisp");
-    assert.equal(ORB_STATES.length, 9);
+    assert.equal(ORB_STATES.length, 10);
     for (const state of ORB_STATES) {
       const frames = [0, 0.4, 0.9, 1.7, 2.6].map((t) => Array.from(orb.frame(state, t, new Float32Array(GRID * GRID))));
       for (const f of frames) {

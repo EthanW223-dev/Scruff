@@ -68,7 +68,7 @@ const settled = (job: WorkshopJob, timeout = 20_000) =>
   new Promise<void>((resolve, reject) => {
     const start = Date.now();
     const iv = setInterval(() => {
-      if (job.status !== "running" && job.status !== "proposed") {
+      if (job.status !== "running") {
         clearInterval(iv);
         resolve();
       } else if (Date.now() - start > timeout) {
@@ -118,16 +118,11 @@ test("modding_guide: the attached game's engine playbook, its field notes, searc
   assert.match(String(await tool.run({}, ctx)), /No game attached\. Engine playbooks: .*unity.*unreal/);
 });
 
-test("the AI can only propose a build; it starts when the player says so, with universal-modder loaded", async () => {
+test("asking for a mod starts the builder right away, with universal-modder loaded", async () => {
   const { ws, profile, notices, calls } = workshop();
-  const job = ws.propose(profile, "Add a homing missile launcher", { by: "ai" });
-  assert.equal(job.status, "proposed");
-  assert.match(notices[0], /wants to build a mod for Test Game.*Workshop window/);
-  await new Promise((r) => setTimeout(r, 200));
-  assert.equal(calls().length, 0, "nothing runs before the player's OK");
-
-  ws.approve(job.id);
+  const job = ws.start(profile, "Add a homing missile launcher");
   assert.equal(job.status, "running");
+  assert.match(notices[0], /Building "Add a homing missile launcher" for Test Game in the background\. Click the hammer to watch/);
   await settled(job);
   assert.equal(job.status, "done", job.error);
   assert.match(job.summary ?? "", /Built MissileLauncher/);
@@ -135,7 +130,7 @@ test("the AI can only propose a build; it starts when the player says so, with u
     job.steps.filter((s) => s.kind === "tool").map((s) => s.text),
     ["skill universal-modder:mod-any-game", '$ um scan "Test Game"', "write Plugin.cs", "$ dotnet build MissileLauncher -c Release", "telos look at screen"],
   );
-  assert.ok(notices.some((n) => /the Test Game mod is built\. Built MissileLauncher/.test(n)));
+  assert.ok(notices.some((n) => /the Test Game mod is built\. Built MissileLauncher/i.test(n)));
   assert.ok(fs.existsSync(path.join(job.folder, `telos-build-${job.id}.log`)), "a log of the build next to it");
 
   const [call] = calls();
@@ -145,7 +140,7 @@ test("the AI can only propose a build; it starts when the player says so, with u
   assert.ok(call.args.includes("--strict-mcp-config"));
   const addDirs = call.args.flatMap((a: string, i: number) => (call.args[i - 1] === "--add-dir" ? [a] : []));
   assert.ok(addDirs.includes(profile.installDir), "it can work in the game's folder");
-  assert.match(argAfter(call.args, "--append-system-prompt") ?? "", /mod workshop of Telos.*approved this build/);
+  assert.match(argAfter(call.args, "--append-system-prompt") ?? "", /mod builder of Telos, the in-game modding overlay, working in the background/);
   const config = JSON.parse(fs.readFileSync(argAfter(call.args, "--mcp-config")!, "utf8"));
   assert.deepEqual(config.mcpServers.telos.headers, { "x-telos-chat": "workshop" });
   assert.equal(call.cwd, job.folder);
@@ -154,50 +149,47 @@ test("the AI can only propose a build; it starts when the player says so, with u
   assert.match(prompt, /Game: Test Game \(Unity \(Mono\)\)/);
 
   // "Make it bigger" carries on in the same Claude Code session.
-  const more = ws.propose(profile, "Make the missiles faster", { by: "player", continues: true });
-  assert.equal(more.status, "running", "the player's own request is their go-ahead");
+  const more = ws.start(profile, "Make the missiles faster", { continues: true });
   await settled(more);
   assert.match(argAfter(calls()[1].args, "--resume") ?? "", /^sess-\d+$/);
   assert.match(JSON.parse(calls()[1].stdin).message.content, /continues your earlier work/);
 });
 
-test("one build at a time, a new proposal replaces a waiting one, online games are refused", async () => {
+test("one build at a time, Stop ends it, online games are refused", async () => {
   const { ws, profile } = workshop("ok", 400);
-  const first = ws.propose(profile, "mod one", { by: "ai" });
-  const second = ws.propose(profile, "mod two", { by: "ai" });
-  assert.equal(first.status, "declined");
-  assert.equal(ws.current, second);
-  ws.approve(second.id);
-  assert.throws(() => ws.propose(profile, "mod three", { by: "player" }), /still building "mod two"/);
-  ws.stop(second.id);
-  await settled(second);
-  assert.equal(second.status, "stopped");
+  const job = ws.start(profile, "mod one");
+  assert.throws(() => ws.start(profile, "mod two"), /Still building "mod one"/);
+  ws.stop(job.id);
+  await settled(job);
+  assert.equal(job.status, "stopped");
 
   const online = game("Grand Theft Auto V", "GTA5.exe").profile;
-  assert.throws(() => ws.propose(online, "flying cars", { by: "player" }), /online game with anti-cheat/);
-  assert.throws(() => ws.propose(profile, "   ", { by: "player" }), /Say what the mod should do/);
+  assert.throws(() => ws.start(online, "flying cars"), /online game with anti-cheat/);
+  assert.throws(() => ws.start(profile, "   "), /Say what the mod should do/);
 });
 
 test("a failed build says why", async () => {
   const { ws, profile, notices } = workshop("build-fails");
-  const job = ws.propose(profile, "a nuke", { by: "player" });
+  const job = ws.start(profile, "a nuke");
   await settled(job);
   assert.equal(job.status, "failed");
   assert.match(job.error ?? "", /dotnet: command not found/);
   assert.ok(notices.some((n) => /stopped with a problem/.test(n)));
 });
 
-test("the chat AI's Workshop tools", async () => {
+test("the chat AI's builder tools: start, check, stop", async () => {
   const { ws, profile } = workshop("ok", 300);
   let attached: any = null;
   const tools = Object.fromEntries(workshopTools(ws, () => attached).map((t) => [t.name, t]));
   await assert.rejects(async () => tools.build_mod.run({ request: "a sword" }, ctx), /Attach to the game first/);
   attached = profile;
-  const proposed = JSON.parse(String(await tools.build_mod.run({ request: "a laser sword" }, ctx)));
-  assert.equal(proposed.proposed.status, "proposed");
-  assert.match(proposed.next, /press Build in the Workshop window/);
-  assert.match(String(await tools.workshop_status.run({}, ctx)), /"status": "proposed"/);
-  assert.match(String(await tools.stop_mod_build.run({}, ctx)), /Dropped the proposed build/);
+  const started = JSON.parse(String(await tools.build_mod.run({ request: "a laser sword" }, ctx)));
+  assert.equal(started.started.status, "running");
+  assert.match(started.next, /click the hammer/);
+  assert.match(String(await tools.workshop_status.run({}, ctx)), /"status": "running"/);
+  assert.match(String(await tools.stop_mod_build.run({}, ctx)), /Stopping the build/);
+  await settled(ws.latest!);
+  assert.equal(ws.latest!.status, "stopped");
   assert.match(String(await tools.stop_mod_build.run({}, ctx)), /Nothing is being built/);
 });
 
@@ -217,7 +209,7 @@ async function freePort(): Promise<number> {
   return p;
 }
 
-test("in the hub: the overlay's Build button runs it, its state reaches the overlay, and its tool calls stay out of the chat", async () => {
+test("in the hub: the chat AI's build_mod starts it, its state reaches the overlay, the status note follows it, and its tool calls stay out of the chat", async () => {
   const { dir, profile } = game();
   const port = await freePort();
   const brain = { model: "unused", createStream: () => { throw new Error("unused"); } } as any;
@@ -238,13 +230,14 @@ test("in the hub: the overlay's Build button runs it, its state reaches the over
       if (m.type === "state") states.push(m);
     });
     await new Promise((r) => dash.once("open", r));
-    dash.send(JSON.stringify({ type: "workshop_build", request: "Add a homing missile launcher" }));
+    await (names.get("build_mod") as any).run({ request: "Add a homing missile launcher" }, ctx);
     const deadline = Date.now() + 20_000;
     while (!states.some((s) => s.workshop?.job?.status === "done") && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
     const done = states.find((s) => s.workshop?.job?.status === "done");
     assert.ok(done, `states: ${JSON.stringify(states.map((s) => s.workshop?.job?.status))}`);
     assert.equal(done.workshop.available, true);
     assert.match(done.workshop.job.summary, /Built MissileLauncher/);
+    assert.ok(states.some((st) => st.workshop?.job?.status === "running" && st.workshop.job.builder === "Claude Code"), "the overlay saw it working");
     dash.close();
 
     // MCP calls from the Workshop's builder aren't the chat's; the chat's own aren't "your Claude app".
@@ -302,7 +295,7 @@ test("with the real claude: universal-modder loads as a plugin and the builder w
     }),
   });
   try {
-    const job = ws.propose(profile, "Add a homing missile launcher", { by: "player" });
+    const job = ws.start(profile, "Add a homing missile launcher");
     await settled(job, 90_000);
     assert.equal(job.status, "done", job.error);
     assert.ok(fs.existsSync(path.join(job.folder, "built-mod.txt")), "its command ran, in the Workshop folder, without a permission prompt");
@@ -310,7 +303,7 @@ test("with the real claude: universal-modder loads as a plugin and the builder w
     assert.match(job.summary ?? "", /Built a test mod/);
     const sent = api.requests.find((r: any) => r.method === "POST" && r.body.tools);
     assert.match(JSON.stringify(sent.body), /mod-any-game/, "universal-modder's skills are offered");
-    assert.match(JSON.stringify(sent.body.system), /mod workshop of Telos/);
+    assert.match(JSON.stringify(sent.body.system), /mod builder of Telos/);
   } finally {
     ws.close();
     api.server.close();
@@ -344,7 +337,7 @@ test("the chat AI builds with Telos's builder tools and universal-modder's loop,
     if (last.name === "write_file" && !last.isError) return { content: [toolUse("write_file", { path: outside, content: "nope" })] };
     return { content: [text("Built MissileMod in the workshop folder. Copy it into BepInEx/plugins and start the game.")] };
   });
-  const job = ws.propose(profile, "Add a homing missile launcher", { by: "player" });
+  const job = ws.start(profile, "Add a homing missile launcher");
   await settled(job);
   assert.equal(job.status, "done", job.error);
   assert.equal(job.builder, "Ollama · qwen3:8b");
@@ -361,7 +354,7 @@ test("the chat AI builds with Telos's builder tools and universal-modder's loop,
 
   const first = model.calls[0];
   const system = String(first.system);
-  assert.match(system, /mod workshop of Telos/);
+  assert.match(system, /mod builder of Telos/);
   assert.match(system, /universal-modder's loop \(mod-any-game\)[\s\S]*## The loop/);
   assert.match(system, /python -m um/);
   const names = (first.tools ?? []).map((t: any) => t.name);
@@ -369,7 +362,7 @@ test("the chat AI builds with Telos's builder tools and universal-modder's loop,
   assert.match(JSON.stringify(first.messages[0]), /Mod request from the player: Add a homing missile launcher/);
 
   // "Now make them faster" continues the same conversation.
-  const more = ws.propose(profile, "Make the missiles faster", { by: "player", continues: true });
+  const more = ws.start(profile, "Make the missiles faster", { continues: true });
   await settled(more);
   assert.equal(more.status, "done");
   const resumed = model.calls.find((c) => JSON.stringify(c.messages.at(-1)).includes("Make the missiles faster"))!;
@@ -379,14 +372,14 @@ test("the chat AI builds with Telos's builder tools and universal-modder's loop,
 
 test("the chat AI's build stops on Stop, and won't start without a working AI", async () => {
   const { ws, profile } = chatWorkshop(() => ({ content: [toolUse("run_command", { command: process.platform === "win32" ? "Start-Sleep 30" : "sleep 30" })] }));
-  const job = ws.propose(profile, "a nuke", { by: "player" });
+  const job = ws.start(profile, "a nuke");
   await new Promise((r) => setTimeout(r, 400));
   ws.stop(job.id);
   await settled(job, 10_000);
   assert.equal(job.status, "stopped");
 
   const broken = chatWorkshop(() => ({ content: [text("unused")] }), { ready: false, problem: "Ollama isn't running" });
-  const j2 = broken.ws.propose(broken.profile, "a sword", { by: "player" });
+  const j2 = broken.ws.start(broken.profile, "a sword");
   await settled(j2);
   assert.equal(j2.status, "failed");
   assert.match(j2.error ?? "", /Ollama isn't running.*AI menu/);

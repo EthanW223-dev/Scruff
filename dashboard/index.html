@@ -36,7 +36,12 @@
         <div id="hud-name" class="hud-name">Telos</div>
         <div id="hud-state" class="hud-state">Starting…</div>
       </div>
+      <!-- The mod builder, while it works: a hammering sprite. Click it to see its steps here. -->
+      <button id="hud-build" class="hud-build" type="button" hidden aria-label="Mod builder: see what it's doing" title="Mod builder: click to see what it's doing">
+        <canvas id="hud-build-sprite" class="orb-canvas"></canvas>
+      </button>
       <div id="hud-reply" class="hud-reply" hidden></div>
+      <div id="hud-buildview" class="hud-reply hud-buildview" hidden></div>
     </div>
     <div id="hud-mods" class="hud-mods"></div>
     <div id="hud-toasts" class="hud-toasts" aria-live="polite"></div>
@@ -144,11 +149,6 @@
         <div id="market-installed" class="market-installed"></div>
         <button type="button" id="market-open" class="primary market-open"><i data-icon="store"></i><span>Browse mods</span></button>
       </div>
-      <!-- The Workshop: real mods (new items, enemies, mechanics) built by Claude Code with
-           universal-modder. Nothing starts without the player pressing Build. -->
-      <div class="panel win" id="workshop-panel" hidden>
-        <div class="panel-head"><i data-icon="hammer"></i><h2>Workshop</h2><span class="stripes" aria-hidden="true"></span><span id="workshop-badge" class="badge" hidden></span></div>
-        <div id="workshop" class="workshop"></div>
       </div>
     </aside>
   </main>
@@ -176,6 +176,32 @@
       </section>
       <div id="provider-grid" class="provider-grid" role="listbox" aria-label="AI providers"></div>
       <div id="connect-panel" class="connect-panel" hidden></div>
+    </form>
+  </dialog>
+
+  <!-- The mod builder (a background helper the chat AI starts): its steps, live. -->
+  <dialog id="build-dialog" class="picker build-dialog">
+    <form method="dialog" class="picker-inner">
+      <div class="picker-head">
+        <h2><span class="term-prompt">&gt;&nbsp;mod-builder</span><span class="cursor" aria-hidden="true"></span></h2>
+        <span class="stripes" aria-hidden="true"></span>
+        <button value="close" class="icon-btn" aria-label="Close">✕</button>
+      </div>
+      <div class="build-head">
+        <span class="build-tile"><canvas id="build-sprite" class="orb-canvas"></canvas></span>
+        <div class="build-titles">
+          <div id="build-title" class="build-title"></div>
+          <div id="build-meta" class="muted small"></div>
+        </div>
+        <span id="build-pill" class="pill"></span>
+      </div>
+      <ol id="build-log" class="build-log"></ol>
+      <p id="build-summary" class="build-summary" hidden></p>
+      <p id="build-error" class="build-error" hidden></p>
+      <div class="ws-row">
+        <button type="button" id="build-stop" class="danger" hidden>Stop</button>
+        <span id="build-folder" class="build-folder"></span>
+      </div>
     </form>
   </dialog>
 

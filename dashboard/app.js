@@ -18,6 +18,7 @@ import {
 } from "./audio.js";
 import { startRecording } from "./voice.js";
 import { hydrateIcons, icon } from "./icons.js";
+import { AgentOrb } from "./orb.js";
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -80,6 +81,7 @@ function handle(msg) {
       break;
     case "history":
       $("log").querySelectorAll(".msg, .sys").forEach((n) => n.remove());
+      clearBuildCards();
       currentTurn = null;
       for (const event of msg.events) renderAgentEvent(event, true);
       updateEmpty();
@@ -357,7 +359,7 @@ function renderState() {
   );
 
   renderLinks(state.links ?? []);
-  renderWorkshop(state.workshop, game.profile ?? null);
+  renderBuilds(state.workshop);
   renderMarket(state.market, game.profile ?? null);
 
   // Scan status
@@ -716,127 +718,119 @@ $("market-pick").addEventListener("click", () => send({ type: "market_communitie
 $("market-community-filter").addEventListener("input", filterCommunities);
 $("market-community-filter").addEventListener("keydown", (e) => e.key === "Enter" && e.preventDefault());
 
-// ---------- Workshop: real mods built by the chat's AI with universal-modder ----------
+// ---------- The mod builder: a background helper the chat AI starts ----------
+// Each build shows up in the chat as a card with a hammering sprite; clicking it opens its
+// steps, live. (The in-game tray has its own hammer tile, in overlay.js.)
 
-const WS_STATUS = {
-  proposed: ["needs your OK", "warn"],
+const BUILD_STATUS = {
   running: ["building", "on busy"],
   done: ["built", "on"],
   failed: ["problem", "warn"],
   stopped: ["stopped", ""],
-  declined: ["not built", ""],
 };
-/** Who builds (the chat's AI) and what building means. */
-function wsConsent(builder) {
-  const who = builder ? `Your chat AI (${builder.label})` : "Your chat AI";
-  return (
-    `${who} builds it with universal-modder: it runs commands and edits files on this PC (in its workshop folder and the ` +
-    "game's folders) and can take a long time. Change the AI in the AI menu." +
-    (builder && !builder.ready ? ` ⚠ ${builder.problem ?? "That AI isn't set up yet"}.` : "")
-  );
-}
-let wsParts = null; // the window's pieces: the request form stays put while the rest re-renders
+const buildCards = new Map(); // job id → { card, orb, sprite state }
+let buildShown = null; // the job id the dialog shows
+let buildDialogOrb = null;
 
-/** The request form, made once so typing survives live updates. */
-function workshopForm() {
-  const form = el("div", "ws-form");
-  const input = el("textarea");
-  input.rows = 3;
-  const row = el("div", "ws-row");
-  const build = el("button", "primary", "Build");
-  build.type = "button";
-  const contLabel = el("label");
-  const cont = el("input");
-  cont.type = "checkbox";
-  contLabel.append(cont, "Build on the last mod");
-  build.addEventListener("click", () => {
-    const request = input.value.trim();
-    if (!request) return input.focus();
-    send({ type: "workshop_build", request, continue: cont.checked && !contLabel.hidden });
-    input.value = "";
-    cont.checked = false;
-  });
-  row.append(build, contLabel);
-  const consent = el("p", "ws-note", wsConsent(null));
-  form.append(input, row, consent);
-  return { form, input, build, contLabel, consent };
+/** Every build the hub knows: the live/latest one (with steps) and the earlier ones (outcome only). */
+function buildsOf(ws) {
+  if (!ws?.job) return [];
+  return [...[...(ws.history ?? [])].reverse(), ws.job];
 }
 
-function renderWorkshop(ws, profile) {
-  const panel = $("workshop-panel");
-  panel.hidden = !ws?.available;
-  if (!ws?.available) return;
-  if (!wsParts) {
-    wsParts = { jobBox: el("div"), history: el("ul", "ws-history"), ...workshopForm() };
-    $("workshop").replaceChildren(wsParts.jobBox, wsParts.form, wsParts.history);
+function clearBuildCards() {
+  for (const { orb } of buildCards.values()) orb.destroy();
+  buildCards.clear();
+}
+
+function spriteFor(job) {
+  return job.status === "running" ? "building" : job.status === "done" ? "breathing" : "connecting";
+}
+
+function renderBuilds(ws) {
+  for (const job of buildsOf(ws)) {
+    let entry = buildCards.get(job.id);
+    if (!entry) {
+      const card = el("div", "msg subagent");
+      card.tabIndex = 0;
+      card.setAttribute("role", "button");
+      const tile = el("span", "sub-tile");
+      const canvas = el("canvas");
+      tile.append(canvas);
+      const text = el("div", "sub-text");
+      card.append(tile, text, el("span", "sub-open", "view ›"));
+      card.addEventListener("click", () => openBuild(job.id));
+      card.addEventListener("keydown", (e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), openBuild(job.id)));
+      const orb = new AgentOrb(canvas, { size: 32 });
+      entry = { card, orb, text };
+      buildCards.set(job.id, entry);
+      $("log").append(card);
+      updateEmpty();
+      scrollToEnd();
+    }
+    const [label, cls] = BUILD_STATUS[job.status] ?? [job.status, ""];
+    entry.card.classList.toggle("running", job.status === "running");
+    entry.orb.setState(spriteFor(job));
+    // Only the live build animates.
+    if (job.status === "running") entry.orb.start();
+    else entry.orb.stop();
+    const title = el("div", "sub-title");
+    title.append(el("span", null, `Mod builder · ${job.game}`), el("span", `pill ${cls}`, label));
+    const last = job.steps?.at(-1);
+    const line =
+      job.status === "running"
+        ? last
+          ? last.kind === "say"
+            ? last.text
+            : `› ${last.text}`
+          : "Starting…"
+        : (job.summary ?? job.error ?? "").split(/\n/)[0];
+    entry.text.replaceChildren(title, el("div", "sub-req", job.request), el("div", "sub-last", line));
   }
-  const job = ws.job;
-  const live = job && (job.status === "running" || job.status === "proposed");
-  $("workshop-badge").hidden = !live;
-  $("workshop-badge").textContent = job?.status === "proposed" ? "!" : "…";
-
-  // The current (or latest) build.
-  const card = [];
-  if (job) {
-    const box = el("div", "ws-job");
-    const [label, cls] = WS_STATUS[job.status] ?? [job.status, ""];
-    const head = el("div", "ws-job-head");
-    head.append(el("span", null, job.builder ? `${job.game} · ${job.builder}` : job.game), el("span", `pill ${cls}`, label));
-    box.append(head, el("div", "ws-request", job.request));
-    if (job.status === "proposed") {
-      box.append(el("p", "ws-note", `The AI suggested this build. ${wsConsent(ws.builder)}`));
-      const row = el("div", "ws-row");
-      const go = el("button", "primary", "Build");
-      go.type = "button";
-      go.addEventListener("click", () => send({ type: "workshop_approve", id: job.id }));
-      const no = el("button", "link", "No thanks");
-      no.type = "button";
-      no.addEventListener("click", () => send({ type: "workshop_decline", id: job.id }));
-      row.append(go, no);
-      box.append(row);
-    }
-    // The closing words are the summary below: no need to show them twice.
-    const steps = (job.steps ?? []).filter((s) => !(job.summary && s.kind === "say" && job.summary.startsWith(s.text.slice(0, 200))));
-    if (steps.length) {
-      const log = el("ol", "ws-log");
-      for (const s of steps.slice(-14)) log.append(el("li", s.kind, s.kind === "say" ? s.text : `› ${s.text}`));
-      box.append(log);
-      requestAnimationFrame(() => (log.scrollTop = log.scrollHeight));
-    }
-    if (job.status === "running") {
-      const row = el("div", "ws-row");
-      const mins = Math.max(0, Math.round((Date.now() - job.startedAt) / 60000));
-      const stop = el("button", "danger", "Stop");
-      stop.type = "button";
-      stop.addEventListener("click", () => send({ type: "workshop_stop", id: job.id }));
-      row.append(stop, el("span", "ws-note", `${mins ? `${mins} min` : "Just started"} · ${job.stepCount} step${job.stepCount === 1 ? "" : "s"} · Telos tells you when it's done`));
-      box.append(row);
-    }
-    if (job.summary && job.status !== "running") box.append(el("p", "ws-summary", job.summary));
-    if (job.error) box.append(el("p", "ws-error", job.error));
-    if (job.status !== "proposed") box.append(el("div", "ws-folder", job.folder));
-    card.push(box);
-  }
-  wsParts.jobBox.replaceChildren(...card);
-
-  // A new request: not while one is building or waiting for the player.
-  const game = profile?.name;
-  wsParts.form.hidden = Boolean(live);
-  wsParts.input.disabled = !game;
-  wsParts.build.disabled = !game;
-  wsParts.input.placeholder = game ? `Describe a mod for ${game}: "add a homing missile launcher", "a boss that…"` : "Attach to a game to build mods for it.";
-  wsParts.contLabel.hidden = !(job && job.game === game && job.status === "done");
-  wsParts.consent.textContent = wsConsent(ws.builder);
-
-  wsParts.history.replaceChildren(
-    ...(ws.history ?? []).map((h) => {
-      const li = el("li");
-      li.title = h.summary ?? h.error ?? "";
-      li.append(el("span", null, (WS_STATUS[h.status] ?? [h.status])[0]), el("span", null, `${h.game}: ${h.request}`));
-      return li;
-    }),
-  );
+  if (buildShown !== null && $("build-dialog").open) fillBuild(ws);
 }
+
+function openBuild(id) {
+  buildShown = id;
+  fillBuild(state?.workshop);
+  if (!$("build-dialog").open) $("build-dialog").showModal();
+}
+
+function fillBuild(ws) {
+  const job = buildsOf(ws).find((j) => j.id === buildShown);
+  if (!job) return;
+  buildDialogOrb ??= new AgentOrb($("build-sprite"), { size: 32 });
+  buildDialogOrb.setState(spriteFor(job));
+  if (job.status === "running") buildDialogOrb.start();
+  else buildDialogOrb.stop();
+  const [label, cls] = BUILD_STATUS[job.status] ?? [job.status, ""];
+  $("build-pill").className = `pill ${cls}`;
+  $("build-pill").textContent = label;
+  $("build-title").textContent = job.request;
+  const mins = job.startedAt ? Math.max(0, Math.round(((job.endedAt ?? Date.now()) - job.startedAt) / 60000)) : 0;
+  $("build-meta").textContent = [job.game, job.builder ? `built by ${job.builder}` : "", job.stepCount ? `${job.stepCount} steps` : "", mins ? `${mins} min` : ""].filter(Boolean).join(" · ");
+  const log = $("build-log");
+  const steps = (job.steps ?? []).filter((s) => !(job.summary && s.kind === "say" && job.summary.startsWith(s.text.slice(0, 200))));
+  const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+  log.replaceChildren(
+    ...(steps.length
+      ? steps.map((s) => el("li", s.kind, s.kind === "say" ? s.text : `› ${s.text}`))
+      : [el("li", "empty", job.steps ? "Getting started…" : "This build's steps are no longer kept; its outcome is below.")]),
+  );
+  if (atBottom) log.scrollTop = log.scrollHeight;
+  $("build-summary").hidden = !job.summary || job.status === "running";
+  $("build-summary").textContent = job.summary ?? "";
+  $("build-error").hidden = !job.error;
+  $("build-error").textContent = job.error ?? "";
+  $("build-stop").hidden = job.status !== "running";
+  $("build-folder").textContent = job.folder ? `Files: ${job.folder}` : "";
+}
+
+$("build-stop").addEventListener("click", () => buildShown !== null && send({ type: "workshop_stop", id: buildShown }));
+$("build-dialog").addEventListener("close", () => buildDialogOrb?.stop());
+
+// The in-game tray (overlay.js) asks the hub for things through here: it has no socket of its own.
+window.addEventListener("scruff:send", (e) => send(e.detail));
 
 function renderChanges(changes) {
   $("changes-empty").hidden = changes.length > 0;

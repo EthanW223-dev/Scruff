@@ -21,14 +21,14 @@ import { defineTool, json, type HubTool } from "./tools.ts";
  * an OpenAI-compatible service) drives Telos's own builder tools (buildtools.ts) with
  * universal-modder's loop as its instructions.
  *
- * Building a mod means running commands and editing files on the player's PC, for minutes or
- * hours. So nothing starts without the player: the chat AI can only propose a build
- * (build_mod), and the player presses Build in the overlay. One build runs at a time; the next
- * request for the same game continues the same Claude Code session, so "now make the nuke
- * bigger" works.
+ * It runs like a subagent of the chat: when the player asks for a mod, the chat AI starts a
+ * build (build_mod) and carries on talking while it works in the background. The overlay shows
+ * it as a hammering sprite the player can click to watch its steps, or stop it. One build runs
+ * at a time; the next request for the same game continues the same session, so "now make the
+ * nuke bigger" works.
  */
 
-export type JobStatus = "proposed" | "running" | "done" | "failed" | "stopped" | "declined";
+export type JobStatus = "running" | "done" | "failed" | "stopped";
 
 export interface WorkshopStep {
   at: number;
@@ -43,8 +43,6 @@ export interface WorkshopJob {
   engine: string;
   request: string;
   status: JobStatus;
-  /** Who asked: the player in the Workshop window, or the chat AI (which needs the player's OK). */
-  by: "player" | "ai";
   /** Carries on the last build for this game (same session, same folder). */
   continues: boolean;
   /** The AI building it ("Claude Code", "Ollama · qwen3:8b"). */
@@ -110,8 +108,8 @@ const BUILDER_TOOLS = [
 
 /** Added to Claude Code's system prompt for a build. Kept free of quotes and % (it goes on a command line). */
 const BUILDER_ROLE =
-  "You are the mod workshop of Telos, the in-game modding overlay. The player asked for the mod below and approved " +
-  "this build. They are playing or away and cannot answer questions mid-build: make sensible choices, write them down " +
+  "You are the mod builder of Telos, the in-game modding overlay, working in the background. The player asked for the " +
+  "mod below. They are playing or away and cannot answer questions mid-build: make sensible choices, write them down " +
   "in MODLOG.md, and keep going. Follow universal-modder's mod-any-game skill: search its knowledge base, recon the " +
   "game, pick the route, back up saves before any modded launch, get one working slice first, then the rest. Work in " +
   "the current folder and the game's folders. Never touch online games or anti-cheat. Don't launch the game, drive the " +
@@ -126,7 +124,6 @@ const CHAT_BUILD_STEPS = 160;
 export class Workshop extends EventEmitter {
   private jobs: WorkshopJob[] = [];
   /** The game each build is for, until it ends. */
-  private profiles = new Map<number, GameProfile>();
   private nextId = 1;
   /** The running build: how to stop it. */
   private active: { stop(): void } | null = null;
@@ -144,8 +141,14 @@ export class Workshop extends EventEmitter {
     return fs.existsSync(path.join(this.opts.pluginDir, "skills", "mod-any-game", "SKILL.md"));
   }
 
+  /** The build that's running, if any. */
   get current(): WorkshopJob | null {
-    return this.jobs.find((j) => j.status === "running") ?? this.jobs.find((j) => j.status === "proposed") ?? null;
+    return this.jobs.find((j) => j.status === "running") ?? null;
+  }
+
+  /** The newest build, running or not. */
+  get latest(): WorkshopJob | null {
+    return this.jobs.at(-1) ?? null;
   }
 
   job(id: number): WorkshopJob | undefined {
@@ -154,7 +157,7 @@ export class Workshop extends EventEmitter {
 
   /** What the overlay shows: the live (or latest) build, and a short history. */
   snapshot() {
-    const view = (j: WorkshopJob) => ({ ...j, steps: j.steps.slice(-40), stepCount: j.steps.length });
+    const view = (j: WorkshopJob) => ({ ...j, steps: j.steps.slice(-80), stepCount: j.steps.length });
     const live = this.current ?? this.jobs.at(-1) ?? null;
     return {
       available: this.pluginReady,
@@ -168,17 +171,15 @@ export class Workshop extends EventEmitter {
     };
   }
 
-  /** A build for the attached game. The chat AI's proposals wait for the player; the player's own start right away. */
-  propose(profile: GameProfile, request: string, opts: { by: "player" | "ai"; continues?: boolean }): WorkshopJob {
+  /** Starts building a mod for the attached game, in the background: the player asked for it. */
+  start(profile: GameProfile, request: string, opts: { continues?: boolean } = {}): WorkshopJob {
     const text = request.trim();
     if (!text) throw new Error("Say what the mod should do.");
     if (!this.pluginReady) throw new Error("universal-modder isn't bundled with this Telos (vendor/universal-modder). Run npm run update:modder.");
     const online = onlineGame(profile.exe);
-    if (online) throw new Error(`${online} is an online game with anti-cheat. The Workshop only builds mods for single-player games.`);
-    const running = this.jobs.find((j) => j.status === "running");
-    if (running) throw new Error(`The Workshop is still building "${running.request}" for ${running.game}. Wait for it, or stop it first.`);
-    // A newer proposal replaces one still waiting for the player.
-    for (const j of this.jobs) if (j.status === "proposed") j.status = "declined";
+    if (online) throw new Error(`${online} is an online game with anti-cheat. Telos only builds mods for single-player games.`);
+    const running = this.current;
+    if (running) throw new Error(`Still building "${running.request}" for ${running.game}. Wait for it, or stop it first.`);
     const folder = path.join(this.opts.dataDir, "workshop", slug(profile.name));
     const continues = Boolean(opts.continues && (this.sessions()[slug(profile.name)] || this.agents.has(slug(profile.name)) || fs.existsSync(folder)));
     const job: WorkshopJob = {
@@ -186,47 +187,24 @@ export class Workshop extends EventEmitter {
       game: profile.name,
       engine: profile.engine,
       request: text,
-      status: "proposed",
-      by: opts.by,
+      status: "running",
       continues,
       createdAt: Date.now(),
+      startedAt: Date.now(),
       steps: [],
       folder,
     };
     this.jobs.push(job);
     if (this.jobs.length > 20) this.jobs.splice(0, this.jobs.length - 20);
-    this.profiles.set(job.id, profile);
     this.emit("update");
-    if (opts.by === "player") this.approve(job.id);
-    else this.emit("notice", `The AI wants to build a mod for ${profile.name}: "${text}". Open the Workshop window to start it.`);
+    this.emit("notice", `Building "${text}" for ${profile.name} in the background. Click the hammer to watch.`);
+    this.run(job, profile);
     return job;
-  }
-
-  approve(id: number): void {
-    const job = this.job(id);
-    if (!job || job.status !== "proposed") throw new Error("That build isn't waiting to start.");
-    const profile = this.profiles.get(id);
-    if (!profile) throw new Error("Telos lost track of that game; propose the build again.");
-    job.status = "running";
-    job.startedAt = Date.now();
-    this.emit("update");
-    this.emit("notice", `Workshop: building "${job.request}" for ${job.game}. This can take a while; Telos tells you when it's done.`);
-    this.start(job, profile);
-  }
-
-  decline(id: number): void {
-    const job = this.job(id);
-    if (!job || job.status !== "proposed") return;
-    job.status = "declined";
-    job.endedAt = Date.now();
-    this.emit("update");
   }
 
   stop(id?: number): void {
     const job = id === undefined ? this.jobs.find((j) => j.status === "running") : this.job(id);
-    if (!job) return;
-    if (job.status === "proposed") return this.decline(job.id);
-    if (job.status !== "running" || !this.active) return;
+    if (!job || job.status !== "running" || !this.active) return;
     this.stopping = true;
     this.active.stop();
   }
@@ -243,7 +221,7 @@ export class Workshop extends EventEmitter {
     return dirs;
   }
 
-  private start(job: WorkshopJob, profile: GameProfile): void {
+  private run(job: WorkshopJob, profile: GameProfile): void {
     fs.mkdirSync(job.folder, { recursive: true });
     const log = path.join(job.folder, `telos-build-${job.id}.log`);
     const note = (line: string) => {
@@ -468,14 +446,13 @@ export class Workshop extends EventEmitter {
     job.endedAt = Date.now();
     if (summary) job.summary = summary;
     if (error) job.error = error;
-    this.profiles.delete(job.id);
     this.emit("update");
     if (status === "done") {
-      this.emit("notice", `Workshop: the ${job.game} mod is built. ${firstSentences(job.summary ?? "See the Workshop window.", 2)}`);
+      this.emit("notice", `The ${job.game} mod is built. ${firstSentences(job.summary ?? "Click the hammer for the details.", 2)}`);
     } else if (status === "failed") {
-      this.emit("notice", `Workshop: the ${job.game} build stopped with a problem. ${error ?? ""}`.trim());
+      this.emit("notice", `The ${job.game} mod build stopped with a problem. ${error ?? ""}`.trim());
     } else if (status === "stopped") {
-      this.emit("notice", `Workshop: stopped building "${job.request}". What it made so far stays in its folder.`);
+      this.emit("notice", `Stopped building "${job.request}". What it made so far stays in its folder.`);
     }
   }
 
@@ -565,7 +542,7 @@ function firstSentences(text: string, n: number): string {
   return parts.slice(0, n).join("").trim().slice(0, 300);
 }
 
-/** The chat AI's side: propose a build (the player starts it), check on it, stop it. */
+/** The chat AI's side: start a build (its background builder), check on it, stop it. */
 export function workshopTools(workshop: Workshop, profile: () => GameProfile | null): HubTool[] {
   if (!workshop.pluginReady) return [];
   const view = (j: WorkshopJob | null | undefined) =>
@@ -584,28 +561,28 @@ export function workshopTools(workshop: Workshop, profile: () => GameProfile | n
     defineTool({
       name: "build_mod",
       description:
-        "Propose a REAL mod for the attached game to Telos's Workshop: the chat's AI builds it with universal-modder (new " +
-        "items, weapons, enemies, bosses, mechanics, art, sounds), installs it and tests it. Use it for anything Telos's " +
-        "live tools can't do. It runs commands and edits files on the player's PC and can take a long time, so it only " +
-        "starts when the player presses Build in the overlay's Workshop window: tell them that. Check modding_guide first " +
-        "to set expectations. Single-player games only.",
+        "Start your mod builder: a background helper that builds a REAL mod for the attached game with universal-modder " +
+        "(new items, weapons, enemies, bosses, mechanics, art, sounds), installs it and tests it, running commands and " +
+        "editing files on the player's PC. Only when the player asks you to make or build a mod (and no ready-made one from " +
+        "find_mods fits). It starts right away and works on its own, often for many minutes: say so in a sentence and keep " +
+        "chatting. The player sees a hammer in the overlay and can click it to watch or stop it. Single-player games only.",
       input: z.object({
         request: z.string().describe("The mod, complete and in the player's words, with any details they gave"),
-        continue_previous: z.boolean().optional().describe("Build on the last Workshop build for this game (e.g. 'make the nuke bigger')"),
+        continue_previous: z.boolean().optional().describe("Build on the last build for this game (e.g. 'make the nuke bigger')"),
       }),
       run({ request, continue_previous }) {
         const p = profile();
-        if (!p) throw new Error("Attach to the game first: the Workshop needs to know which game and where it's installed.");
-        const job = workshop.propose(p, request, { by: "ai", continues: continue_previous });
+        if (!p) throw new Error("Attach to the game first: the builder needs to know which game and where it's installed.");
+        const job = workshop.start(p, request, { continues: continue_previous });
         return json({
-          proposed: view(job),
-          next: "Waiting for the player: they press Build in the Workshop window of the overlay (Ctrl+T) to start it. Say so in one or two sentences, and that it can take a while.",
+          started: view(job),
+          next: "It's building in the background. Tell the player in a sentence that it's started, that they can click the hammer to watch, and that Telos says when it's done.",
         });
       },
     }),
     defineTool({
       name: "workshop_status",
-      description: "What Telos's Workshop is doing: the current or last mod build, its recent steps, and its summary when done.",
+      description: "What your mod builder is doing: the current or last build, its recent steps, and its summary when done.",
       input: z.object({}),
       readOnly: true,
       run() {
@@ -615,14 +592,13 @@ export function workshopTools(workshop: Workshop, profile: () => GameProfile | n
     }),
     defineTool({
       name: "stop_mod_build",
-      description: "Stop the Workshop's running mod build (what it made so far stays in its folder).",
+      description: "Stop your mod builder's running build (what it made so far stays in its folder).",
       input: z.object({}),
       run() {
         const j = workshop.current;
         if (!j) return "Nothing is being built.";
-        const waiting = j.status === "proposed";
         workshop.stop(j.id);
-        return waiting ? "Dropped the proposed build." : "Stopping the build.";
+        return "Stopping the build.";
       },
     }),
   ];

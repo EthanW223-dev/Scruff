@@ -274,7 +274,7 @@ export function moddingTools(knowledge: ModderKnowledge, profile: () => GameProf
           "Rules: only single-player games the player owns; never online clients with anti-cheat; back up saves before " +
             "modded launches; don't share game files or decompiled code." +
             (opts.workshop
-              ? " To build the mod for real, propose it with build_mod: the Workshop builds, installs and tests it with these playbooks once the player approves it in the overlay."
+              ? " To build the mod for real, use build_mod: your mod builder builds, installs and tests it with these playbooks in the background."
               : ""),
         );
         parts.push(`(From universal-modder, ${knowledge.source}, MIT.)`);

@@ -8,8 +8,8 @@ import { defineTool, type HubTool } from "./tools.ts";
  * The Workshop's hands when the chat AI builds a mod (any AI in the AI menu other than Claude
  * Code, which brings its own): a shell, files and the web. Files can only be written inside the
  * build's folders (its workshop folder and the game's folders) and read there or in
- * universal-modder. Commands run as the player, like any build tool; the player approved the
- * build before any of this runs.
+ * universal-modder. Commands run as the player, like any build tool; the player asked for the
+ * mod and can watch or stop the build from the overlay.
  */
 
 export interface BuilderToolOptions {

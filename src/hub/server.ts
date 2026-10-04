@@ -317,13 +317,6 @@ export async function startServer(opts: ServerOptions): Promise<http.Server> {
         );
         break;
       }
-      case "workshop_build": {
-        // The player typed the mod and pressed Build: that's their go-ahead.
-        if (!workshop) throw new Error("This Telos has no Workshop.");
-        if (!games.profile) throw new Error("Attach to the game first: the Workshop needs to know which game it's building for.");
-        workshop.propose(games.profile, String(msg.request ?? ""), { by: "player", continues: msg.continue === true });
-        break;
-      }
       case "market_search":
         if (!market) throw new Error("This Telos has no marketplace.");
         await market.search(String(msg.query ?? ""), Number(msg.page) > 1 ? Number(msg.page) : 1);
@@ -346,12 +339,6 @@ export async function startServer(opts: ServerOptions): Promise<http.Server> {
         break;
       case "market_community":
         await market?.setCommunity(String(msg.identifier ?? ""));
-        break;
-      case "workshop_approve":
-        workshop?.approve(Number(msg.id));
-        break;
-      case "workshop_decline":
-        workshop?.decline(Number(msg.id));
         break;
       case "workshop_stop":
         workshop?.stop(Number(msg.id));

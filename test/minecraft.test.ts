@@ -183,16 +183,14 @@ test("the chat AI hears what works in Minecraft, the builder gets its playbook, 
   assert.match(s.note, /rarely stick/);
   assert.equal(new ModderKnowledge(PLUGIN).playbookFor(profile), "minecraft.md");
 
-  // Thunderstore's mods are Unity mods: nothing to search, nothing to install into .minecraft.
+  // Thunderstore's mods are Unity mods: Minecraft's come from Modrinth and CurseForge (minecraft-mods.test.ts).
   const store = new Thunderstore({ cacheDir: fs.mkdtempSync(path.join(os.tmpdir(), "telos-mc-cache-")), base: "http://127.0.0.1:9" });
   const m = new Marketplace({ store, profile: () => profile, isRunning: async () => false });
-  assert.deepEqual(await m.search("minimap"), []);
-  assert.match(m.snapshot().error ?? "", /Modrinth or CurseForge/);
-  assert.match(m.snapshot().elsewhere ?? "", /Modrinth or CurseForge/, "the Player mods window says so instead of offering the store");
-  await assert.rejects(m.install("BepInEx-BepInExPack"), /aren't on Thunderstore/);
-  const [find] = marketplaceTools(m, () => profile);
-  assert.match(String(await find.run({ query: "minimap" }, ctx)), /Modrinth or CurseForge/);
+  await assert.rejects(m.setCommunity("lethal-company"), /Modrinth and CurseForge, not Thunderstore/);
+  await assert.rejects(m.plan("BepInEx-BepInExPack"), /Modrinth and CurseForge, not Thunderstore/);
+  assert.equal(m.snapshot().community, null);
   assert.ok(!fs.existsSync(path.join(mc, "BepInEx")));
+  assert.equal(marketplaceTools(m, () => profile).length, 2);
 });
 
 test("a Minecraft mod build works in the game directory", async () => {

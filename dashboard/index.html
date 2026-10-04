@@ -211,9 +211,19 @@
         <span class="stripes" aria-hidden="true"></span>
         <button value="close" class="icon-btn" aria-label="Close">✕</button>
       </div>
+      <!-- Minecraft: its two stores. Everything else: its Thunderstore community. -->
+      <div id="market-sources" class="market-sources" role="tablist" aria-label="Mod store" hidden></div>
       <div class="market-sub">
         <span id="market-where" class="muted small"></span>
         <button type="button" id="market-pick" class="link">Wrong game?</button>
+      </div>
+      <div id="market-key" class="market-key" hidden>
+        <p id="market-key-why"></p>
+        <div class="market-search">
+          <input id="market-key-input" type="password" placeholder="Paste your CurseForge API key" autocomplete="off" spellcheck="false">
+          <button type="button" id="market-key-save" class="primary">Save</button>
+        </div>
+        <p class="muted small">Get one free at <a href="https://console.curseforge.com/" target="_blank" rel="noreferrer">console.curseforge.com</a> (sign in, then API keys). Telos keeps it on this PC and only sends it to CurseForge.</p>
       </div>
       <div id="market-communities" class="market-communities" hidden>
         <input id="market-community-filter" type="search" placeholder="Find the game on Thunderstore…" autocomplete="off">
@@ -227,7 +237,7 @@
       <p id="market-error" class="connect-error" hidden></p>
       <div id="market-grid" class="market-grid"></div>
       <button type="button" id="market-more" class="link market-more" hidden>More mods</button>
-      <p class="muted small market-note">Mods are made by other players and come from <a href="https://thunderstore.io" target="_blank" rel="noreferrer">Thunderstore</a>. Telos adds each with everything it needs (and the mod loader), and takes out exactly what it added. Add mods you trust; single-player use only.</p>
+      <p id="market-note" class="muted small market-note">Mods are made by other players and come from <a href="https://thunderstore.io" target="_blank" rel="noreferrer">Thunderstore</a>. Telos adds each with everything it needs (and the mod loader), and takes out exactly what it added. Add mods you trust; single-player use only.</p>
     </form>
   </dialog>
 

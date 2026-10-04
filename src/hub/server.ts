@@ -340,6 +340,14 @@ export async function startServer(opts: ServerOptions): Promise<http.Server> {
       case "market_community":
         await market?.setCommunity(String(msg.identifier ?? ""));
         break;
+      case "market_source":
+        // Minecraft: Modrinth or CurseForge.
+        await market?.setSource(String(msg.source ?? ""));
+        break;
+      case "market_curseforge_key":
+        // Kept in .scruff/curseforge.json; never sent back to the dashboard.
+        await market?.setCurseForgeKey(typeof msg.key === "string" && msg.key.trim() ? msg.key : null);
+        break;
       case "workshop_stop":
         workshop?.stop(Number(msg.id));
         break;

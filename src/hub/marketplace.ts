@@ -5,10 +5,12 @@ import { z } from "zod";
 import { hasMelonLoader, readManifest, removeBridge, replaceLoadedFile, safeJoin, unityFlavor } from "../games/bepinex.ts";
 import type { GameProfile } from "../games/profile.ts";
 import { readZip, type ZipEntry } from "../games/zip.ts";
+import { addMinecraftMod, type CurseForgeKey, type McSourceId, type McStore } from "./minecraftmods.ts";
 import { defineTool, json, type HubTool } from "./tools.ts";
 
 /**
- * The mod marketplace: other players' mods, ready to add. Mods come from Thunderstore
+ * The mod marketplace: other players' mods, ready to add. Minecraft's come from Modrinth and
+ * CurseForge (minecraftmods.ts). Every other game's come from Thunderstore
  * (thunderstore.io), the community mod store for Unity games: each game has its own community,
  * and every package says which mods it needs (dependencies) and is laid out for its mod loader
  * (BepInEx or MelonLoader). Telos adds a mod with everything it needs, in the layout r2modman
@@ -25,9 +27,8 @@ const MAX_ZIP = 400 * 1024 * 1024;
 /** Downloads only come from Thunderstore and its CDN. */
 const ALLOWED_HOSTS = /(^|\.)thunderstore\.io$/;
 /** Thunderstore's mods are for Unity games and their loaders (BepInEx, MelonLoader); Minecraft's aren't there. */
-const NOT_FOR_MINECRAFT =
-  "Minecraft's mods aren't on Thunderstore: players get them from Modrinth or CurseForge, for their game and loader " +
-  "version, into the mods folder. Telos can build one for you instead.";
+const NOT_FOR_MINECRAFT = "Minecraft's mods come from Modrinth and CurseForge, not Thunderstore.";
+const isMinecraft = (p: GameProfile | null | undefined) => p?.engine === "Minecraft (Java)";
 const MOD_MANAGERS = /^(r2modman|GaleModManager|Gale|ThunderstoreModManager|r2modman_plus)$/i;
 /** Package metadata, not game files. */
 const META = /^(icon\.png|manifest\.json|readme\.md|changelog\.md|license(\.md|\.txt)?)$/i;
@@ -51,6 +52,8 @@ export interface MarketMod {
   categories: string[];
   updated: string;
   url: string;
+  /** Where it's from, for Minecraft's stores ("modrinth", "curseforge"). */
+  source?: string;
   /** Why it may not work in this game (e.g. built for the other Unity backend). */
   warning?: string;
   /** The version Telos added, if it's in the game. */
@@ -319,6 +322,8 @@ export interface MarketplaceOptions {
   profile: () => GameProfile | null;
   /** Whether the game's exe is running (switching loaders needs it closed). */
   isRunning?: (exe: string) => Promise<boolean>;
+  /** Minecraft's stores (Modrinth, CurseForge) and CurseForge's key. */
+  minecraft?: { stores: McStore[]; curseforgeKey?: CurseForgeKey };
 }
 
 /** The Marketplace window's state, and adding/removing mods in the attached game. */
@@ -333,6 +338,8 @@ export class Marketplace extends EventEmitter {
   private error: string | null = null;
   /** A loader switch waiting for the player's OK. */
   private pending: { id: string; message: string } | null = null;
+  /** The Minecraft store the window shows. */
+  private mcSource: McSourceId = "modrinth";
 
   constructor(private opts: MarketplaceOptions) {
     super();
@@ -341,24 +348,67 @@ export class Marketplace extends EventEmitter {
   private game(): GameProfile {
     const p = this.opts.profile();
     if (!p) throw new Error("Attach to a game first: the marketplace shows mods for the game you're playing.");
-    if (p.engine === "Minecraft (Java)") throw new Error(NOT_FOR_MINECRAFT);
     return p;
+  }
+
+  /** A Thunderstore game (anything but Minecraft). */
+  private thunderstoreGame(): GameProfile {
+    const p = this.game();
+    if (isMinecraft(p)) throw new Error(NOT_FOR_MINECRAFT);
+    return p;
+  }
+
+  private mcStore(id: string = this.mcSource): McStore {
+    const store = this.opts.minecraft?.stores.find((s) => s.id === id || id.startsWith(`${s.id}:`));
+    if (!store) throw new Error("This Telos has no Minecraft mod stores.");
+    return store;
+  }
+
+  /** Which store the window shows for Minecraft. */
+  async setSource(id: string): Promise<void> {
+    const store = this.mcStore(id);
+    this.mcSource = store.id;
+    this.results = [];
+    this.count = 0;
+    await this.search("");
+  }
+
+  /** The player pasted a CurseForge API key (null forgets it). */
+  async setCurseForgeKey(key: string | null): Promise<void> {
+    const k = this.opts.minecraft?.curseforgeKey;
+    if (!k) throw new Error("This Telos has no CurseForge.");
+    k.save(key);
+    if (key && !k.get()) throw new Error("That doesn't look like a CurseForge API key.");
+    this.emit("update");
+    if (this.mcSource === "curseforge" && isMinecraft(this.opts.profile())) await this.search("");
   }
 
   snapshot() {
     const p = this.opts.profile();
     const installed = p ? Object.values(readMods(p.installDir).mods) : [];
+    const mc = isMinecraft(p) && this.opts.minecraft ? p!.minecraft ?? {} : null;
     return {
       game: p?.name ?? null,
-      /** Why this game's mods aren't Thunderstore's (Minecraft), or null. */
-      elsewhere: p?.engine === "Minecraft (Java)" ? NOT_FOR_MINECRAFT : null,
-      community: this.communityFor === p?.installDir ? this.community : null,
+      /** Minecraft: its version and loader, and the stores (Modrinth, CurseForge) the window switches between. */
+      minecraft: mc
+        ? {
+            ...mc,
+            source: this.mcSource,
+            sources: this.opts.minecraft!.stores.map((s) => ({
+              id: s.id,
+              name: s.name,
+              problem: s.problem(),
+              ...(s.id === "curseforge" ? { keySource: this.opts.minecraft!.curseforgeKey?.source ?? null } : {}),
+            })),
+          }
+        : null,
+      community: !mc && this.communityFor === p?.installDir ? this.community : null,
       query: this.query,
       count: this.count,
       page: this.page,
       results: this.results.map((m) => this.annotate(m, p, installed)),
       installed: installed.map((m) => ({ id: m.id, name: m.name, version: m.version, explicit: m.explicit, loader: m.loader, icon: m.icon })),
-      loader: p ? gameLoader(p.installDir) : null,
+      loader: p && !mc ? gameLoader(p.installDir) : null,
       busy: this.busy,
       error: this.error,
       pending: this.pending,
@@ -393,7 +443,7 @@ export class Marketplace extends EventEmitter {
   }
 
   async setCommunity(identifier: string): Promise<void> {
-    const p = this.game();
+    const p = this.thunderstoreGame();
     const c = (await this.opts.store.communities()).find((x) => x.identifier === identifier);
     if (!c) throw new Error(`No Thunderstore community called ${identifier}.`);
     this.community = c;
@@ -407,14 +457,8 @@ export class Marketplace extends EventEmitter {
 
   /** page > 1 adds the next page to the results ("more"). */
   async search(query = this.query, page = 1): Promise<MarketMod[]> {
-    if (this.opts.profile()?.engine === "Minecraft (Java)") {
-      this.results = [];
-      this.count = 0;
-      this.error = NOT_FOR_MINECRAFT;
-      this.emit("update");
-      return [];
-    }
-    const p = this.game();
+    if (isMinecraft(this.opts.profile())) return this.searchMinecraft(query, page);
+    const p = this.thunderstoreGame();
     this.error = null;
     try {
       const c = await this.communityOf(p);
@@ -438,9 +482,73 @@ export class Marketplace extends EventEmitter {
     }
   }
 
+  /** Minecraft: the chosen store's mods for the game's version and loader. */
+  private async searchMinecraft(query: string, page: number): Promise<MarketMod[]> {
+    const p = this.game();
+    if (this.communityFor !== p.installDir) {
+      // A new game: start over.
+      this.communityFor = p.installDir;
+      this.community = null;
+      this.results = [];
+      this.count = 0;
+    }
+    const store = this.mcStore();
+    this.error = null;
+    this.query = query.trim();
+    try {
+      const problem = store.problem();
+      if (problem) {
+        this.results = [];
+        this.count = 0;
+        this.error = problem;
+        return [];
+      }
+      const { version, loader } = p.minecraft ?? {};
+      const res = await store.search(this.query, { version, loader }, page);
+      this.results = page > 1 ? [...this.results, ...res.mods.filter((m) => !this.results.some((r) => r.id === m.id))] : res.mods;
+      this.count = res.count;
+      this.page = page;
+      return this.snapshot().results;
+    } catch (err) {
+      const msg = (err as Error).message;
+      this.error = /API key/.test(msg) ? msg : `Couldn't reach ${store.name}: ${msg}`;
+      throw new Error(this.error);
+    } finally {
+      this.emit("update");
+    }
+  }
+
+  /** Minecraft: adds a mod (and the mods it requires) to the game's mods/ folder. */
+  private async installMinecraft(p: GameProfile, id: string): Promise<{ added: string[]; note: string }> {
+    const { version, loader } = p.minecraft ?? {};
+    if (!version) throw new Error("Telos can't tell your Minecraft version. Attach again while Minecraft's window title shows it (Minecraft 26.3).");
+    if (!loader) {
+      throw new Error(
+        `Minecraft ${version} is running without a mod loader, so mods won't load. Install Fabric for ${version} ` +
+          "(fabricmc.net/use: run the installer and pick the version), start Minecraft with the Fabric profile, and attach Telos again.",
+      );
+    }
+    const store = this.mcStore(id);
+    const record = readMods(p.installDir);
+    const res = await addMinecraftMod(p.installDir, { version, loader }, store, id, record.mods, (text) => {
+      this.busy = { id, text };
+      this.emit("update");
+    });
+    writeMods(p.installDir, record);
+    const added = res.added.map((m) => `${m.name} ${m.version}`);
+    const running = this.opts.isRunning ? await this.opts.isRunning(p.exe).catch(() => false) : false;
+    const note =
+      `Added ${added.join(", ")} to Minecraft's mods folder` +
+      (res.already.length ? ` (${res.already.map((a) => a.name).join(", ")} ${res.already.length === 1 ? "was" : "were"} already there)` : "") +
+      ". " +
+      (running ? `Quit Minecraft fully and start it again with ${loader} to load ${added.length === 1 ? "it" : "them"}.` : `Start Minecraft with ${loader} to load ${added.length === 1 ? "it" : "them"}.`);
+    this.emit("notice", note);
+    return { added, note };
+  }
+
   /** What adding a mod involves: its dependencies, its loader, and any clash with the game's loader. */
   async plan(id: string): Promise<InstallPlan> {
-    const p = this.game();
+    const p = this.thunderstoreGame();
     const installed = readMods(p.installDir).mods;
     const have = gameLoader(p.installDir);
     const add: PackageVersion[] = [];
@@ -508,6 +616,7 @@ export class Marketplace extends EventEmitter {
     this.pending = null;
     this.emit("update");
     try {
+      if (isMinecraft(p)) return await this.installMinecraft(p, id);
       const plan = await this.plan(id);
       if (plan.switchFrom) {
         if (!opts.switchLoader) {
@@ -589,16 +698,19 @@ export class Marketplace extends EventEmitter {
       throw new Error(`${mod.name} is needed by ${users.join(", ")}: remove ${users.length > 1 ? "those" : "that"} first.`);
     }
     const removed: string[] = [];
+    const names: string[] = [];
     let locked = false;
     for (const m of Object.values(record.mods)) {
       if (keep.has(m.id) || (m.loader && m.id !== id)) continue;
       locked = removeFiles(p.installDir, m) || locked;
       delete record.mods[m.id];
       removed.push(m.id);
+      // Minecraft's ids are the stores' ("modrinth:mOgUt4GM"): say the mods' names.
+      names.push(isMinecraft(p) ? m.name : m.id);
     }
     writeMods(p.installDir, record);
     const note =
-      `Removed ${removed.join(", ")} from ${p.name}.` + (locked ? " Some files are in use by the running game; they're switched off and go when it closes." : "");
+      `Removed ${names.join(", ")} from ${p.name}.` + (locked ? " Some files are in use by the running game; they're switched off and go when it closes." : "");
     this.emit("notice", note);
     this.emit("update");
     return { removed, note };
@@ -739,16 +851,42 @@ export function marketplaceTools(market: Marketplace, profile: () => GameProfile
     defineTool({
       name: "find_mods",
       description:
-        "Find other players' ready-made mods for the attached game on Thunderstore (the community mod store for Unity " +
-        "games), most downloaded first, and show them in the overlay's Marketplace window. The player adds one with its " +
-        "Add button (Telos installs it with everything it needs); you can't install mods yourself. Empty query: the most " +
-        "popular mods. Prefer an existing mod over building one with build_mod.",
-      input: z.object({ query: z.string().optional().describe("What the mod should do, in a few words: 'minimap', 'more money', 'bigger storage'") }),
+        "Find other players' ready-made mods for the attached game, most popular first, and show them in the overlay's " +
+        "Marketplace window: Modrinth or CurseForge for Minecraft (only mods for its exact version and loader), " +
+        "Thunderstore (the community mod store for Unity games) for the rest. The player adds one with its Add button " +
+        "(Telos installs it with everything it needs); you can't install mods yourself. Empty query: the most popular " +
+        "mods. Prefer an existing mod over building one with build_mod.",
+      input: z.object({
+        query: z.string().optional().describe("What the mod should do, in a few words: 'minimap', 'more money', 'bigger storage'"),
+        source: z.enum(["modrinth", "curseforge"]).optional().describe("Minecraft only: which store (Modrinth by default)"),
+      }),
       readOnly: true,
-      async run({ query }) {
-        if (!profile()) throw new Error("Attach to the game first.");
+      async run({ query, source }) {
+        const p = profile();
+        if (!p) throw new Error("Attach to the game first.");
+        if (source && isMinecraft(p)) await market.setSource(source);
         const mods = await market.search(query ?? "");
         const s = market.snapshot();
+        if (s.minecraft) {
+          if (s.error) return s.error;
+          const store = s.minecraft.sources.find((x) => x.id === s.minecraft!.source)!.name;
+          return json({
+            store,
+            for: `Minecraft ${s.minecraft.version ?? "(version unknown)"} with ${s.minecraft.loader ?? "no mod loader running"}`,
+            found: s.count,
+            mods: mods.slice(0, 8).map((m) => ({
+              id: m.id,
+              name: m.name,
+              what: m.description,
+              downloads: m.downloads,
+              ...(m.installed ? { installed: m.installed } : {}),
+              ...(m.warning ? { warning: m.warning } : {}),
+            })),
+            next:
+              "They're in the Marketplace window (Ctrl+T). Tell the player which look right and that they add one with its Add button" +
+              (s.minecraft.loader ? "." : `; mods need a loader first (Fabric for ${s.minecraft.version ?? "their version"}): say so.`),
+          });
+        }
         if (!s.community) return s.error ?? "No Thunderstore community for this game.";
         return json({
           community: s.community.name,
@@ -775,7 +913,7 @@ export function marketplaceTools(market: Marketplace, profile: () => GameProfile
         if (!p) throw new Error("Attach to the game first.");
         const mods = Object.values(readMods(p.installDir).mods);
         return json({
-          loader: gameLoader(p.installDir),
+          loader: isMinecraft(p) ? (p.minecraft?.loader ?? null) : gameLoader(p.installDir),
           mods: mods.map((m) => ({ id: m.id, version: m.version, added_by_player: m.explicit, ...(m.loader ? { loader: m.loader } : {}) })),
         });
       },

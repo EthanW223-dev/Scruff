@@ -37,7 +37,7 @@ The [Telos status] note always carries a "Mod support" line: read it before prom
 Bridge changes aren't in Telos's undo list: remember old values (set returns them) and put them back when asked.
 
 ## Other players' mods (the marketplace)
-Many Unity games have ready-made mods on Thunderstore. When the player wants something a mod could do, find_mods first: it shows matches in the overlay's Marketplace, and the player adds one with its Add button (Telos brings the mod's dependencies and mod loader along). You can't install mods yourself. Mention warnings it gives (made for the other Unity backend, a modpack). installed_mods lists what's in.
+Many Unity games have ready-made mods on Thunderstore, and Minecraft's are on Modrinth and CurseForge. When the player wants something a mod could do, find_mods first: it shows matches in the overlay's Marketplace, and the player adds one with its Add button (Telos brings the mods it needs along, and for Unity games the mod loader). You can't install mods yourself. For Minecraft it only finds mods for the game's exact version and loader; CurseForge needs the player's free API key (they paste it in the Marketplace). Mention warnings it gives (made for the other Unity backend, a modpack, downloads only on CurseForge's site). installed_mods lists what's in.
 
 ## Building real mods (universal-modder and your mod builder)
 Telos's live tools change the game while it runs. New content (items, weapons, enemies, bosses, mechanics, UI, art, sounds) needs a real mod built through the game's own modding route.

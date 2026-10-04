@@ -13,6 +13,7 @@ import fs from "node:fs";
 import { McpEndpoint } from "./mcp.ts";
 import { ModderKnowledge, moddingTools } from "./modder.ts";
 import { Marketplace, Thunderstore, marketplaceTools } from "./marketplace.ts";
+import { CurseForge, CurseForgeKey, Modrinth, type McStore } from "./minecraftmods.ts";
 import { Workshop, workshopTools, type BuilderChoice } from "./workshop.ts";
 import { engineModSupport } from "./mods.ts";
 import { quickPath } from "./quick.ts";
@@ -43,6 +44,8 @@ export interface HubOptions {
   workshopBuilder?: () => BuilderChoice;
   /** The marketplace's mod store (tests point it at a stand-in). */
   thunderstore?: Thunderstore;
+  /** Minecraft's mod stores (tests point them at stand-ins); default Modrinth and CurseForge. */
+  minecraftStores?: McStore[];
 }
 
 /** Telos tools the chat AI keeps while it builds a Workshop mod. */
@@ -106,11 +109,19 @@ export async function createHub(opts: HubOptions) {
     extraTools: () => tools.filter((t) => WORKSHOP_EXTRAS.has(t.name)),
   });
 
-  // Other players' mods, ready to add (Thunderstore).
+  // Other players' mods, ready to add: Thunderstore, and Modrinth and CurseForge for Minecraft.
+  const curseforgeKey = new CurseForgeKey(path.join(dataDir, "curseforge.json"));
   const market = new Marketplace({
     store: opts.thunderstore ?? new Thunderstore({ cacheDir: path.join(dataDir, "market") }),
     profile: () => games.profile,
     isRunning: exeRunning,
+    minecraft: {
+      stores: opts.minecraftStores ?? [
+        new Modrinth({ cacheDir: path.join(dataDir, "market") }),
+        new CurseForge({ key: () => curseforgeKey.get(), cacheDir: path.join(dataDir, "market") }),
+      ],
+      curseforgeKey,
+    },
   });
 
   // Claude Code as the brain calls Telos's tools over this hub's own MCP endpoint.

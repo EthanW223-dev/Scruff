@@ -565,7 +565,7 @@ function renderLinks(links) {
   );
 }
 
-// ---------- Player mods: Thunderstore, ready to add ----------
+// ---------- Player mods: Thunderstore (Unity games), Modrinth and CurseForge (Minecraft), ready to add ----------
 
 let marketSearchedFor = null; // the game the store last loaded mods for
 let marketCommunities = [];
@@ -603,16 +603,62 @@ function renderMarket(m, profile) {
     row.append(el("span", "name", i.name), el("span", "ver", i.version), remove);
     return row;
   });
-  const loader = m.loader ? `Mod loader: ${LOADER_NAME[m.loader]}` : "No mod loader yet: Telos adds the one a mod needs.";
-  // Some games' mods live elsewhere (Minecraft's on Modrinth/CurseForge): say so instead of offering the store.
-  $("market-open").hidden = Boolean(m.elsewhere);
-  $("market-installed").replaceChildren(...rows, el("div", "loader", m.elsewhere ?? (mine.length ? loader : `No player mods added yet. ${loader}`)));
+  const mc = m.minecraft;
+  // Minecraft's mods need the loader it's running; Unity games get theirs added with the first mod.
+  const loader = mc
+    ? mc.loader
+      ? `Minecraft ${mc.version ?? ""} · ${mc.loader}${mc.loaderVersion ? ` ${mc.loaderVersion}` : ""}`
+      : `Minecraft ${mc.version ?? ""} has no mod loader running: mods need Fabric (or NeoForge) first.`
+    : m.loader
+      ? `Mod loader: ${LOADER_NAME[m.loader]}`
+      : "No mod loader yet: Telos adds the one a mod needs.";
+  $("market-installed").replaceChildren(...rows, el("div", "loader", mine.length ? loader : `No player mods added yet. ${loader}`));
 
-  // The store dialog.
-  const where = m.community ? `${m.community.name} on Thunderstore · ${m.count.toLocaleString()} mod${m.count === 1 ? "" : "s"}${m.query ? ` for "${m.query}"` : ""}` : `${profile.name}`;
-  $("market-where").textContent = where + (m.loader ? ` · this game uses ${LOADER_NAME[m.loader]}` : "");
+  // The store dialog: Minecraft switches between its stores; other games show their Thunderstore community.
+  const found = `${m.count.toLocaleString()} mod${m.count === 1 ? "" : "s"}${m.query ? ` for "${m.query}"` : ""}`;
+  const source = mc?.sources.find((x) => x.id === mc.source);
+  $("market-sources").hidden = !mc;
+  $("market-pick").hidden = Boolean(mc);
+  if (mc) {
+    $("market-sources").replaceChildren(
+      ...mc.sources.map((src) => {
+        const b = el("button", null, src.name);
+        b.type = "button";
+        b.setAttribute("role", "tab");
+        b.setAttribute("aria-selected", String(src.id === mc.source));
+        if (src.problem) b.append(el("span", "tag", "needs a key"));
+        b.addEventListener("click", () => src.id !== mc.source && send({ type: "market_source", source: src.id }));
+        return b;
+      }),
+    );
+    const target = mc.loader ? `${mc.loader} ${mc.version ?? ""}` : `Minecraft ${mc.version ?? ""} (no mod loader)`;
+    $("market-where").textContent = `${source?.name ?? ""} · mods for ${target}${source?.problem || m.error ? "" : ` · ${found}`}`;
+  } else {
+    const where = m.community ? `${m.community.name} on Thunderstore · ${found}` : `${profile.name}`;
+    $("market-where").textContent = where + (m.loader ? ` · this game uses ${LOADER_NAME[m.loader]}` : "");
+  }
+  // CurseForge without a key (or with one it turned down): ask for one right here.
+  const keyRefused = /API key/i.test(m.error ?? "");
+  const needsKey = Boolean(mc && source?.id === "curseforge" && (source.problem || keyRefused));
+  $("market-key").hidden = !needsKey;
+  if (needsKey) $("market-key-why").textContent = source.problem ? "CurseForge's mod list needs an API key. It's free." : m.error;
+  $("market-note").replaceChildren(
+    ...(mc
+      ? [
+          "Mods are made by other players and come from ",
+          storeLink("Modrinth", "https://modrinth.com/mods"),
+          " and ",
+          storeLink("CurseForge", "https://www.curseforge.com/minecraft"),
+          ", for your exact Minecraft version and loader. Telos adds each with the mods it needs (skipping ones already in your mods folder) and takes out exactly what it added. Add mods you trust.",
+        ]
+      : [
+          "Mods are made by other players and come from ",
+          storeLink("Thunderstore", "https://thunderstore.io"),
+          ". Telos adds each with everything it needs (and the mod loader), and takes out exactly what it added. Add mods you trust; single-player use only.",
+        ]),
+  );
   const err = $("market-error");
-  err.hidden = !m.error;
+  err.hidden = !m.error || needsKey;
   err.textContent = m.error ?? "";
   const pending = $("market-pending");
   pending.hidden = !m.pending;
@@ -634,7 +680,7 @@ function renderMarket(m, profile) {
       const head = el("div", "market-card-head");
       const img = modIcon(mod.icon, mod.name);
       const text = el("div");
-      text.append(el("div", "name", mod.name.replace(/_/g, " ")), el("div", "by", `by ${mod.namespace} · ${compact(mod.downloads)} downloads`));
+      text.append(el("div", "name", mod.name.replace(/_/g, " ")), el("div", "by", `${mod.namespace ? `by ${mod.namespace} · ` : ""}${compact(mod.downloads)} downloads`));
       head.append(img, text);
       card.append(head, el("p", "desc", mod.description));
       if (mod.loader) card.append(el("span", "tag", `${LOADER_NAME[mod.loader]} (mod loader)`));
@@ -666,12 +712,20 @@ function renderMarket(m, profile) {
       return card;
     }),
   );
-  $("market-more").hidden = !(m.community && m.results.length && m.results.length < m.count);
+  $("market-more").hidden = !((m.community || mc) && m.results.length && m.results.length < m.count);
   // A new game: load its most popular mods once the store is open.
   if ($("market-dialog").open && marketSearchedFor !== profile.installDir) {
     marketSearchedFor = profile.installDir;
     send({ type: "market_search", query: "" });
   }
+}
+
+function storeLink(name, href) {
+  const a = el("a", null, name);
+  a.href = href;
+  a.target = "_blank";
+  a.rel = "noreferrer";
+  return a;
 }
 
 function renderCommunities(list) {
@@ -717,6 +771,20 @@ $("market-query").addEventListener("keydown", (e) => {
 });
 $("market-more").addEventListener("click", () => send({ type: "market_search", query: state?.market?.query ?? "", page: (state?.market?.page ?? 1) + 1 }));
 $("market-pick").addEventListener("click", () => send({ type: "market_communities" }));
+const saveCurseForgeKey = () => {
+  const key = $("market-key-input").value.trim();
+  if (!key) return $("market-key-input").focus();
+  send({ type: "market_curseforge_key", key });
+  $("market-key-input").value = "";
+};
+$("market-key-save").addEventListener("click", saveCurseForgeKey);
+$("market-key-input").addEventListener("keydown", (e) => {
+  // The dialog is a form: Enter would close it.
+  if (e.key === "Enter") {
+    e.preventDefault();
+    saveCurseForgeKey();
+  }
+});
 $("market-community-filter").addEventListener("input", filterCommunities);
 $("market-community-filter").addEventListener("keydown", (e) => e.key === "Enter" && e.preventDefault());
 

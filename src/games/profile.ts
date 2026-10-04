@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { detectMinecraft, minecraftProfile } from "./minecraft.ts";
+import { detectMinecraft, minecraftProfile, type Loader as MinecraftLoader } from "./minecraft.ts";
 
 /**
  * What Telos can learn about a game from its files: the engine, where it keeps saves and
@@ -19,6 +19,8 @@ export interface GameProfile {
   saveDirs: string[];
   configFiles: string[];
   notes: string[];
+  /** Minecraft: Java Edition: the version and mod loader its mods must match. */
+  minecraft?: { version?: string; loader?: MinecraftLoader; loaderVersion?: string };
 }
 
 /**

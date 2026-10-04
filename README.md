@@ -139,8 +139,9 @@ What works depends on the engine (the status note in chat always says which tier
   Prism/MultiMC/CurseForge/Modrinth instance), its version and its mod loader (Fabric, Quilt,
   Forge, NeoForge). Java moves values around in memory, so Telos doesn't promise memory edits;
   in a single-player world with cheats on, it gives you the exact command to type (`/give`,
-  `/effect`, `/gamerule`). New items, mobs and mechanics are a mod the mod builder makes for your
-  exact version and loader. Telos won't attach while you're on a server or Realm, and it never
+  `/effect`, `/gamerule`). Ready-made mods come from Modrinth and CurseForge in the marketplace
+  (below); new items, mobs and mechanics are a mod the mod builder makes for your exact version
+  and loader. Telos won't attach while you're on a server or Realm, and it never
   reads the launcher's sign-in file (`launcher_accounts.json`).
 - **Everything else (Godot, GameMaker, Source, ...) — numbers only, live.** Colors, models,
   spawning and new content there need a real mod: see the mod builder below.
@@ -155,6 +156,17 @@ Many Unity games have ready-made mods on [Thunderstore](https://thunderstore.io)
 mod store (Schedule I, Lethal Company, R.E.P.O., Valheim, Risk of Rain 2, PEAK and 300+ more).
 Open **Player mods → Browse mods** in the panel: Telos finds your game's community and shows its
 mods, most downloaded first. Search, then press **Add**.
+
+**Minecraft** mods come from [Modrinth](https://modrinth.com/mods) and
+[CurseForge](https://www.curseforge.com/minecraft) instead: the same window has a tab for each.
+It only shows mods for your exact Minecraft version and loader (Fabric, Quilt, Forge or
+NeoForge). **Add** puts the mod's `.jar` in your `mods` folder along with the mods it requires,
+skips any you already have (two copies of a mod stop the game), and checks every download
+against the store's hash. Modrinth works as is. CurseForge needs a free API key from
+[console.curseforge.com](https://console.curseforge.com/): paste it in the CurseForge tab (or put
+`CURSEFORGE_API_KEY` in `.env`). Some CurseForge authors only allow downloads on their site; those
+say so. Minecraft needs a mod loader running first: if it's vanilla, Telos says to install
+Fabric for your version.
 
 - Telos adds the mod with everything it needs: its dependencies, and the mod loader it runs on
   (BepInEx or MelonLoader) if the game doesn't have it yet. Files go where r2modman would put them.
@@ -342,7 +354,8 @@ in raw memory like a real game, and also connects to Telos as a game adapter. As
 - `src/hub/modder.ts` reads universal-modder's playbooks and field notes (`modding_guide`),
   `src/hub/workshop.ts` runs the mod builder (`buildtools.ts` is its tools when the chat AI
   isn't Claude Code), and `vendor/universal-modder/` is the bundled toolkit.
-  `src/hub/marketplace.ts` is the Thunderstore marketplace.
+  `src/hub/marketplace.ts` is the marketplace (Thunderstore), and `src/hub/minecraftmods.ts`
+  its Minecraft stores (Modrinth, CurseForge).
 - `src/hub/links.ts` is game links; `src/hub/bridges.ts` works out which connected bridge belongs
   to the attached game.
 - `src/memory/` scans and edits another process's memory: `windows.ts` (Win32 via koffi),
@@ -402,7 +415,10 @@ In `.env` (all optional):
 - The mod builder is tested with the real Claude Code CLI and with a scripted model against
   stand-ins, not yet on a real mod build. How far a build gets depends on the AI building it.
 - The marketplace is tested against Thunderstore itself (Schedule I and Lethal Company mods
-  installed into stand-in game folders), not yet inside a running game.
+  installed into stand-in game folders), not yet inside a running game. Its Minecraft side was
+  tried against Modrinth itself (Mod Menu and the mods it needs, into a stand-in `.minecraft`);
+  its tests use Modrinth's recorded responses and a stand-in for CurseForge's API (the real one
+  needs a key).
 - Game links on memory values stop when that game closes. Find the value again and remake the
   link.
 - The Unity bridge's core (networking, JSON, reading and changing objects) is tested against Telos,

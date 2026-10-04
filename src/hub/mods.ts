@@ -64,7 +64,8 @@ const MINECRAFT_NOTE =
   "creative world, or Open to LAN > Allow Cheats): give the player the exact command to type in chat (/give @s " +
   "minecraft:diamond 64, /effect give @s minecraft:speed 600 2, /time set day, /gamerule keepInventory true). New " +
   "items, mobs, blocks and mechanics are a real mod: build_mod builds it for the game's exact version and loader " +
-  "(Fabric or NeoForge). Ready-made mods come from Modrinth or CurseForge, not Telos's marketplace. ";
+  "(Fabric or NeoForge). Ready-made mods: find_mods searches Modrinth (or CurseForge) for this exact version and loader, " +
+  "and the player adds them in the Marketplace window. ";
 
 const NUMBERS_NOTE =
   "Only number changes work live on this engine (memory editing). Colors, models, spawning, new " +

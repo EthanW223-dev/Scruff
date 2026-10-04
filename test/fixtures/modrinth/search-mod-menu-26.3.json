@@ -1,0 +1,63 @@
+{
+ "hits": [
+  {
+   "project_id": "mOgUt4GM",
+   "project_type": "mod",
+   "slug": "modmenu",
+   "author": "Prospector",
+   "title": "Mod Menu",
+   "description": "Adds a mod menu to view the list of mods you have installed.",
+   "categories": [
+    "fabric",
+    "quilt",
+    "utility"
+   ],
+   "downloads": 149586495,
+   "follows": 27379,
+   "icon_url": "https://cdn.modrinth.com/data/mOgUt4GM/5a20ed1450a0e1e79a1fe04e61bb4e5878bf1d20.png",
+   "date_modified": "2026-09-24T20:44:01.940592+00:00",
+   "client_side": "required",
+   "server_side": "unsupported"
+  },
+  {
+   "project_id": "XKoaSG4i",
+   "project_type": "mod",
+   "slug": "modmenuc",
+   "author": "bleudev",
+   "title": "Mod Menu Command",
+   "description": "Simple mod which provides /mods and /config commands to open mods list or specific mod config",
+   "categories": [
+    "fabric",
+    "utility"
+   ],
+   "downloads": 35644,
+   "follows": 20,
+   "icon_url": "https://cdn.modrinth.com/data/XKoaSG4i/ee7a63dbb1d351fb851c8702d62831a617cde28e.png",
+   "date_modified": "2026-09-20T11:29:10.953813+00:00",
+   "client_side": "required",
+   "server_side": "unsupported"
+  },
+  {
+   "project_id": "eUw8l2Vi",
+   "project_type": "mod",
+   "slug": "modmenu-badges-lib",
+   "author": "syorito-hatsuki",
+   "title": "ModMenu Badges Lib",
+   "description": "More badge!!!",
+   "categories": [
+    "fabric",
+    "library",
+    "utility"
+   ],
+   "downloads": 915692,
+   "follows": 244,
+   "icon_url": "",
+   "date_modified": "2026-03-30T08:27:28.429016+00:00",
+   "client_side": "required",
+   "server_side": "unsupported"
+  }
+ ],
+ "offset": 0,
+ "limit": 3,
+ "total_hits": 35
+}

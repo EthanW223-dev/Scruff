@@ -112,7 +112,37 @@ export function detectMinecraft(exe: string, launch: GameLaunch, dirs: UserDirs)
   }
   version ??= flag(args, "--fml.mcVersion") ?? (versionId && /^\d+\.\d+[\w.-]*$/.test(versionId) ? versionId : undefined);
 
-  return { gameDir: findGameDir(args, launch.cwd, dirs), version, loader, loaderVersion };
+  const gameDir = findGameDir(args, launch.cwd, dirs);
+  // No launch to read (Windows wouldn't say), but the title's asterisk says it's modded: if the
+  // launcher has one kind of loader for this version, that's the one running.
+  if (!loader && version && /^Minecraft\*/i.test(title)) {
+    const found = installedLoaders(gameDir, version);
+    if (found.length && found.every((f) => f.loader === found[0].loader)) {
+      loader = found[0].loader;
+      loaderVersion = found.map((f) => f.version).sort(newer)[0];
+    }
+  }
+  return { gameDir, version, loader, loaderVersion };
+}
+
+/** The loader versions the launcher has for a game version (versions/fabric-loader-0.16.10-26.3, …). */
+function installedLoaders(gameDir: string, version: string): { loader: Loader; version: string }[] {
+  const out: { loader: Loader; version: string }[] = [];
+  for (const v of list(path.join(gameDir, "versions"))) {
+    const knot = /^(fabric|quilt)-loader-([\d.]+)-(.+)$/i.exec(v);
+    if (knot && knot[3] === version) out.push({ loader: knot[1].toLowerCase() === "fabric" ? "Fabric" : "Quilt", version: knot[2] });
+    const forge = /^(.+)-forge-([\d.]+)$/i.exec(v);
+    if (forge && forge[1] === version) out.push({ loader: "Forge", version: forge[2] });
+  }
+  return out;
+}
+
+/** Sorts dotted versions newest first. */
+function newer(a: string, b: string): number {
+  const x = a.split(".").map(Number);
+  const y = b.split(".").map(Number);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) if ((y[i] ?? 0) !== (x[i] ?? 0)) return (y[i] ?? 0) - (x[i] ?? 0);
+  return 0;
 }
 
 /**
@@ -192,5 +222,6 @@ export function minecraftProfile(exe: string, mc: MinecraftLaunch): GameProfile 
     saveDirs: isDir(saves) ? [saves] : [],
     configFiles,
     notes,
+    minecraft: { version: mc.version, loader: mc.loader, loaderVersion: mc.loaderVersion },
   };
 }

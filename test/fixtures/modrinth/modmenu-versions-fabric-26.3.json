@@ -1,0 +1,89 @@
+[
+ {
+  "id": "kyy7dbrZ",
+  "project_id": "mOgUt4GM",
+  "name": "v21.0.0 for 26.3",
+  "version_number": "21.0.0",
+  "game_versions": [
+   "26.3"
+  ],
+  "loaders": [
+   "fabric",
+   "quilt"
+  ],
+  "version_type": "release",
+  "date_published": "2026-09-23T21:31:03.843943Z",
+  "files": [
+   {
+    "id": "kai5Dbms",
+    "hashes": {
+     "sha512": "588c0c557963f4778572ee81bfafc190b332c26d5926c5fe7e3e1614dcf8e14f58e3bc80a97694521dd05907e9753a7c8575048ea769e4dbf40a3db74a4e2606",
+     "sha1": "66ec40f1cd0c037ddca2b5fc6b4b976d479c18e8"
+    },
+    "url": "https://cdn.modrinth.com/data/mOgUt4GM/versions/kyy7dbrZ/modmenu-21.0.0.jar",
+    "filename": "modmenu-21.0.0.jar",
+    "primary": true,
+    "size": 856779,
+    "file_type": null
+   }
+  ],
+  "dependencies": [
+   {
+    "version_id": null,
+    "project_id": "eXts2L7r",
+    "file_name": null,
+    "dependency_type": "required"
+   },
+   {
+    "version_id": null,
+    "project_id": "P7dR8mSH",
+    "file_name": null,
+    "dependency_type": "required"
+   }
+  ]
+ },
+ {
+  "id": "lcxkZSq6",
+  "project_id": "mOgUt4GM",
+  "name": "v21.0.0-beta.1 for 26.3-rc-1",
+  "version_number": "21.0.0-beta.1",
+  "game_versions": [
+   "26.3-rc-1",
+   "26.3"
+  ],
+  "loaders": [
+   "fabric",
+   "quilt"
+  ],
+  "version_type": "beta",
+  "date_published": "2026-09-11T00:52:42.214641Z",
+  "files": [
+   {
+    "id": "NEtIoQS2",
+    "hashes": {
+     "sha1": "e75cdab1860f1efd2ac29876512f6d7da9edefdb",
+     "sha512": "f56cf8d2d1daaf5de33a9615d75fa70aae9502144c3c605973ae627c9c67750bf181e1a83b37583582414fb7626487a2850a3bc88c2b34ea54a46f91ca6802b4"
+    },
+    "url": "https://cdn.modrinth.com/data/mOgUt4GM/versions/lcxkZSq6/modmenu-21.0.0-beta.1.jar",
+    "filename": "modmenu-21.0.0-beta.1.jar",
+    "primary": true,
+    "size": 856788,
+    "file_type": null
+   }
+  ],
+  "dependencies": [
+   {
+    "version_id": null,
+    "project_id": "P7dR8mSH",
+    "file_name": null,
+    "dependency_type": "required"
+   },
+   {
+    "version_id": null,
+    "project_id": "eXts2L7r",
+    "file_name": null,
+    "dependency_type": "required"
+   }
+  ]
+ }
+]

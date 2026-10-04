@@ -73,7 +73,21 @@ export function onlineGame(exeName: string): string | undefined {
   return onlineGames.get(normalize(exeName.split(/[\\/]/).pop() ?? exeName));
 }
 
+/**
+ * Minecraft's title says where the player is ("Minecraft 1.21.4 - Multiplayer (3rd-party Server)",
+ * "- Minecraft Realms"). Someone else's server is other players' game; single-player and LAN are fine.
+ */
+const MINECRAFT_ONLINE = /^Minecraft\*?\s.*-\s*(Multiplayer \(3rd-party Server\)|Minecraft Realms)\s*$/i;
+
 export function checkAttachSafety(target: ProcessInfo, running: ProcessInfo[]): SafetyVerdict {
+  if (MINECRAFT_ONLINE.test(target.title ?? "")) {
+    return {
+      ok: false,
+      reason:
+        "Minecraft is on a server or Realm right now. Telos only changes single-player worlds (or a LAN world you host): " +
+        "open one, then attach again.",
+    };
+  }
   const game = onlineGames.get(normalize(target.name));
   if (game) {
     return {

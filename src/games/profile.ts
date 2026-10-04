@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { detectMinecraft, minecraftProfile } from "./minecraft.ts";
 
 /**
  * What Telos can learn about a game from its files: the engine, where it keeps saves and
@@ -18,6 +19,19 @@ export interface GameProfile {
   saveDirs: string[];
   configFiles: string[];
   notes: string[];
+}
+
+/**
+ * What the running process says about itself, beyond its exe: games whose exe is a shared
+ * runtime (Minecraft: Java Edition runs as javaw.exe) are known by their window and launch.
+ */
+export interface GameLaunch {
+  /** Window title. */
+  title?: string;
+  /** The process's arguments (read once at attach; never kept). */
+  args?: string[];
+  /** The folder it runs in, when the OS tells us. */
+  cwd?: string;
 }
 
 export interface UserDirs {
@@ -60,7 +74,11 @@ const list = (dir: string) => {
 /** "60 Seconds! Reatomized" and "60SecondsReatomized" should match. */
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 
-export function buildProfile(exe: string, dirs: UserDirs = userDirs()): GameProfile {
+export function buildProfile(exe: string, dirs: UserDirs = userDirs(), launch: GameLaunch = {}): GameProfile {
+  // --- Minecraft: Java Edition (the exe is Java; the game lives in its game directory) ---
+  const minecraft = detectMinecraft(exe, launch, dirs);
+  if (minecraft) return minecraftProfile(exe, minecraft);
+
   let installDir = path.dirname(exe);
   const base = path.basename(exe).replace(/\.exe$/i, "");
   const names = new Set<string>([base.replace(/-Win64-Shipping$/i, ""), path.basename(installDir)]);
@@ -220,5 +238,7 @@ export function describeProfile(p: GameProfile): string {
   }
   if (p.codeKind === "il2cpp") lines.push("Its code names are searchable with search_game_code (names only, no types).");
   lines.push(p.saveDirs.length ? `Saves/settings found in: ${p.saveDirs.join("; ")}.` : "No save folder found yet.");
+  // Minecraft's game folder, version and loader decide how anything gets modded: say them.
+  if (p.engine === "Minecraft (Java)") lines.push(...p.notes);
   return lines.join(" ");
 }

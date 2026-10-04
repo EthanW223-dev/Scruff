@@ -13,11 +13,14 @@
  * - rpgmaker (RPG Maker MV/MZ): a plugin bridge (one JS file in the game's plugin list) for
  *   live gold, items, party stats, switches, variables, teleporting and encounters; the
  *   database itself (items, enemies, prices) is plain JSON the file tools edit.
+ * - minecraft (Minecraft: Java Edition): Java moves values around (garbage collection), so memory
+ *   edits rarely stick; the game's own commands do live changes in single-player, and new content
+ *   is a Fabric/NeoForge mod the mod builder makes.
  * - numbers-only (Godot, GameMaker, Ren'Py, Source, unknown): memory editing.
  *   Structural mods there need a real mod, which the Workshop builds (workshop.ts).
  */
 
-export type ModTier = "full" | "unreal" | "rpgmaker" | "numbers";
+export type ModTier = "full" | "unreal" | "rpgmaker" | "minecraft" | "numbers";
 
 export interface EngineModSupport {
   tier: ModTier;
@@ -55,6 +58,14 @@ const RPGMAKER_MISSING =
   "Meanwhile number changes via memory work. ";
 const RPGMAKER_READY = "The RPG Maker bridge is connected: use the rpgmaker__ tools (start with rpgmaker__status). ";
 
+const MINECRAFT_NOTE =
+  "Minecraft: Java Edition. Java moves values around in memory (garbage collection), so memory edits rarely stick: " +
+  "don't offer them. Live changes go through the game's own commands, in a single-player world with cheats on (a " +
+  "creative world, or Open to LAN > Allow Cheats): give the player the exact command to type in chat (/give @s " +
+  "minecraft:diamond 64, /effect give @s minecraft:speed 600 2, /time set day, /gamerule keepInventory true). New " +
+  "items, mobs, blocks and mechanics are a real mod: build_mod builds it for the game's exact version and loader " +
+  "(Fabric or NeoForge). Ready-made mods come from Modrinth or CurseForge, not Telos's marketplace. ";
+
 const NUMBERS_NOTE =
   "Only number changes work live on this engine (memory editing). Colors, models, spawning, new " +
   "content and mechanics need a real mod: modding_guide has the route for this engine, and build_mod " +
@@ -68,6 +79,7 @@ export function engineModSupport(engine: string, bridgeConnected: boolean, unrea
   if (engine === "Unreal Engine") {
     return { tier: "unreal", note: UNREAL_NOTE + (unrealConnected || bridgeConnected ? UNREAL_READY : "") };
   }
+  if (engine === "Minecraft (Java)") return { tier: "minecraft", note: MINECRAFT_NOTE };
   if (engine.startsWith("RPG Maker")) {
     return { tier: "rpgmaker", note: RPGMAKER_NOTE + (bridgeConnected ? RPGMAKER_READY : RPGMAKER_MISSING) };
   }

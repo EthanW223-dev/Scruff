@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { readFields, scanTypeFor, type FieldInfo } from "../games/dotnet.ts";
+import { isPrivateFile } from "../games/minecraft.ts";
 import { allowedRoots, isInside, type GameProfile } from "../games/profile.ts";
 import type { GameManager } from "./game.ts";
 import { defineTool, json, type HubTool } from "./tools.ts";
@@ -136,6 +137,7 @@ export function gameFileTools(games: GameManager, backupDir: string): HubTool[] 
     if (!isInside(resolved, allowedRoots(p))) {
       throw new Error("That file is outside the game's install, save and settings folders.");
     }
+    if (isPrivateFile(resolved)) throw new Error("That's the launcher's sign-in file (the player's account): Telos never reads or changes it.");
     return resolved;
   };
 
@@ -226,6 +228,7 @@ export function gameFileTools(games: GameManager, backupDir: string): HubTool[] 
         else if (where === "settings") files.push(...p.configFiles);
         else walk(p.installDir, 1, files);
         const rows = files
+          .filter((f) => !isPrivateFile(f))
           .filter((f) => !filter || path.basename(f).toLowerCase().includes(filter.toLowerCase()))
           .slice(0, MAX_FILES)
           .map((f) => {

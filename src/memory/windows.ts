@@ -131,3 +131,16 @@ export async function listWindowsProcesses(): Promise<ProcessInfo[]> {
     exe: r.Path || undefined,
   }));
 }
+
+/** One process's full command line (Get-Process doesn't have it), or undefined if Windows won't say. */
+export async function windowsCommandLine(pid: number): Promise<string | undefined> {
+  if (!Number.isInteger(pid) || pid <= 0) return undefined;
+  // UTF-8 out, so a game folder under a non-English user name comes through intact.
+  const script = `[Console]::OutputEncoding = [Text.Encoding]::UTF8; (Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`;
+  const { stdout } = await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    maxBuffer: 4 * 1024 * 1024,
+    windowsHide: true,
+    timeout: 15_000,
+  });
+  return stdout.trim() || undefined;
+}

@@ -134,6 +134,14 @@ What works depends on the engine (the status note in chat always says which tier
   ([bridge-rpgmaker/](bridge-rpgmaker/README.md)) for live changes: gold, items, party HP and
   levels, switches and variables by name, teleporting, walking through walls, random
   encounters.
+- **Minecraft: Java Edition — commands, plus mods the builder makes.** Minecraft runs as Java
+  (`javaw.exe`), so Telos reads how it was launched to find the game folder (`.minecraft`, or a
+  Prism/MultiMC/CurseForge/Modrinth instance), its version and its mod loader (Fabric, Quilt,
+  Forge, NeoForge). Java moves values around in memory, so Telos doesn't promise memory edits;
+  in a single-player world with cheats on, it gives you the exact command to type (`/give`,
+  `/effect`, `/gamerule`). New items, mobs and mechanics are a mod the mod builder makes for your
+  exact version and loader. Telos won't attach while you're on a server or Realm, and it never
+  reads the launcher's sign-in file (`launcher_accounts.json`).
 - **Everything else (Godot, GameMaker, Source, ...) — numbers only, live.** Colors, models,
   spawning and new content there need a real mod: see the mod builder below.
 
@@ -324,6 +332,7 @@ in raw memory like a real game, and also connects to Telos as a game adapter. As
 ```
 
 - `src/games/` reads a game's files: `profile.ts` (engine, install, save and settings folders),
+  `minecraft.ts` (Minecraft: Java Edition, known by its launch rather than its exe),
   `dotnet.ts` (variable names and types from a Unity game's `Assembly-CSharp.dll`), `bepinex.ts`
   (installs and removes the Unity bridge).
 - `bridge/` is the Unity bridge: a BepInEx plugin in C# ([bridge/README.md](bridge/README.md)).

@@ -604,7 +604,9 @@ function renderMarket(m, profile) {
     return row;
   });
   const loader = m.loader ? `Mod loader: ${LOADER_NAME[m.loader]}` : "No mod loader yet: Telos adds the one a mod needs.";
-  $("market-installed").replaceChildren(...rows, el("div", "loader", mine.length ? loader : `No player mods added yet. ${loader}`));
+  // Some games' mods live elsewhere (Minecraft's on Modrinth/CurseForge): say so instead of offering the store.
+  $("market-open").hidden = Boolean(m.elsewhere);
+  $("market-installed").replaceChildren(...rows, el("div", "loader", m.elsewhere ?? (mine.length ? loader : `No player mods added yet. ${loader}`)));
 
   // The store dialog.
   const where = m.community ? `${m.community.name} on Thunderstore · ${m.count.toLocaleString()} mod${m.count === 1 ? "" : "s"}${m.query ? ` for "${m.query}"` : ""}` : `${profile.name}`;

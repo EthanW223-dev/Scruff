@@ -4,9 +4,10 @@ import { bridgeState, clearOldBridges, installBridge, readManifest } from "../ga
 import { installRpgMakerBridge, rpgMakerBridgeState } from "../games/rpgmaker.ts";
 import { installUe4ssBridge, ue4ssBridgeState } from "../games/ue4ss.ts";
 import { installUnrealBridge, unrealBridgeState } from "../games/unreal.ts";
-import { buildProfile, type GameProfile } from "../games/profile.ts";
+import { isJavaExe } from "../games/minecraft.ts";
+import { buildProfile, userDirs, type GameLaunch, type GameProfile } from "../games/profile.ts";
 import { z } from "zod";
-import { listProcesses, memorySupported, openBackend } from "../memory/platform.ts";
+import { listProcesses, memorySupported, openBackend, processLaunch } from "../memory/platform.ts";
 import { checkAttachSafety } from "../memory/safety.ts";
 import { GameSession } from "../memory/session.ts";
 import { WATCH_LIMIT, type ScanRequest } from "../memory/scanner.ts";
@@ -97,10 +98,14 @@ export class GameManager extends EventEmitter {
     const verdict = checkAttachSafety(target, running);
     if (!verdict.ok) throw new Error(verdict.reason);
 
+    // A Java game (Minecraft) is known by its launch, not its exe: read that once, keep only the profile.
+    const launch: GameLaunch = { title: target.title };
+    if (isJavaExe(target.exe)) Object.assign(launch, await processLaunch(pid).catch(() => ({})));
+
     this.detach();
     const session = new GameSession(target, openBackend(pid));
     try {
-      this.profile = target.exe ? buildProfile(target.exe) : null;
+      this.profile = target.exe ? buildProfile(target.exe, userDirs(), launch) : null;
     } catch {
       this.profile = null; // unreadable install folder: memory editing still works
     }

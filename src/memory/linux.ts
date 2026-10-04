@@ -95,3 +95,19 @@ export function listLinuxProcesses(): ProcessInfo[] {
   // Newest first: the game was probably started recently.
   return out.sort((a, b) => b.pid - a.pid);
 }
+
+/** One process's whole argument list and working folder (the listing keeps only the start of the command). */
+export function linuxLaunch(pid: number): { args?: string[]; cwd?: string } {
+  const out: { args?: string[]; cwd?: string } = {};
+  try {
+    out.args = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean);
+  } catch {
+    // exited, or not ours to read
+  }
+  try {
+    out.cwd = fs.readlinkSync(`/proc/${pid}/cwd`);
+  } catch {
+    // not ours to read
+  }
+  return out;
+}

@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+import { isPrivateFile } from "../games/minecraft.ts";
 import { defineTool, type HubTool } from "./tools.ts";
 
 /**
@@ -45,6 +46,7 @@ export function builderTools(o: BuilderToolOptions): HubTool[] {
     });
   const resolve = (p: string, write: boolean) => {
     const full = path.resolve(o.cwd, p);
+    if (isPrivateFile(full)) throw new Error(`${full} is the launcher's sign-in file (the player's account): never read or change it.`);
     if (inside(full, o.roots)) return full;
     if (!write && inside(full, o.readOnlyRoots)) return full;
     throw new Error(
@@ -213,7 +215,7 @@ export function builderTools(o: BuilderToolOptions): HubTool[] {
               if (!/^(\.git|node_modules|obj|bin|\.venv)$/.test(e.name)) walk(f, depth + 1);
               continue;
             }
-            if (glob && !glob.test(e.name)) continue;
+            if ((glob && !glob.test(e.name)) || isPrivateFile(f)) continue;
             files++;
             let buf: Buffer;
             try {

@@ -24,6 +24,10 @@ const MANIFEST = ".telos-mods.json";
 const MAX_ZIP = 400 * 1024 * 1024;
 /** Downloads only come from Thunderstore and its CDN. */
 const ALLOWED_HOSTS = /(^|\.)thunderstore\.io$/;
+/** Thunderstore's mods are for Unity games and their loaders (BepInEx, MelonLoader); Minecraft's aren't there. */
+const NOT_FOR_MINECRAFT =
+  "Minecraft's mods aren't on Thunderstore: players get them from Modrinth or CurseForge, for their game and loader " +
+  "version, into the mods folder. Telos can build one for you instead.";
 const MOD_MANAGERS = /^(r2modman|GaleModManager|Gale|ThunderstoreModManager|r2modman_plus)$/i;
 /** Package metadata, not game files. */
 const META = /^(icon\.png|manifest\.json|readme\.md|changelog\.md|license(\.md|\.txt)?)$/i;
@@ -337,6 +341,7 @@ export class Marketplace extends EventEmitter {
   private game(): GameProfile {
     const p = this.opts.profile();
     if (!p) throw new Error("Attach to a game first: the marketplace shows mods for the game you're playing.");
+    if (p.engine === "Minecraft (Java)") throw new Error(NOT_FOR_MINECRAFT);
     return p;
   }
 
@@ -345,6 +350,8 @@ export class Marketplace extends EventEmitter {
     const installed = p ? Object.values(readMods(p.installDir).mods) : [];
     return {
       game: p?.name ?? null,
+      /** Why this game's mods aren't Thunderstore's (Minecraft), or null. */
+      elsewhere: p?.engine === "Minecraft (Java)" ? NOT_FOR_MINECRAFT : null,
       community: this.communityFor === p?.installDir ? this.community : null,
       query: this.query,
       count: this.count,
@@ -400,6 +407,13 @@ export class Marketplace extends EventEmitter {
 
   /** page > 1 adds the next page to the results ("more"). */
   async search(query = this.query, page = 1): Promise<MarketMod[]> {
+    if (this.opts.profile()?.engine === "Minecraft (Java)") {
+      this.results = [];
+      this.count = 0;
+      this.error = NOT_FOR_MINECRAFT;
+      this.emit("update");
+      return [];
+    }
     const p = this.game();
     this.error = null;
     try {

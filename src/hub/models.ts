@@ -4,7 +4,7 @@ import path from "node:path";
 import OpenAI from "openai";
 import type { Brain } from "./agent.ts";
 import { CLAUDE_MODELS, claudeStreamFactory, listClaudeModels, type Effort } from "./providers/anthropic.ts";
-import { openAICompatibleStreamFactory } from "./providers/openai.ts";
+import { openAICompatibleStreamFactory, OPENROUTER_APP_HEADERS } from "./providers/openai.ts";
 import { BEST_VOICE, defaultVoiceFor, isVoiceFor, selectedEngineReady, TTS_ENGINES, voiceEnginesReady, type TtsEngine } from "./voice.ts";
 
 export const PROVIDER_IDS = [
@@ -127,6 +127,23 @@ function hostLabel(baseURL: string): string {
   if (host.includes("x.ai")) return "xAI";
   if (host === "localhost" || host === "127.0.0.1") return "Local server";
   return host;
+}
+
+/**
+ * OpenRouter serves GET /models without checking the key at all, so a models-list
+ * "check" would accept any garbage string and save it as "Connected". /auth/key
+ * actually verifies the key: 200 means it's good, 401/403 means it was rejected.
+ * `fetchFn` is injectable so tests don't need the network.
+ */
+export async function checkOpenRouterKey(key: string, fetchFn: typeof fetch = fetch): Promise<void> {
+  const res = await fetchFn("https://openrouter.ai/api/v1/auth/key", {
+    headers: { Authorization: `Bearer ${key}`, ...OPENROUTER_APP_HEADERS },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (res.status === 401 || res.status === 403) {
+    throw new Error("That key was rejected. Double-check you copied the whole thing.");
+  }
+  if (!res.ok) throw new Error(`OpenRouter answered ${res.status}; try again in a bit.`);
 }
 
 /**
@@ -405,6 +422,8 @@ export class ModelRouter {
     try {
       if (id === "claude") {
         await listClaudeModels(new Anthropic({ apiKey: key, timeout: 10000, maxRetries: 0 }));
+      } else if (id === "openrouter") {
+        await checkOpenRouterKey(key);
       } else {
         const baseURL =
           id === "custom"

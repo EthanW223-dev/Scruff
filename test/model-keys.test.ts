@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { ModelRouter } from "../src/hub/models.ts";
+import { checkOpenRouterKey, ModelRouter } from "../src/hub/models.ts";
 
 function tmpSettings(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "scruff-keys-"));
@@ -103,4 +103,46 @@ test("the old OPENAI_BASE_URL env still lands on the custom provider", () => {
 test("setProviderKey still rejects unknown provider ids", async () => {
   const router = new ModelRouter({}, tmpSettings(), "medium");
   await assert.rejects(router.setProviderKey("nope", "some-key-value"), /doesn't use an API key/);
+});
+
+// OpenRouter serves GET /models without checking auth, so the key check must hit
+// /auth/key instead. These tests stub fetch and never touch the network.
+const stubFetch = (res: Response) => (async () => res) as unknown as typeof fetch;
+
+test("OpenRouter key check accepts a 200 from /auth/key", async () => {
+  await checkOpenRouterKey("sk-or-v1-realkey123", stubFetch({ status: 200, ok: true } as Response));
+});
+
+test("OpenRouter key check rejects a 401 as a bad key", async () => {
+  await assert.rejects(
+    checkOpenRouterKey("sk-or-v1-boguskey123", stubFetch({ status: 401, ok: false } as Response)),
+    /key was rejected/,
+  );
+});
+
+test("OpenRouter key check rejects a 403 as a bad key", async () => {
+  await assert.rejects(
+    checkOpenRouterKey("sk-or-v1-boguskey123", stubFetch({ status: 403, ok: false } as Response)),
+    /key was rejected/,
+  );
+});
+
+test("OpenRouter key check treats a 500 as a retryable error, not a bad key", async () => {
+  await assert.rejects(
+    checkOpenRouterKey("sk-or-v1-realkey123", stubFetch({ status: 500, ok: false } as Response)),
+    /try again/,
+  );
+});
+
+test("OpenRouter key check sends the key as a Bearer token to /auth/key", async () => {
+  let gotUrl = "";
+  let gotAuth = "";
+  const stub = (async (url: string | URL | Request, init?: { headers?: Record<string, string> }) => {
+    gotUrl = String(url);
+    gotAuth = init?.headers?.["Authorization"] ?? "";
+    return { status: 200, ok: true } as Response;
+  }) as unknown as typeof fetch;
+  await checkOpenRouterKey("sk-or-v1-realkey123", stub);
+  assert.equal(gotUrl, "https://openrouter.ai/api/v1/auth/key");
+  assert.equal(gotAuth, "Bearer sk-or-v1-realkey123");
 });

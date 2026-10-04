@@ -9,6 +9,17 @@ import type { ModelStream, StreamFactory } from "../agent.ts";
  * Claude-shaped message.
  */
 
+/** App-identification headers OpenRouter asks API clients to send. */
+export const OPENROUTER_APP_HEADERS = {
+  "HTTP-Referer": "https://github.com/EthanW223-dev/Scruff",
+  "X-Title": "Telos",
+} as const;
+
+/** True for requests headed to OpenRouter's API (key checks and chat alike). */
+export function isOpenRouterURL(baseURL: string): boolean {
+  return baseURL.includes("openrouter.ai");
+}
+
 type Params = Parameters<StreamFactory>[0];
 type ChatMessage = OpenAI.Chat.Completions.ChatCompletionMessageParam;
 type Block = Anthropic.Beta.BetaContentBlock;
@@ -22,7 +33,12 @@ export interface OpenAICompatibleConfig {
 }
 
 export function openAICompatibleStreamFactory(config: OpenAICompatibleConfig): StreamFactory {
-  const client = new OpenAI({ baseURL: config.baseURL, apiKey: config.apiKey || "not-needed", maxRetries: 1 });
+  const client = new OpenAI({
+    baseURL: config.baseURL,
+    apiKey: config.apiKey || "not-needed",
+    maxRetries: 1,
+    defaultHeaders: isOpenRouterURL(config.baseURL) ? { ...OPENROUTER_APP_HEADERS } : undefined,
+  });
   // Flipped off the first time the server rejects images (text-only local models).
   let vision = true;
 

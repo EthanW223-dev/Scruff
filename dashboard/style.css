@@ -951,10 +951,24 @@ body.hud-only[data-corner^="bottom"] .hud { min-height: 100vh; }
 .hud-build:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .hud-build canvas { display: block; width: 32px; height: 32px; margin: 3px; image-rendering: pixelated; }
 .hud-unit.compact .hud-build { margin: 5px 5px 5px 0; }
-.hud-buildview { display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
+/* After the build, a mark in the tile's corner says how it went. */
+.hud-build { position: relative; }
+.hud-build[data-status="done"]::after, .hud-build[data-status="failed"]::after, .hud-build[data-status="stopped"]::after {
+  position: absolute; top: -6px; right: -6px; width: 15px; height: 15px; display: grid; place-items: center;
+  font: 700 11px/1 var(--mono); border: 1px solid var(--bg); background: var(--accent); color: var(--bg);
+}
+.hud-build[data-status="done"]::after { content: "✓"; }
+.hud-build[data-status="failed"] { border-color: var(--danger); }
+.hud-build[data-status="failed"]::after { content: "!"; background: var(--danger); color: #fff; }
+.hud-build[data-status="stopped"]::after { content: "■"; font-size: 8px; background: var(--muted); }
+.hud-buildview { display: flex; flex-direction: column; gap: 5px; max-height: 290px; font-size: 13px; }
+.hud-buildview > * { flex: none; } /* full height each; the view scrolls if it must */
 .hud-buildview .bv-head { display: flex; align-items: center; gap: 8px; font: 11px var(--mono); color: var(--muted); }
 .hud-buildview .bv-head .pill { margin-left: auto; }
 .hud-buildview .bv-req { font-weight: 650; line-height: 1.35; }
+/* Long requests, words and endings stay a few lines: the tray's window is only so tall. */
+.hud-buildview .bv-req, .hud-buildview ol li.say, .hud-buildview .bv-end { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.hud-buildview ol li.say { -webkit-line-clamp: 2; }
 .hud-buildview ol { margin: 0; padding: 0; list-style: none; font: 11.5px/1.5 var(--mono); color: var(--muted); }
 .hud-buildview ol li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hud-buildview ol li.say { color: var(--text); white-space: normal; }

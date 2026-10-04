@@ -45,12 +45,12 @@ function fakeCanvas() {
 
 const lit = (f: Float32Array) => [...f].filter((v) => v > 0.1).length;
 
-test("all ten states draw an animated sprite inside the grid", () => {
+test("all eleven states draw a sprite inside the grid, and all but the resting hammer move", () => {
   const { canvas } = fakeCanvas();
   const orb = new AgentOrb(canvas, { size: 64 });
   try {
     assert.equal(canvas.width, GRID, "the canvas is the sprite's own size; CSS scales it up crisp");
-    assert.equal(ORB_STATES.length, 10);
+    assert.equal(ORB_STATES.length, 11);
     for (const state of ORB_STATES) {
       const frames = [0, 0.4, 0.9, 1.7, 2.6].map((t) => Array.from(orb.frame(state, t, new Float32Array(GRID * GRID))));
       for (const f of frames) {
@@ -59,7 +59,8 @@ test("all ten states draw an animated sprite inside the grid", () => {
       }
       assert.ok(Math.max(...frames.map((f) => lit(Float32Array.from(f)))) >= 8, `${state} draws a shape`);
       const distinct = new Set(frames.map((f) => f.join(","))).size;
-      assert.ok(distinct >= 2, `${state} moves (got ${distinct} distinct frames)`);
+      if (state === "resting") assert.equal(distinct, 1, "a finished build's hammer lies still");
+      else assert.ok(distinct >= 2, `${state} moves (got ${distinct} distinct frames)`);
     }
   } finally {
     orb.destroy();

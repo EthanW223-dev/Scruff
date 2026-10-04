@@ -744,7 +744,7 @@ function clearBuildCards() {
 }
 
 function spriteFor(job) {
-  return job.status === "running" ? "building" : job.status === "done" ? "breathing" : "connecting";
+  return job.status === "running" ? "building" : "resting";
 }
 
 function renderBuilds(ws) {
@@ -2070,7 +2070,7 @@ function renderKeys(keys) {
   $("dock-keys").replaceChildren(
     ...keys.map(([combo, what]) => {
       const hint = el("span", "key-hint");
-      for (const k of combo.split("+")) hint.append(el("kbd", "", k.replace("CommandOrControl", "Ctrl")));
+      for (const k of combo.split("+")) hint.append(el("kbd", "", /^(CommandOrControl|CmdOrCtrl|Control)$/i.test(k) ? "Ctrl" : k));
       hint.append(what);
       return hint;
     }),

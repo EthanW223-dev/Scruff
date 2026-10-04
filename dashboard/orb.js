@@ -5,7 +5,8 @@
 // dissolves in pixel by pixel (ordered dither) instead of fading.
 //
 // States: working, searching, solving, listening, connecting, weaving,
-//          composing, breathing, shaping, building (the mod builder at work).
+//          composing, breathing, shaping, building (the mod builder at work), resting
+//          (its work over).
 // Ink: the page's text color by default (black & white theme); setColor() uses the
 // active game's accent instead.
 
@@ -20,6 +21,7 @@ export const ORB_STATES = [
   "breathing",
   "shaping",
   "building",
+  "resting",
 ];
 
 const LABELS = {
@@ -33,6 +35,7 @@ const LABELS = {
   breathing: "Thinking…",
   shaping: "Shaping…",
   building: "Building a mod…",
+  resting: "Mod builder finished",
 };
 
 /** "#rgb" / "#rrggbb" / "rgb()" → {r,g,b} ink tint, or undefined for the default ink. */
@@ -300,26 +303,10 @@ const SPRITES = {
   },
   // The mod builder at work: a hammer swings down onto an anvil, and sparks fly.
   building(f, n) {
-    // The anvil: a lit top with its horn to the left, a dim waist, a solid base.
-    for (let x = 2; x <= 12; x++) put(f, x, 10, x === 2 ? DIM : FULL);
-    for (let x = 4; x <= 12; x++) put(f, x, 11, x === 4 ? FAINT : DIM);
-    for (let y = 12; y <= 13; y++) for (let x = 6; x <= 10; x++) put(f, x, y, DIM);
-    for (let x = 4; x <= 12; x++) put(f, x, 14, FULL);
-    // The hammer swings about the hand at the right: raised, down onto the anvil, a bounce, back up.
+    anvil(f);
+    // Raised, down onto the anvil, a bounce, back up.
     const step = n % 12;
-    const angle = [58, 58, 58, 66, 40, 16, 0, 0, 6, 18, 36, 50][step] * (Math.PI / 180);
-    const px = 14;
-    const py = 7.5;
-    const dx = -Math.cos(angle);
-    const dy = -Math.sin(angle);
-    for (let y = 0; y < N; y++) {
-      for (let x = 0; x < N; x++) {
-        const along = (x - px) * dx + (y - py) * dy;
-        const across = Math.abs((x - px) * -dy + (y - py) * dx);
-        if (along >= 4.5 && along <= 7.5 && across <= 2) put(f, x, y, FULL); // the head
-        else if (along >= 0.5 && along < 4.5 && across <= 0.5) put(f, x, y, DIM); // the handle
-      }
-    }
+    hammer(f, [58, 58, 58, 66, 40, 16, 0, 0, 6, 18, 36, 50][step]);
     // Sparks off the strike, flying out and fading.
     const sparks = [
       [[5, 8], [4, 6], [6, 5], [3, 9]],
@@ -329,7 +316,37 @@ const SPRITES = {
     const age = step - 6;
     if (age >= 0 && age < 3) for (const [x, y] of sparks[age]) put(f, x, y, [FULL, DIM, FAINT][age]);
   },
+  // The mod builder's work is over: the hammer lies still on the anvil.
+  resting(f) {
+    anvil(f);
+    hammer(f, 0);
+  },
 };
+
+/** The mod builder's anvil: a lit top with its horn to the left, a dim waist, a solid base. */
+function anvil(f) {
+  for (let x = 2; x <= 12; x++) put(f, x, 10, x === 2 ? DIM : FULL);
+  for (let x = 4; x <= 12; x++) put(f, x, 11, x === 4 ? FAINT : DIM);
+  for (let y = 12; y <= 13; y++) for (let x = 6; x <= 10; x++) put(f, x, y, DIM);
+  for (let x = 4; x <= 12; x++) put(f, x, 14, FULL);
+}
+
+/** Its hammer, held at the right and raised `deg` degrees (0: its head on the anvil). */
+function hammer(f, deg) {
+  const angle = deg * (Math.PI / 180);
+  const px = 14;
+  const py = 7.5;
+  const dx = -Math.cos(angle);
+  const dy = -Math.sin(angle);
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const along = (x - px) * dx + (y - py) * dy;
+      const across = Math.abs((x - px) * -dy + (y - py) * dx);
+      if (along >= 4.5 && along <= 7.5 && across <= 2) put(f, x, y, FULL); // the head
+      else if (along >= 0.5 && along < 4.5 && across <= 0.5) put(f, x, y, DIM); // the handle
+    }
+  }
+}
 
 export class AgentOrb {
   /**

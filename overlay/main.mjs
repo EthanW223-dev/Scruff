@@ -126,7 +126,7 @@ function createWindow() {
     focusable: false,
     alwaysOnTop: true,
     show: false,
-    title: "Scruff",
+    title: "Telos",
     webPreferences: {
       preload: path.join(path.dirname(fileURLToPath(import.meta.url)), "preload.cjs"),
       contextIsolation: true,
@@ -179,7 +179,9 @@ function saveHudPos(p) {
  * once dragged, it stays exactly where it was put.
  */
 const HUD_W = 520;
-const HUD_H = 300;
+// Tall enough for the tray opened on a reply or the mod builder's steps; the window is
+// click-through everywhere but the tray itself.
+const HUD_H = 400;
 /** Keep the whole HUD window on the primary display — it must never end up
  *  half off-screen (a migrated pre-window orb spot is a unit position, not a
  *  window corner, and would otherwise shove the window off the edge). */
@@ -302,13 +304,13 @@ async function captureGame() {
 function createTray() {
   const icon = nativeImage.createFromPath(path.join(root, "dashboard", "icon.png")).resize({ width: 16, height: 16 });
   tray = new Tray(icon);
-  tray.setToolTip("Scruff");
+  tray.setToolTip("Telos");
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: `Open Scruff (${HOTKEYS.panel.replace("CommandOrControl", "Ctrl")})`, click: () => setPanel(true) },
+      { label: `Open Telos (${HOTKEYS.panel.replace(/CommandOrControl|CmdOrCtrl|Control/i, "Ctrl")})`, click: () => setPanel(true) },
       { label: "Open the dashboard in your browser", click: () => shell.openExternal(`http://localhost:${port}`) },
       { type: "separator" },
-      { label: "Quit Scruff", click: () => app.quit() },
+      { label: "Quit Telos", click: () => app.quit() },
     ]),
   );
   tray.on("click", () => setPanel(!panelOpen));

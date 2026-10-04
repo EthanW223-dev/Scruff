@@ -90,8 +90,16 @@ function startHudWindow({ bridge, toolLabel, speak }) {
     }
     if (!recent && buildOpen) closeBuild();
     if (!build) return;
-    buildOrb.setState(build.status === "running" ? "building" : build.status === "done" ? "breathing" : "connecting");
-    buildBtn.title = `Mod builder: ${build.request} (${build.status === "running" ? "building, click to see what it's doing" : build.status})`;
+    // Hammering while it works; after, the hammer rests and the tile's corner mark says how it went.
+    buildOrb.setState(build.status === "running" ? "building" : "resting");
+    buildBtn.dataset.status = build.status;
+    const how = {
+      running: "building, click to see what it's doing",
+      done: "built, click to see how to load it",
+      failed: "stopped with a problem, click to see why",
+      stopped: "stopped",
+    }[build.status];
+    buildBtn.title = `Mod builder: ${build.request} (${how ?? build.status})`;
     if (buildOpen) fillBuild();
   }
   function fillBuild() {
@@ -109,7 +117,9 @@ function startHudWindow({ bridge, toolLabel, speak }) {
     req.className = "bv-req";
     req.textContent = build.request;
     const list = document.createElement("ol");
-    for (const step of (build.steps ?? []).slice(-6)) {
+    // The closing words are the ending below: no need to show them twice.
+    const steps = (build.steps ?? []).filter((st) => !(build.summary && st.kind === "say" && build.summary.startsWith(st.text.slice(0, 200))));
+    for (const step of steps.slice(-5)) {
       const li = document.createElement("li");
       li.className = step.kind;
       li.textContent = step.kind === "say" ? step.text : `› ${step.text}`;
@@ -130,6 +140,7 @@ function startHudWindow({ bridge, toolLabel, speak }) {
       const end = document.createElement("div");
       end.className = `bv-end ${build.error ? "warn" : ""}`;
       end.textContent = build.error ?? build.summary;
+      end.title = end.textContent; // the whole of it, when it's clamped
       parts.push(end);
     }
     buildView.replaceChildren(...parts);
@@ -537,6 +548,10 @@ function startHudWindow({ bridge, toolLabel, speak }) {
   idle();
 }
 
+/** An Electron accelerator as players write it: "Control+T" / "CommandOrControl+T" → "Ctrl+T". */
 function pretty(accelerator) {
-  return String(accelerator ?? "").replace("CommandOrControl", "Ctrl");
+  return String(accelerator ?? "")
+    .split("+")
+    .map((k) => (/^(CommandOrControl|CmdOrCtrl|Control)$/i.test(k) ? "Ctrl" : k))
+    .join("+");
 }
